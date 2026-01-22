@@ -1,0 +1,24 @@
+# Rust
+target/
+Cargo.lock
+
+# Soroban
+test_snapshots/
+*.wasm
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
