@@ -143,39 +143,39 @@ impl SLACalculatorContract {
     // Config management
     // --------------------
 
-    pub fn set_config(
-        env: Env,
-        caller: Address,
-        severity: Symbol,
-        threshold_minutes: u32,
-        penalty_per_minute: i128,
-        reward_base: i128,
-    ) -> Result<(), SLAError> {
-        Self::require_admin(&env, &caller)?;
+pub fn set_config(
+    env: Env,
+    caller: Address,
+    severity: Symbol,
+    threshold_minutes: u32,
+    penalty_per_minute: i128,
+    reward_base: i128,
+) -> Result<(), SLAError> {
+    Self::require_admin(&env, &caller)?;
 
-        let mut configs: Map<Symbol, SLAConfig> = env
-            .storage()
-            .instance()
-            .get(&CONFIG_KEY)
-            .ok_or(SLAError::NotInitialized)?;
+    let mut configs: Map<Symbol, SLAConfig> = env
+        .storage()
+        .instance()
+        .get(&CONFIG_KEY)
+        .ok_or(SLAError::NotInitialized)?;
 
-        let cfg = SLAConfig {
-            threshold_minutes,
-            penalty_per_minute,
-            reward_base,
-        };
+    let cfg = SLAConfig {
+        threshold_minutes,
+        penalty_per_minute,
+        reward_base,
+    };
 
-        configs.set(severity.clone(), cfg.clone());
-        env.storage().instance().set(&CONFIG_KEY, &configs);
+    configs.set(severity.clone(), cfg);
+    env.storage().instance().set(&CONFIG_KEY, &configs);
 
-        // 🔔 Emit config update event
-        env.events().publish(
-            (EVENT_CONFIG_UPD, severity),
-            (threshold_minutes, penalty_per_minute, reward_base),
-        );
+    // 🔔 Emit config update event
+    env.events().publish(
+        (EVENT_CONFIG_UPD, severity),
+        (threshold_minutes, penalty_per_minute, reward_base),
+    );
 
-        Ok(())
-    }
+    Ok(())
+}
 
     pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
         let configs: Map<Symbol, SLAConfig> = env
