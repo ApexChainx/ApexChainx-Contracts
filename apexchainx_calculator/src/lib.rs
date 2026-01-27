@@ -12,6 +12,8 @@ pub struct SLACalculatorContract;
 // --------------------
 const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
 const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
+const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
+const STORAGE_VERSION: u32 = 1;
 
 // --------------------
 // Events
@@ -30,6 +32,7 @@ pub enum SLAError {
     NotInitialized = 2,
     Unauthorized = 3,
     ConfigNotFound = 4,
+    VersionMismatch = 5,
 }
 
 // --------------------
@@ -110,16 +113,37 @@ impl SLACalculatorContract {
         );
 
         env.storage().instance().set(&CONFIG_KEY, &configs);
-
+        Self::write_version(&env);
         Ok(())
     }
 
     pub fn get_admin(env: Env) -> Result<Address, SLAError> {
+        Self::check_version(&env)?;
         env.storage()
             .instance()
             .get(&ADMIN_KEY)
             .ok_or(SLAError::NotInitialized)
     }
+
+    fn write_version(env: &Env) {
+    env.storage()
+        .instance()
+        .set(&STORAGE_VERSION_KEY, &STORAGE_VERSION);
+}
+
+fn check_version(env: &Env) -> Result<(), SLAError> {
+    let v: u32 = env
+        .storage()
+        .instance()
+        .get(&STORAGE_VERSION_KEY)
+        .ok_or(SLAError::NotInitialized)?;
+
+    if v != STORAGE_VERSION {
+        return Err(SLAError::VersionMismatch);
+    }
+
+    Ok(())
+}
 
     // --------------------
     // Internal helper
@@ -151,6 +175,7 @@ pub fn set_config(
     penalty_per_minute: i128,
     reward_base: i128,
 ) -> Result<(), SLAError> {
+    Self::check_version(&env)?;
     Self::require_admin(&env, &caller)?;
 
     let mut configs: Map<Symbol, SLAConfig> = env
@@ -178,6 +203,8 @@ pub fn set_config(
 }
 
     pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
+        Self::check_version(&env)?;
+        
         let configs: Map<Symbol, SLAConfig> = env
             .storage()
             .instance()
@@ -188,6 +215,7 @@ pub fn set_config(
     }
 
 pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
+    Self::check_version(&env)?;
     env.storage()
         .instance()
         .get(&CONFIG_KEY)
@@ -211,6 +239,7 @@ pub fn calculate_sla(
     severity: Symbol,
     mttr_minutes: u32,
 ) -> Result<SLAResult, SLAError> {
+    Self::check_version(&env)?;
     let cfg = Self::get_config(env.clone(), severity.clone())?;
     let threshold = cfg.threshold_minutes;
 
