@@ -463,3 +463,118 @@ fn test_stats_not_incremented_by_unauthorized_caller() {
     let stats = client2.get_stats();
     assert_eq!(stats.total_calculations, 0);
 }
+
+// ============================================================
+// #31 – Deterministic SLA Calculation Audit Mode
+// ============================================================
+
+#[test]
+fn test_calculate_sla_view_matches_mutating_and_does_not_mutate() {
+    let (_env, client, actors) = setup();
+
+    let outage_id = symbol_short!("INC999");
+    let severity  = symbol_short!("critical");
+    let mttr      = 25; // 10 min over threshold, results in penalty
+
+    // 1. Get initial stats
+    let initial_stats = client.get_stats();
+    assert_eq!(initial_stats.total_calculations, 0);
+
+    // 2. Call view function
+    let view_result = client.calculate_sla_view(&outage_id, &severity, &mttr);
+
+    // 3. Ensure no state mutated
+    let after_view_stats = client.get_stats();
+    assert_eq!(after_view_stats.total_calculations, 0, "View function must not mutate stats");
+
+    // 4. Call mutating function
+    let mut_result = client.calculate_sla(&actors.operator, &outage_id, &severity, &mttr);
+
+    // 5. Ensure state mutated
+    let after_mut_stats = client.get_stats();
+    assert_eq!(after_mut_stats.total_calculations, 1, "Mutating function must mutate stats");
+
+    // 6. Ensure results are perfectly identical
+    assert_eq!(view_result.status,            mut_result.status);
+    assert_eq!(view_result.amount,            mut_result.amount);
+    assert_eq!(view_result.rating,            mut_result.rating);
+    assert_eq!(view_result.payment_type,      mut_result.payment_type);
+    assert_eq!(view_result.mttr_minutes,      mut_result.mttr_minutes);
+    assert_eq!(view_result.threshold_minutes, mut_result.threshold_minutes);
+    assert_eq!(view_result.outage_id,         mut_result.outage_id);
+}
+// ============================================================
+// #32 – Contract Economic Stress Test Suite
+// ============================================================
+
+#[test]
+fn test_stress_1000_calculations_mixed_severities() {
+    let env = Env::default();
+    
+    // Reset budget to unlimited to allow 1000 sequential calls in a single test environment.
+    // We will manually track CPU instruction counts to assert gas efficiency per call.
+    env.budget().reset_unlimited();
+
+    let cid    = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin  = soroban_sdk::Address::generate(&env);
+    let op     = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let severities = [
+        symbol_short!("critical"),
+        symbol_short!("high"),
+        symbol_short!("medium"),
+        symbol_short!("low"),
+    ];
+
+    let mut expected_calculations = 0;
+    let mut expected_violations   = 0;
+    let mut expected_rewards      = 0i128;
+    let mut expected_penalties    = 0i128;
+
+    let before_cpu = env.budget().cpu_instruction_count();
+
+    for i in 0..1000u32 {
+        let severity = severities[(i % 4) as usize].clone();
+        let cfg = client.get_config(&severity);
+        
+        // Alternate between meeting and violating the SLA to stress both logic paths
+        let mttr = if i % 2 == 0 {
+            cfg.threshold_minutes / 2 // Safely met
+        } else {
+            cfg.threshold_minutes + 10 // Safely violated by 10 mins
+        };
+
+        let outage_id = symbol_short!("STRESS");
+
+        let res = client.calculate_sla(&op, &outage_id, &severity, &mttr);
+
+        expected_calculations += 1;
+        
+        if res.status == symbol_short!("viol") {
+            expected_violations += 1;
+            // The contract returns penalties as negative values, so we negate it to track the positive aggregate
+            expected_penalties += -res.amount; 
+        } else {
+            expected_rewards += res.amount;
+        }
+    }
+
+    let after_cpu = env.budget().cpu_instruction_count();
+    let avg_cpu_per_call = (after_cpu - before_cpu) / 1000;
+
+    // 1. Assert no overflows occurred and cumulative statistics precisely match the local simulation
+    let stats = client.get_stats();
+    assert_eq!(stats.total_calculations, expected_calculations, "Calculation aggregate mismatch");
+    assert_eq!(stats.total_violations, expected_violations, "Violation aggregate mismatch");
+    assert_eq!(stats.total_rewards, expected_rewards, "Reward aggregate mismatch");
+    assert_eq!(stats.total_penalties, expected_penalties, "Penalty aggregate mismatch");
+
+    // 2. Assert gas bounds remain stable to catch unintended exponential looping or storage bloat
+    assert!(
+        avg_cpu_per_call < 200_000, 
+        "Average CPU instructions per call exceeded safe bounds: {}", 
+        avg_cpu_per_call
+    );
+}

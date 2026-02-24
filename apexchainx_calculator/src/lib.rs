@@ -233,6 +233,26 @@ impl SLACalculatorContract {
     }
 
     // -------------------------------------------------------------------
+    // #31 - SLA Audit Mode (View-only calculation)
+    // -------------------------------------------------------------------
+
+    /// Recalculates SLA deterministically without mutating any state or emitting events.
+    /// Can be called by anyone for verification and audit purposes.
+    pub fn calculate_sla_view(
+        env:          Env,
+        outage_id:    Symbol,
+        severity:     Symbol,
+        mttr_minutes: u32,
+    ) -> Result<SLAResult, SLAError> {
+        Self::check_version(&env)?;
+        // We bypass pause and operator checks to allow continuous, public verification
+        let cfg = Self::load_config(&env, &severity)?;
+        
+        // Delegate to pure internal math
+        Ok(Self::compute_result(outage_id, mttr_minutes, &cfg))
+    }
+
+    // -------------------------------------------------------------------
     // SLA calculation (operator only)                                #28
     // -------------------------------------------------------------------
 
@@ -247,7 +267,37 @@ impl SLACalculatorContract {
         Self::require_not_paused(&env)?;       // #27
         Self::require_operator(&env, &caller)?; // #28
 
-        let cfg       = Self::load_config(&env, &severity)?;
+        let cfg    = Self::load_config(&env, &severity)?;
+        let result = Self::compute_result(outage_id.clone(), mttr_minutes, &cfg);
+
+        // Mutate stats and emit events depending on outcome
+        if result.status == symbol_short!("viol") {
+            // #29 – update stats (pass positive penalty value)
+            Self::increment_stats(&env, false, 0, -result.amount);
+
+            env.events().publish(
+                (EVENT_SLA_CALC, severity.clone()),
+                (outage_id.clone(), symbol_short!("viol"), result.amount),
+            );
+        } else {
+            // #29 – update stats
+            Self::increment_stats(&env, true, result.amount, 0);
+
+            env.events().publish(
+                (EVENT_SLA_CALC, severity.clone()),
+                (outage_id.clone(), symbol_short!("met"), result.amount),
+            );
+        }
+
+        Ok(result)
+    }
+
+    // -------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------
+
+    /// Pure helper to generate the SLAResult deterministically
+    fn compute_result(outage_id: Symbol, mttr_minutes: u32, cfg: &SLAConfig) -> SLAResult {
         let threshold = cfg.threshold_minutes;
 
         // Case 1: SLA violated → penalty
@@ -255,15 +305,7 @@ impl SLACalculatorContract {
             let overtime = (mttr_minutes - threshold) as i128;
             let penalty  = overtime * cfg.penalty_per_minute;
 
-            // #29 – update stats
-            Self::increment_stats(&env, false, 0, penalty);
-
-            env.events().publish(
-                (EVENT_SLA_CALC, severity.clone()),
-                (outage_id.clone(), symbol_short!("viol"), -penalty),
-            );
-
-            return Ok(SLAResult {
+            SLAResult {
                 outage_id,
                 status:            symbol_short!("viol"),
                 mttr_minutes,
@@ -271,44 +313,32 @@ impl SLACalculatorContract {
                 amount:            -penalty,
                 payment_type:      symbol_short!("pen"),
                 rating:            symbol_short!("poor"),
-            });
-        }
-
-        // Case 2: SLA met → reward
-        let performance_ratio = if threshold == 0 { 0 } else { (mttr_minutes * 100) / threshold };
-
-        let (multiplier, rating) = if performance_ratio < 50 {
-            (200u32, symbol_short!("top"))
-        } else if performance_ratio < 75 {
-            (150u32, symbol_short!("excel"))
+            }
         } else {
-            (100u32, symbol_short!("good"))
-        };
+            // Case 2: SLA met → reward
+            let performance_ratio = if threshold == 0 { 0 } else { (mttr_minutes * 100) / threshold };
 
-        let reward = (cfg.reward_base * multiplier as i128) / 100;
+            let (multiplier, rating) = if performance_ratio < 50 {
+                (200u32, symbol_short!("top"))
+            } else if performance_ratio < 75 {
+                (150u32, symbol_short!("excel"))
+            } else {
+                (100u32, symbol_short!("good"))
+            };
 
-        // #29 – update stats
-        Self::increment_stats(&env, true, reward, 0);
+            let reward = (cfg.reward_base * multiplier as i128) / 100;
 
-        env.events().publish(
-            (EVENT_SLA_CALC, severity.clone()),
-            (outage_id.clone(), symbol_short!("met"), reward),
-        );
-
-        Ok(SLAResult {
-            outage_id,
-            status:            symbol_short!("met"),
-            mttr_minutes,
-            threshold_minutes: threshold,
-            amount:            reward,
-            payment_type:      symbol_short!("rew"),
-            rating,
-        })
+            SLAResult {
+                outage_id,
+                status:            symbol_short!("met"),
+                mttr_minutes,
+                threshold_minutes: threshold,
+                amount:            reward,
+                payment_type:      symbol_short!("rew"),
+                rating,
+            }
+        }
     }
-
-    // -------------------------------------------------------------------
-    // Private helpers
-    // -------------------------------------------------------------------
 
     fn write_version(env: &Env) {
         env.storage().instance().set(&STORAGE_VERSION_KEY, &STORAGE_VERSION);
