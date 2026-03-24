@@ -2,10 +2,14 @@
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, Symbol,
+    Vec,
 };
 
 #[contract]
 pub struct SLACalculatorContract;
+
+#[cfg(test)]
+mod tests;
 
 // -----------------------------------------------------------------------
 // Storage keys
@@ -15,6 +19,7 @@ const OPERATOR_KEY:        Symbol = symbol_short!("OPERATOR"); // #28
 const CONFIG_KEY:          Symbol = symbol_short!("CONFIG");
 const PAUSED_KEY:          Symbol = symbol_short!("PAUSED");   // #27
 const STATS_KEY:           Symbol = symbol_short!("STATS");    // #29
+const HISTORY_KEY:         Symbol = symbol_short!("HIST");
 const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
 const STORAGE_VERSION:     u32    = 1;
 
@@ -26,6 +31,7 @@ const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
 const EVENT_PAUSED:   Symbol = symbol_short!("paused");    // #27
 const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");   // #27
 const EVENT_OP_SET:   Symbol = symbol_short!("op_set");    // #28
+const EVENT_PRUNED:   Symbol = symbol_short!("pruned");
 
 // -----------------------------------------------------------------------
 // Errors
@@ -104,6 +110,7 @@ impl SLACalculatorContract {
             total_rewards:      0,
             total_penalties:    0,
         });
+        env.storage().instance().set(&HISTORY_KEY, &Vec::<SLAResult>::new(&env));
 
         let mut configs = Map::<Symbol, SLAConfig>::new(&env);
         configs.set(symbol_short!("critical"), SLAConfig { threshold_minutes: 15,  penalty_per_minute: 100, reward_base: 750 });
@@ -269,6 +276,13 @@ impl SLACalculatorContract {
 
         let cfg    = Self::load_config(&env, &severity)?;
         let result = Self::compute_result(outage_id.clone(), mttr_minutes, &cfg);
+        let mut history: Vec<SLAResult> = env
+            .storage().instance()
+            .get(&HISTORY_KEY)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        history.push_back(result.clone());
+        env.storage().instance().set(&HISTORY_KEY, &history);
 
         // Mutate stats and emit events depending on outcome
         if result.status == symbol_short!("viol") {

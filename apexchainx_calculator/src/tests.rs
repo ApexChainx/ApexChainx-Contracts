@@ -2,7 +2,6 @@
 
 use super::*;
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::testutils::Budget;
 use soroban_sdk::Env;
 
 // ============================================================
@@ -334,9 +333,9 @@ fn test_calculate_sla_budget_is_reasonable() {
     let op     = soroban_sdk::Address::generate(&env);
     client.initialize(&admin, &op);
 
-    let before = env.budget().cpu_instruction_count();
+    let before = env.budget().cpu_instruction_cost();
     let _ = client.calculate_sla(&op, &symbol_short!("BUDG"), &symbol_short!("critical"), &25);
-    let after  = env.budget().cpu_instruction_count();
+    let after  = env.budget().cpu_instruction_cost();
 
     assert!(after - before < 200_000, "calculate_sla too expensive: {} instructions", after - before);
 }
@@ -352,9 +351,9 @@ fn test_set_config_budget_is_reasonable() {
     let op     = soroban_sdk::Address::generate(&env);
     client.initialize(&admin, &op);
 
-    let before = env.budget().cpu_instruction_count();
+    let before = env.budget().cpu_instruction_cost();
     client.set_config(&admin, &symbol_short!("critical"), &15, &100, &750);
-    let after  = env.budget().cpu_instruction_count();
+    let after  = env.budget().cpu_instruction_cost();
 
     assert!(after - before < 150_000, "set_config too expensive: {} instructions", after - before);
 }
@@ -437,13 +436,6 @@ fn test_stats_not_updated_on_paused_rejection() {
 
     client.pause(&actors.admin);
 
-    // This panics (ContractPaused), so we catch it and verify stats unchanged.
-    let result = std::panic::catch_unwind(|| {
-        // Can't easily do this in no_std; test is illustrative.
-        // The assertion below runs in a fresh setup where the panic didn't happen.
-    });
-    drop(result);
-
     // Fresh setup: verify stats stay at 0 when no successful calls were made.
     let (_env2, client2, _actors2) = setup();
     let stats = client2.get_stats();
@@ -452,11 +444,7 @@ fn test_stats_not_updated_on_paused_rejection() {
 
 #[test]
 fn test_stats_not_incremented_by_unauthorized_caller() {
-    let (_env, client, actors) = setup();
-
-    // Stranger call panics; stats should remain at 0.
-    // We verify via a separate client that had no successful calls.
-    let _ = std::panic::catch_unwind(|| {});
+    let (_env, _client, _actors) = setup();
 
     // Confirm baseline stays zero after only failed calls in another env.
     let (_env2, client2, _actors2) = setup();
@@ -533,7 +521,7 @@ fn test_stress_1000_calculations_mixed_severities() {
     let mut expected_rewards      = 0i128;
     let mut expected_penalties    = 0i128;
 
-    let before_cpu = env.budget().cpu_instruction_count();
+    let before_cpu = env.budget().cpu_instruction_cost();
 
     for i in 0..1000u32 {
         let severity = severities[(i % 4) as usize].clone();
@@ -561,7 +549,7 @@ fn test_stress_1000_calculations_mixed_severities() {
         }
     }
 
-    let after_cpu = env.budget().cpu_instruction_count();
+    let after_cpu = env.budget().cpu_instruction_cost();
     let avg_cpu_per_call = (after_cpu - before_cpu) / 1000;
 
     // 1. Assert no overflows occurred and cumulative statistics precisely match the local simulation
@@ -577,8 +565,9 @@ fn test_stress_1000_calculations_mixed_severities() {
         "Average CPU instructions per call exceeded safe bounds: {}", 
         avg_cpu_per_call
     );
+}
 
-    // ============================================================
+// ============================================================
 // #33 – Storage Compaction Strategy Tests
 // ============================================================
 
@@ -600,7 +589,7 @@ fn test_admin_can_prune_history() {
     let (_env, client, actors) = setup();
 
     // Generate 5 records
-    for i in 0..5 {
+    for _i in 0..5 {
         client.calculate_sla(&actors.operator, &symbol_short!("H_GEN"), &symbol_short!("low"), &10);
     }
 
@@ -635,5 +624,4 @@ fn test_prune_history_preserves_latest_records_accurately() {
     let history = client.get_history();
     assert_eq!(history.len(), 1);
     assert_eq!(history.get(0).unwrap().outage_id, symbol_short!("ID_3"), "Did not retain the correct recent record");
-}
 }
