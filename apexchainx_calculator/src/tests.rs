@@ -1328,13 +1328,6 @@ fn setup_with_critical(threshold: u32, penalty: i128, reward: i128) -> (Env, SLA
 /// Setup and perform one calculation, returning the result along with the env/client/actors.
 fn setup_after_calculation(severity: &str, mttr: u32) -> (Env, SLACalculatorContractClient<'static>, Actors) {
     let (env, client, actors) = setup();
-    client
-        .calculate_sla(
-            &actors.operator,
-            &symbol(&env, "FIXTURE_ID"),
-            &symbol(&env, severity),
-            &mttr,
-        );
     client.calculate_sla(
         &actors.operator,
         &symbol(&env, "FIXTURE_ID"),
@@ -1377,15 +1370,6 @@ fn test_fixture_after_calculation_stats_are_updated() {
 fn test_calculate_sla_unknown_severity_panics() {
     let (_env, client, actors) = setup();
     // "xyz" is not a configured severity — ConfigNotFound maps to a panic in the client
-    client
-        .calculate_sla(
-            &actors.operator,
-            &symbol_short!("OUT001"),
-            &symbol_short!("xyz"),
-            &10,
-        );
-}
-
     client.calculate_sla(
         &actors.operator,
         &symbol_short!("OUT001"),
@@ -1579,13 +1563,6 @@ fn test_admin_can_renounce() {
 fn test_calculate_sla_wrong_case_severity_panics() {
     let (_env, client, actors) = setup();
     // "HIGH" differs from configured "high"
-    client
-        .calculate_sla(
-            &actors.operator,
-            &symbol_short!("OUT002"),
-            &symbol_short!("HIGH"),
-            &10,
-        );
     client.calculate_sla(
         &actors.operator,
         &symbol_short!("OUT002"),
@@ -2253,6 +2230,28 @@ fn test_get_latest_by_outage_does_not_return_other_outage() {
 fn test_history_does_not_exceed_max_size() {
     let env = Env::default();
     env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Insert MAX_HISTORY_SIZE + 5 entries
+    for _ in 0..1005u32 {
+        client.calculate_sla(&op, &symbol_short!("CAP"), &symbol_short!("low"), &10);
+    }
+
+    let history = client.get_history();
+    assert_eq!(
+        history.len(),
+        1000,
+        "History must be capped at MAX_HISTORY_SIZE"
+    );
+    let _ = admin;
+}
+
+// ============================================================
 // SC-063 – prune_history_by_age tests
 // ============================================================
 
@@ -2561,17 +2560,16 @@ fn test_pruned_age_event_payload_field_count_is_two() {
     let op = soroban_sdk::Address::generate(&env);
     client.initialize(&admin, &op);
 
-    // Insert MAX_HISTORY_SIZE + 5 entries
-    for _ in 0..1005u32 {
-        client.calculate_sla(&op, &symbol_short!("CAP"), &symbol_short!("low"), &10);
-    }
+    client.calculate_sla(&op, &symbol_short!("PA1"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&op, &symbol_short!("PA2"), &symbol_short!("critical"), &5);
 
-    let history = client.get_history();
-    assert_eq!(
-        history.len(),
-        1000,
-        "History must be capped at MAX_HISTORY_SIZE"
-    );
+    env.ledger().set_timestamp(2000);
+    client.prune_history_by_age(&admin, &500); // removes both (recorded_at=0 < 1500)
+
+    let events = env.events().all();
+    let (_, _, data) = events.last().unwrap();
+    let payload: (u32, u32) = data.try_into_val(&env).unwrap();
+    assert_eq!(payload, (2u32, 0u32)); // removed=2, kept=0
 }
 
 #[test]
@@ -2627,16 +2625,6 @@ fn test_history_below_cap_is_not_trimmed() {
 
     let history = client.get_history();
     assert_eq!(history.len(), 5, "History below cap must not be trimmed");
-    client.calculate_sla(&op, &symbol_short!("PA1"), &symbol_short!("critical"), &5);
-    client.calculate_sla(&op, &symbol_short!("PA2"), &symbol_short!("critical"), &5);
-
-    env.ledger().set_timestamp(2000);
-    client.prune_history_by_age(&admin, &500); // removes both (recorded_at=0 < 1500)
-
-    let events = env.events().all();
-    let (_, _, data) = events.last().unwrap();
-    let payload: (u32, u32) = data.try_into_val(&env).unwrap();
-    assert_eq!(payload, (2u32, 0u32)); // removed=2, kept=0
 }
 
 #[test]
@@ -2861,5 +2849,377 @@ fn test_monotonicity_view_matches_mutating_for_all_mttr_values() {
         assert_eq!(view.amount, mutating.amount, "amount mismatch at mttr={}", mttr);
         assert_eq!(view.rating, mutating.rating, "rating mismatch at mttr={}", mttr);
         assert_eq!(view.payment_type, mutating.payment_type, "payment_type mismatch at mttr={}", mttr);
+    }
+}
+
+// ============================================================
+// SC-013 – Configurable retention limit (issue #133)
+// ============================================================
+
+#[test]
+fn test_get_retention_limit_defaults_to_max_history_size() {
+    let (_env, client, _actors) = setup();
+    assert_eq!(client.get_retention_limit(), 1000);
+}
+
+#[test]
+fn test_admin_can_set_retention_limit() {
+    let (_env, client, actors) = setup();
+    client.set_retention_limit(&actors.admin, &50);
+    assert_eq!(client.get_retention_limit(), 50);
+}
+
+#[test]
+#[should_panic]
+fn test_operator_cannot_set_retention_limit() {
+    let (_env, client, actors) = setup();
+    client.set_retention_limit(&actors.operator, &50);
+}
+
+#[test]
+#[should_panic]
+fn test_stranger_cannot_set_retention_limit() {
+    let (_env, client, actors) = setup();
+    client.set_retention_limit(&actors.stranger, &50);
+}
+
+#[test]
+#[should_panic]
+fn test_set_retention_limit_zero_fails() {
+    let (_env, client, actors) = setup();
+    client.set_retention_limit(&actors.admin, &0);
+}
+
+#[test]
+#[should_panic]
+fn test_set_retention_limit_above_max_fails() {
+    let (_env, client, actors) = setup();
+    client.set_retention_limit(&actors.admin, &1001);
+}
+
+#[test]
+fn test_retention_limit_enforced_on_calculate() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Set a small retention limit
+    client.set_retention_limit(&admin, &5);
+
+    // Insert 10 entries
+    for _ in 0..10u32 {
+        client.calculate_sla(&op, &symbol_short!("RET"), &symbol_short!("low"), &10);
+    }
+
+    // History must be capped at the configured limit, not MAX_HISTORY_SIZE
+    assert_eq!(client.get_history().len(), 5);
+}
+
+#[test]
+fn test_retention_limit_drops_oldest_when_exceeded() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    client.set_retention_limit(&admin, &3);
+
+    client.calculate_sla(&op, &symbol(&env, "FIRST"), &symbol_short!("low"), &10);
+    client.calculate_sla(&op, &symbol(&env, "SECOND"), &symbol_short!("low"), &10);
+    client.calculate_sla(&op, &symbol(&env, "THIRD"), &symbol_short!("low"), &10);
+    // This push should evict FIRST
+    client.calculate_sla(&op, &symbol(&env, "FOURTH"), &symbol_short!("low"), &10);
+
+    let history = client.get_history();
+    assert_eq!(history.len(), 3);
+    assert_eq!(history.get(0).unwrap().outage_id, symbol(&env, "SECOND"));
+    assert_eq!(history.get(2).unwrap().outage_id, symbol(&env, "FOURTH"));
+}
+
+#[test]
+fn test_retention_limit_update_takes_effect_on_next_calculate() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Fill 10 entries with default limit
+    for _ in 0..10u32 {
+        client.calculate_sla(&op, &symbol_short!("BEF"), &symbol_short!("low"), &10);
+    }
+    assert_eq!(client.get_history().len(), 10);
+
+    // Lower the limit; existing history is not pruned until next calculate
+    client.set_retention_limit(&admin, &5);
+    assert_eq!(client.get_history().len(), 10);
+
+    // Next calculate triggers enforcement
+    client.calculate_sla(&op, &symbol_short!("AFT"), &symbol_short!("low"), &10);
+    assert_eq!(client.get_history().len(), 5);
+}
+
+// ============================================================
+// SC-021 – Migration state read helper (issue #141)
+// ============================================================
+
+#[test]
+fn test_get_migration_state_returns_current_version() {
+    let (_env, client, _actors) = setup();
+    let info = client.get_migration_state();
+    assert_eq!(info.stored_version, 1);
+    assert_eq!(info.expected_version, 1);
+    assert!(!info.needs_migration);
+}
+
+#[test]
+fn test_get_migration_state_detects_version_mismatch() {
+    let env = Env::default();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Overwrite stored version to simulate a future schema
+    env.as_contract(&cid, || {
+        env.storage()
+            .instance()
+            .set(&STORAGE_VERSION_KEY, &99u32);
+    });
+
+    let info = client.get_migration_state();
+    assert_eq!(info.stored_version, 99);
+    assert_eq!(info.expected_version, 1);
+    assert!(info.needs_migration);
+}
+
+#[test]
+fn test_get_migration_state_is_deterministic() {
+    let (_env, client, _actors) = setup();
+    let i1 = client.get_migration_state();
+    let i2 = client.get_migration_state();
+    assert_eq!(i1.stored_version, i2.stored_version);
+    assert_eq!(i1.expected_version, i2.expected_version);
+    assert_eq!(i1.needs_migration, i2.needs_migration);
+}
+
+#[test]
+fn test_get_migration_state_after_migrate_shows_no_migration_needed() {
+    let (_env, client, actors) = setup();
+    // Already at current version; migrate is a no-op
+    client.migrate(&actors.admin);
+    let info = client.get_migration_state();
+    assert!(!info.needs_migration);
+}
+
+// ============================================================
+// SC-011 – Latest result by outage (issue #131) – additional coverage
+// ============================================================
+
+#[test]
+fn test_get_latest_by_outage_returns_last_of_many() {
+    let (env, client, actors) = setup();
+
+    // Three calculations for the same outage; last one is a violation
+    client.calculate_sla(&actors.operator, &symbol(&env, "MULTI"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&actors.operator, &symbol(&env, "MULTI"), &symbol_short!("critical"), &10);
+    client.calculate_sla(&actors.operator, &symbol(&env, "MULTI"), &symbol_short!("critical"), &20);
+
+    let latest = client.get_latest_by_outage(&symbol(&env, "MULTI")).unwrap();
+    assert_eq!(latest.status, symbol_short!("viol")); // mttr=20 > threshold=15
+    assert_eq!(latest.mttr_minutes, 20);
+}
+
+#[test]
+fn test_get_latest_by_outage_unaffected_by_other_outages() {
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "A"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&actors.operator, &symbol(&env, "B"), &symbol_short!("critical"), &20);
+    client.calculate_sla(&actors.operator, &symbol(&env, "A"), &symbol_short!("critical"), &10);
+
+    // Latest for A is the second A entry (mttr=10), not B
+    let latest_a = client.get_latest_by_outage(&symbol(&env, "A")).unwrap();
+    assert_eq!(latest_a.mttr_minutes, 10);
+
+    let latest_b = client.get_latest_by_outage(&symbol(&env, "B")).unwrap();
+    assert_eq!(latest_b.mttr_minutes, 20);
+}
+
+// ============================================================
+// SC-038 – Event replay and missed-event recovery (issue #158)
+//
+// These tests demonstrate how a backend consumer can recover from missed events
+// by replaying contract state. The pattern is:
+//   1. Consumer misses some sla_calc events (simulated by not observing them).
+//   2. Consumer calls get_history / get_history_page to reconstruct missed results.
+//   3. Consumer calls get_latest_by_outage to confirm the current state per outage.
+//   4. Consumer calls get_stats to verify aggregate totals are consistent.
+//
+// The contract guarantees that history + stats are always consistent with the
+// events that were emitted, so a consumer can always recover full state from
+// on-chain reads without replaying raw ledger events.
+// ============================================================
+
+#[test]
+fn test_event_replay_history_matches_emitted_events() {
+    // Verify that every entry in get_history corresponds to an emitted sla_calc event.
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "EVR_1"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&actors.operator, &symbol(&env, "EVR_2"), &symbol_short!("high"), &35);
+    client.calculate_sla(&actors.operator, &symbol(&env, "EVR_3"), &symbol_short!("low"), &10);
+
+    let history = client.get_history();
+    let events = env.events().all();
+
+    // Filter only sla_calc events
+    let sla_events: soroban_sdk::Vec<_> = {
+        let mut v = soroban_sdk::Vec::new(&env);
+        for i in 0..events.len() {
+            let (_, topics, _) = events.get(i).unwrap();
+            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if t0 == EVENT_SLA_CALC {
+                v.push_back(events.get(i).unwrap());
+            }
+        }
+        v
+    };
+
+    // One event per calculation
+    assert_eq!(sla_events.len(), 3);
+    assert_eq!(history.len(), 3);
+
+    // Each history entry outage_id matches the corresponding event payload outage_id
+    for i in 0..3u32 {
+        let (_, _, data) = sla_events.get(i).unwrap();
+        let (event_outage_id, _, _, _, _, _, _): (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) =
+            data.try_into_val(&env).unwrap();
+        assert_eq!(history.get(i).unwrap().outage_id, event_outage_id);
+    }
+}
+
+#[test]
+fn test_missed_event_recovery_via_get_history_page() {
+    // Simulate a consumer that missed events for calculations 3-5.
+    // Recovery: page through history to find the missed entries.
+    let (env, client, actors) = setup();
+
+    for i in 0..5u32 {
+        let oid = if i < 3 {
+            symbol(&env, "SEEN")
+        } else {
+            symbol(&env, "MISSED")
+        };
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // Consumer already processed page 0 (entries 0-2); recover page 1 (entries 3-4)
+    let missed = client.get_history_page(&3, &10);
+    assert_eq!(missed.len(), 2);
+    assert_eq!(missed.get(0).unwrap().outage_id, symbol(&env, "MISSED"));
+    assert_eq!(missed.get(1).unwrap().outage_id, symbol(&env, "MISSED"));
+}
+
+#[test]
+fn test_missed_event_recovery_via_get_latest_by_outage() {
+    // Consumer missed all events for outage "OUTAGE_X".
+    // Recovery: call get_latest_by_outage to get the current result.
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "OUTAGE_X"), &symbol_short!("critical"), &20);
+    // Recalculation after fix
+    client.calculate_sla(&actors.operator, &symbol(&env, "OUTAGE_X"), &symbol_short!("critical"), &5);
+
+    // Consumer recovers the latest result without replaying all events
+    let latest = client.get_latest_by_outage(&symbol(&env, "OUTAGE_X")).unwrap();
+    assert_eq!(latest.status, symbol_short!("met"));
+    assert_eq!(latest.mttr_minutes, 5);
+}
+
+#[test]
+fn test_missed_event_recovery_stats_consistent_with_history() {
+    // After missing events, a consumer can verify aggregate stats are consistent
+    // with the history they reconstruct.
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "S1"), &symbol_short!("critical"), &5);  // met
+    client.calculate_sla(&actors.operator, &symbol(&env, "S2"), &symbol_short!("critical"), &20); // viol
+    client.calculate_sla(&actors.operator, &symbol(&env, "S3"), &symbol_short!("high"), &10);     // met
+
+    let history = client.get_history();
+    let stats = client.get_stats();
+
+    // Recompute from history
+    let mut calc_count = 0u64;
+    let mut viol_count = 0u64;
+    for i in 0..history.len() {
+        let entry = history.get(i).unwrap();
+        calc_count += 1;
+        if entry.status == symbol_short!("viol") {
+            viol_count += 1;
+        }
+    }
+
+    assert_eq!(stats.total_calculations, calc_count);
+    assert_eq!(stats.total_violations, viol_count);
+}
+
+#[test]
+fn test_event_replay_view_function_produces_same_result_as_stored() {
+    // A consumer can replay any stored result by calling calculate_sla_view
+    // with the same inputs, confirming determinism.
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "DET1"), &symbol_short!("critical"), &10);
+
+    let stored = client.get_latest_by_outage(&symbol(&env, "DET1")).unwrap();
+    let replayed = client.calculate_sla_view(
+        &symbol(&env, "DET1"),
+        &symbol_short!("critical"),
+        &10,
+    );
+
+    assert_eq!(stored.status, replayed.status);
+    assert_eq!(stored.amount, replayed.amount);
+    assert_eq!(stored.rating, replayed.rating);
+    assert_eq!(stored.payment_type, replayed.payment_type);
+    assert_eq!(stored.mttr_minutes, replayed.mttr_minutes);
+    assert_eq!(stored.threshold_minutes, replayed.threshold_minutes);
+}
+
+#[test]
+fn test_event_replay_after_prune_history_page_reflects_pruned_state() {
+    // After prune, history pages reflect the pruned state.
+    // A consumer that missed events before the prune can only recover
+    // what remains in history.
+    let (env, client, actors) = setup();
+
+    for i in 0..10u32 {
+        let oid = if i < 5 { symbol(&env, "OLD") } else { symbol(&env, "NEW") };
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // Prune to keep only the latest 5
+    client.prune_history(&actors.admin, &5);
+
+    let history = client.get_history();
+    assert_eq!(history.len(), 5);
+    // All remaining entries are the NEW ones
+    for i in 0..5u32 {
+        assert_eq!(history.get(i).unwrap().outage_id, symbol(&env, "NEW"));
     }
 }
