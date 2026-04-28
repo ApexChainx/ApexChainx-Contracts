@@ -27,6 +27,7 @@ const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
 const STORAGE_VERSION: u32 = 1;
 const RESULT_SCHEMA_VERSION: u32 = 1;
 const MAX_HISTORY_SIZE: u32 = 1000; // SC-062: bounded retention cap
+const RETENTION_LIMIT_KEY: Symbol = symbol_short!("RETLIM"); // SC-013: configurable retention
 
 // -----------------------------------------------------------------------
 // Events
@@ -93,6 +94,7 @@ pub enum SLAError {
     InvalidPenalty = 9,    // #70
     InvalidReward = 10,    // #70
     InvalidSeverity = 11,  // #70
+    RetentionLimitOutOfRange = 12, // SC-013
 }
 
 // -----------------------------------------------------------------------
@@ -175,6 +177,23 @@ pub struct SLAStats {
 pub struct PauseInfo {
     pub reason: String,
     pub paused_at: u64, // ledger timestamp (seconds)
+}
+
+/// SC-021 – Storage version and migration posture for off-chain consumers.
+///
+/// Backend consumers should call `get_migration_state` after any contract upgrade
+/// to confirm the storage version matches expectations before resuming operations.
+/// If `needs_migration` is true, the admin must call `migrate` before the contract
+/// will accept versioned calls.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StorageVersionInfo {
+    /// The version currently stamped in storage.
+    pub stored_version: u32,
+    /// The version this contract binary expects.
+    pub expected_version: u32,
+    /// True when stored_version != expected_version (migration required).
+    pub needs_migration: bool,
 }
 
 // -----------------------------------------------------------------------
@@ -769,8 +788,15 @@ impl SLACalculatorContract {
 
         history.push_back(result.clone());
 
+        // SC-013: use configurable retention limit (falls back to MAX_HISTORY_SIZE)
+        let retention_limit: u32 = env
+            .storage()
+            .instance()
+            .get(&RETENTION_LIMIT_KEY)
+            .unwrap_or(MAX_HISTORY_SIZE);
+
         // SC-062: enforce bounded retention – drop oldest entry when cap is exceeded
-        if history.len() > MAX_HISTORY_SIZE {
+        if history.len() > retention_limit {
             let mut trimmed = Vec::new(&env);
             for i in 1..history.len() {
                 trimmed.push_back(history.get(i).unwrap());
@@ -1219,5 +1245,58 @@ impl SLACalculatorContract {
             .instance()
             .get(&STORAGE_VERSION_KEY)
             .ok_or(SLAError::NotInitialized)
+    }
+
+    // -------------------------------------------------------------------
+    // SC-013 – Configurable retention limit (admin only)
+    // -------------------------------------------------------------------
+
+    /// Set the maximum number of history entries to retain.
+    /// Must be between 1 and MAX_HISTORY_SIZE (1000). Admin only.
+    /// The new limit takes effect on the next `calculate_sla` call.
+    pub fn set_retention_limit(env: Env, caller: Address, limit: u32) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+        if limit == 0 || limit > MAX_HISTORY_SIZE {
+            return Err(SLAError::RetentionLimitOutOfRange);
+        }
+        env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
+        Ok(())
+    }
+
+    /// Returns the current configurable retention limit.
+    /// Defaults to MAX_HISTORY_SIZE (1000) if never explicitly set.
+    pub fn get_retention_limit(env: Env) -> Result<u32, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get(&RETENTION_LIMIT_KEY)
+            .unwrap_or(MAX_HISTORY_SIZE))
+    }
+
+    // -------------------------------------------------------------------
+    // SC-021 – Migration state read helper
+    // -------------------------------------------------------------------
+
+    /// Returns the storage version and migration posture.
+    ///
+    /// Backend consumers should call this after any contract upgrade to confirm
+    /// the storage version matches expectations. If `needs_migration` is true,
+    /// the admin must call `migrate` before versioned endpoints will respond.
+    ///
+    /// This function intentionally bypasses `check_version` so it remains
+    /// callable even when the contract is in a pre-migration state.
+    pub fn get_migration_state(env: Env) -> Result<StorageVersionInfo, SLAError> {
+        let stored_version: u32 = env
+            .storage()
+            .instance()
+            .get(&STORAGE_VERSION_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+        Ok(StorageVersionInfo {
+            stored_version,
+            expected_version: STORAGE_VERSION,
+            needs_migration: stored_version != STORAGE_VERSION,
+        })
     }
 }

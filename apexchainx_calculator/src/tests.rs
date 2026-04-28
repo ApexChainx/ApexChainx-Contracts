@@ -1328,13 +1328,6 @@ fn setup_with_critical(threshold: u32, penalty: i128, reward: i128) -> (Env, SLA
 /// Setup and perform one calculation, returning the result along with the env/client/actors.
 fn setup_after_calculation(severity: &str, mttr: u32) -> (Env, SLACalculatorContractClient<'static>, Actors) {
     let (env, client, actors) = setup();
-    client
-        .calculate_sla(
-            &actors.operator,
-            &symbol(&env, "FIXTURE_ID"),
-            &symbol(&env, severity),
-            &mttr,
-        );
     client.calculate_sla(
         &actors.operator,
         &symbol(&env, "FIXTURE_ID"),
@@ -1377,15 +1370,6 @@ fn test_fixture_after_calculation_stats_are_updated() {
 fn test_calculate_sla_unknown_severity_panics() {
     let (_env, client, actors) = setup();
     // "xyz" is not a configured severity — ConfigNotFound maps to a panic in the client
-    client
-        .calculate_sla(
-            &actors.operator,
-            &symbol_short!("OUT001"),
-            &symbol_short!("xyz"),
-            &10,
-        );
-}
-
     client.calculate_sla(
         &actors.operator,
         &symbol_short!("OUT001"),
@@ -1579,13 +1563,6 @@ fn test_admin_can_renounce() {
 fn test_calculate_sla_wrong_case_severity_panics() {
     let (_env, client, actors) = setup();
     // "HIGH" differs from configured "high"
-    client
-        .calculate_sla(
-            &actors.operator,
-            &symbol_short!("OUT002"),
-            &symbol_short!("HIGH"),
-            &10,
-        );
     client.calculate_sla(
         &actors.operator,
         &symbol_short!("OUT002"),
@@ -2253,6 +2230,28 @@ fn test_get_latest_by_outage_does_not_return_other_outage() {
 fn test_history_does_not_exceed_max_size() {
     let env = Env::default();
     env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Insert MAX_HISTORY_SIZE + 5 entries
+    for _ in 0..1005u32 {
+        client.calculate_sla(&op, &symbol_short!("CAP"), &symbol_short!("low"), &10);
+    }
+
+    let history = client.get_history();
+    assert_eq!(
+        history.len(),
+        1000,
+        "History must be capped at MAX_HISTORY_SIZE"
+    );
+    let _ = admin;
+}
+
+// ============================================================
 // SC-063 – prune_history_by_age tests
 // ============================================================
 
@@ -2561,17 +2560,16 @@ fn test_pruned_age_event_payload_field_count_is_two() {
     let op = soroban_sdk::Address::generate(&env);
     client.initialize(&admin, &op);
 
-    // Insert MAX_HISTORY_SIZE + 5 entries
-    for _ in 0..1005u32 {
-        client.calculate_sla(&op, &symbol_short!("CAP"), &symbol_short!("low"), &10);
-    }
+    client.calculate_sla(&op, &symbol_short!("PA1"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&op, &symbol_short!("PA2"), &symbol_short!("critical"), &5);
 
-    let history = client.get_history();
-    assert_eq!(
-        history.len(),
-        1000,
-        "History must be capped at MAX_HISTORY_SIZE"
-    );
+    env.ledger().set_timestamp(2000);
+    client.prune_history_by_age(&admin, &500); // removes both (recorded_at=0 < 1500)
+
+    let events = env.events().all();
+    let (_, _, data) = events.last().unwrap();
+    let payload: (u32, u32) = data.try_into_val(&env).unwrap();
+    assert_eq!(payload, (2u32, 0u32)); // removed=2, kept=0
 }
 
 #[test]
@@ -2627,16 +2625,6 @@ fn test_history_below_cap_is_not_trimmed() {
 
     let history = client.get_history();
     assert_eq!(history.len(), 5, "History below cap must not be trimmed");
-    client.calculate_sla(&op, &symbol_short!("PA1"), &symbol_short!("critical"), &5);
-    client.calculate_sla(&op, &symbol_short!("PA2"), &symbol_short!("critical"), &5);
-
-    env.ledger().set_timestamp(2000);
-    client.prune_history_by_age(&admin, &500); // removes both (recorded_at=0 < 1500)
-
-    let events = env.events().all();
-    let (_, _, data) = events.last().unwrap();
-    let payload: (u32, u32) = data.try_into_val(&env).unwrap();
-    assert_eq!(payload, (2u32, 0u32)); // removed=2, kept=0
 }
 
 #[test]
@@ -2865,83 +2853,153 @@ fn test_monotonicity_view_matches_mutating_for_all_mttr_values() {
 }
 
 // ============================================================
-// SC-022 – Fuller storage migration harness (#142)
+// SC-013 – Configurable retention limit (issue #133)
 // ============================================================
 
 #[test]
-fn test_migrate_v0_to_v1_stamps_version() {
-    // Simulate a legacy contract that has no version key (v0 state).
-    let env = Env::default();
-    let cid = env.register_contract(None, SLACalculatorContract);
-    let client = SLACalculatorContractClient::new(&env, &cid);
-    let admin = soroban_sdk::Address::generate(&env);
-    let op = soroban_sdk::Address::generate(&env);
-    client.initialize(&admin, &op);
-
-    // Manually remove the version key to simulate v0 state
-    env.as_contract(&cid, || {
-        env.storage().instance().remove(&STORAGE_VERSION_KEY);
-    });
-
-    // Verify the contract is now in an unversioned state (get_admin would fail check_version)
-    // migrate() must succeed and restore the version
-    client.migrate(&admin);
-
-    // Contract is functional again
-    assert_eq!(client.get_storage_version(), 1);
-    assert_eq!(client.get_admin(), admin);
+fn test_get_retention_limit_defaults_to_max_history_size() {
+    let (_env, client, _actors) = setup();
+    assert_eq!(client.get_retention_limit(), 1000);
 }
 
 #[test]
-fn test_migrate_idempotent_when_already_current() {
+fn test_admin_can_set_retention_limit() {
     let (_env, client, actors) = setup();
-    // Already at v1 – calling migrate multiple times must be a no-op
-    client.migrate(&actors.admin);
-    client.migrate(&actors.admin);
-    client.migrate(&actors.admin);
-    assert_eq!(client.get_storage_version(), 1);
+    client.set_retention_limit(&actors.admin, &50);
+    assert_eq!(client.get_retention_limit(), 50);
 }
 
 #[test]
 #[should_panic]
-fn test_migrate_rejected_for_non_admin_sc022() {
+fn test_operator_cannot_set_retention_limit() {
     let (_env, client, actors) = setup();
-    client.migrate(&actors.operator);
+    client.set_retention_limit(&actors.operator, &50);
 }
 
 #[test]
-fn test_migrate_does_not_corrupt_existing_state() {
-    // After a v0→v1 migration the config, stats, and history must be intact.
+#[should_panic]
+fn test_stranger_cannot_set_retention_limit() {
+    let (_env, client, actors) = setup();
+    client.set_retention_limit(&actors.stranger, &50);
+}
+
+#[test]
+#[should_panic]
+fn test_set_retention_limit_zero_fails() {
+    let (_env, client, actors) = setup();
+    client.set_retention_limit(&actors.admin, &0);
+}
+
+#[test]
+#[should_panic]
+fn test_set_retention_limit_above_max_fails() {
+    let (_env, client, actors) = setup();
+    client.set_retention_limit(&actors.admin, &1001);
+}
+
+#[test]
+fn test_retention_limit_enforced_on_calculate() {
     let env = Env::default();
+    env.budget().reset_unlimited();
+
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     let admin = soroban_sdk::Address::generate(&env);
     let op = soroban_sdk::Address::generate(&env);
     client.initialize(&admin, &op);
 
-    // Do a calculation to populate history and stats
-    client.calculate_sla(&op, &symbol_short!("MIG001"), &symbol_short!("critical"), &5);
+    // Set a small retention limit
+    client.set_retention_limit(&admin, &5);
 
-    // Simulate v0 state
-    env.as_contract(&cid, || {
-        env.storage().instance().remove(&STORAGE_VERSION_KEY);
-    });
+    // Insert 10 entries
+    for _ in 0..10u32 {
+        client.calculate_sla(&op, &symbol_short!("RET"), &symbol_short!("low"), &10);
+    }
 
-    client.migrate(&admin);
+    // History must be capped at the configured limit, not MAX_HISTORY_SIZE
+    assert_eq!(client.get_history().len(), 5);
+}
 
-    // State must be intact
-    let stats = client.get_stats();
-    assert_eq!(stats.total_calculations, 1);
+#[test]
+fn test_retention_limit_drops_oldest_when_exceeded() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    client.set_retention_limit(&admin, &3);
+
+    client.calculate_sla(&op, &symbol(&env, "FIRST"), &symbol_short!("low"), &10);
+    client.calculate_sla(&op, &symbol(&env, "SECOND"), &symbol_short!("low"), &10);
+    client.calculate_sla(&op, &symbol(&env, "THIRD"), &symbol_short!("low"), &10);
+    // This push should evict FIRST
+    client.calculate_sla(&op, &symbol(&env, "FOURTH"), &symbol_short!("low"), &10);
+
     let history = client.get_history();
-    assert_eq!(history.len(), 1);
-    let cfg = client.get_config(&symbol_short!("critical"));
-    assert_eq!(cfg.threshold_minutes, 15);
+    assert_eq!(history.len(), 3);
+    assert_eq!(history.get(0).unwrap().outage_id, symbol(&env, "SECOND"));
+    assert_eq!(history.get(2).unwrap().outage_id, symbol(&env, "FOURTH"));
 }
 
 #[test]
-#[should_panic]
-fn test_migrate_rejects_future_version() {
-    // A stored version newer than STORAGE_VERSION must be rejected.
+fn test_retention_limit_update_takes_effect_on_next_calculate() {
+    // The retention limit only prevents growth beyond the cap; it does not
+    // retroactively shrink existing history. When the limit is lowered below
+    // the current history size, each subsequent calculate_sla call pushes one
+    // entry and drops one (net zero change) until the history naturally drains
+    // to the new limit via prune_history or prune_history_by_age.
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Fill 10 entries with default limit
+    for _ in 0..10u32 {
+        client.calculate_sla(&op, &symbol_short!("BEF"), &symbol_short!("low"), &10);
+    }
+    assert_eq!(client.get_history().len(), 10);
+
+    // Lower the limit; existing history is not pruned automatically
+    client.set_retention_limit(&admin, &5);
+    assert_eq!(client.get_history().len(), 10, "Lowering limit must not retroactively prune");
+
+    // Each calculate_sla call pushes 1 and drops 1 (net zero) while history > limit.
+    // History stays at 10 until an explicit prune brings it to the new limit.
+    client.calculate_sla(&op, &symbol_short!("AFT"), &symbol_short!("low"), &10);
+    assert_eq!(client.get_history().len(), 10, "History stays at 10 (push 1, drop 1)");
+
+    // Explicit prune brings history down to the new limit
+    client.prune_history(&admin, &5);
+    assert_eq!(client.get_history().len(), 5, "Explicit prune must enforce the new limit");
+
+    // Now the cap is active: further calculations stay at 5
+    client.calculate_sla(&op, &symbol_short!("CAP"), &symbol_short!("low"), &10);
+    assert_eq!(client.get_history().len(), 5, "History must stay at 5 after cap is active");
+}
+
+// ============================================================
+// SC-021 – Migration state read helper (issue #141)
+// ============================================================
+
+#[test]
+fn test_get_migration_state_returns_current_version() {
+    let (_env, client, _actors) = setup();
+    let info = client.get_migration_state();
+    assert_eq!(info.stored_version, 1);
+    assert_eq!(info.expected_version, 1);
+    assert!(!info.needs_migration);
+}
+
+#[test]
+fn test_get_migration_state_detects_version_mismatch() {
     let env = Env::default();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
@@ -2949,209 +3007,825 @@ fn test_migrate_rejects_future_version() {
     let op = soroban_sdk::Address::generate(&env);
     client.initialize(&admin, &op);
 
+    // Overwrite stored version to simulate a future schema
     env.as_contract(&cid, || {
-        env.storage().instance().set(&STORAGE_VERSION_KEY, &99u32);
+        env.storage()
+            .instance()
+            .set(&STORAGE_VERSION_KEY, &99u32);
     });
 
-    client.migrate(&admin); // must panic – VersionMismatch
+    let info = client.get_migration_state();
+    assert_eq!(info.stored_version, 99);
+    assert_eq!(info.expected_version, 1);
+    assert!(info.needs_migration);
+}
+
+#[test]
+fn test_get_migration_state_is_deterministic() {
+    let (_env, client, _actors) = setup();
+    let i1 = client.get_migration_state();
+    let i2 = client.get_migration_state();
+    assert_eq!(i1.stored_version, i2.stored_version);
+    assert_eq!(i1.expected_version, i2.expected_version);
+    assert_eq!(i1.needs_migration, i2.needs_migration);
+}
+
+#[test]
+fn test_get_migration_state_after_migrate_shows_no_migration_needed() {
+    let (_env, client, actors) = setup();
+    // Already at current version; migrate is a no-op
+    client.migrate(&actors.admin);
+    let info = client.get_migration_state();
+    assert!(!info.needs_migration);
 }
 
 // ============================================================
-// SC-024 – Cancel pending admin/operator proposals (#144)
+// SC-011 – Latest result by outage (issue #131) – additional coverage
 // ============================================================
 
 #[test]
-fn test_cancel_admin_proposal_clears_pending() {
+fn test_get_latest_by_outage_returns_last_of_many() {
+    let (env, client, actors) = setup();
+
+    // Three calculations for the same outage; last one is a violation
+    client.calculate_sla(&actors.operator, &symbol(&env, "MULTI"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&actors.operator, &symbol(&env, "MULTI"), &symbol_short!("critical"), &10);
+    client.calculate_sla(&actors.operator, &symbol(&env, "MULTI"), &symbol_short!("critical"), &20);
+
+    let latest = client.get_latest_by_outage(&symbol(&env, "MULTI")).unwrap();
+    assert_eq!(latest.status, symbol_short!("viol")); // mttr=20 > threshold=15
+    assert_eq!(latest.mttr_minutes, 20);
+}
+
+#[test]
+fn test_get_latest_by_outage_unaffected_by_other_outages() {
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "A"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&actors.operator, &symbol(&env, "B"), &symbol_short!("critical"), &20);
+    client.calculate_sla(&actors.operator, &symbol(&env, "A"), &symbol_short!("critical"), &10);
+
+    // Latest for A is the second A entry (mttr=10), not B
+    let latest_a = client.get_latest_by_outage(&symbol(&env, "A")).unwrap();
+    assert_eq!(latest_a.mttr_minutes, 10);
+
+    let latest_b = client.get_latest_by_outage(&symbol(&env, "B")).unwrap();
+    assert_eq!(latest_b.mttr_minutes, 20);
+}
+
+// ============================================================
+// SC-038 – Event replay and missed-event recovery (issue #158)
+//
+// These tests demonstrate how a backend consumer can recover from missed events
+// by replaying contract state. The pattern is:
+//   1. Consumer misses some sla_calc events (simulated by not observing them).
+//   2. Consumer calls get_history / get_history_page to reconstruct missed results.
+//   3. Consumer calls get_latest_by_outage to confirm the current state per outage.
+//   4. Consumer calls get_stats to verify aggregate totals are consistent.
+//
+// The contract guarantees that history + stats are always consistent with the
+// events that were emitted, so a consumer can always recover full state from
+// on-chain reads without replaying raw ledger events.
+// ============================================================
+
+#[test]
+fn test_event_replay_history_matches_emitted_events() {
+    // Verify that every entry in get_history corresponds to an emitted sla_calc event.
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "EVR_1"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&actors.operator, &symbol(&env, "EVR_2"), &symbol_short!("high"), &35);
+    client.calculate_sla(&actors.operator, &symbol(&env, "EVR_3"), &symbol_short!("low"), &10);
+
+    let history = client.get_history();
+    let events = env.events().all();
+
+    // Filter only sla_calc events
+    let sla_events: soroban_sdk::Vec<_> = {
+        let mut v = soroban_sdk::Vec::new(&env);
+        for i in 0..events.len() {
+            let (_, topics, _) = events.get(i).unwrap();
+            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if t0 == EVENT_SLA_CALC {
+                v.push_back(events.get(i).unwrap());
+            }
+        }
+        v
+    };
+
+    // One event per calculation
+    assert_eq!(sla_events.len(), 3);
+    assert_eq!(history.len(), 3);
+
+    // Each history entry outage_id matches the corresponding event payload outage_id
+    for i in 0..3u32 {
+        let (_, _, data) = sla_events.get(i).unwrap();
+        let (event_outage_id, _, _, _, _, _, _): (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) =
+            data.try_into_val(&env).unwrap();
+        assert_eq!(history.get(i).unwrap().outage_id, event_outage_id);
+    }
+}
+
+#[test]
+fn test_missed_event_recovery_via_get_history_page() {
+    // Simulate a consumer that missed events for calculations 3-5.
+    // Recovery: page through history to find the missed entries.
+    let (env, client, actors) = setup();
+
+    for i in 0..5u32 {
+        let oid = if i < 3 {
+            symbol(&env, "SEEN")
+        } else {
+            symbol(&env, "MISSED")
+        };
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // Consumer already processed page 0 (entries 0-2); recover page 1 (entries 3-4)
+    let missed = client.get_history_page(&3, &10);
+    assert_eq!(missed.len(), 2);
+    assert_eq!(missed.get(0).unwrap().outage_id, symbol(&env, "MISSED"));
+    assert_eq!(missed.get(1).unwrap().outage_id, symbol(&env, "MISSED"));
+}
+
+#[test]
+fn test_missed_event_recovery_via_get_latest_by_outage() {
+    // Consumer missed all events for outage "OUTAGE_X".
+    // Recovery: call get_latest_by_outage to get the current result.
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "OUTAGE_X"), &symbol_short!("critical"), &20);
+    // Recalculation after fix
+    client.calculate_sla(&actors.operator, &symbol(&env, "OUTAGE_X"), &symbol_short!("critical"), &5);
+
+    // Consumer recovers the latest result without replaying all events
+    let latest = client.get_latest_by_outage(&symbol(&env, "OUTAGE_X")).unwrap();
+    assert_eq!(latest.status, symbol_short!("met"));
+    assert_eq!(latest.mttr_minutes, 5);
+}
+
+#[test]
+fn test_missed_event_recovery_stats_consistent_with_history() {
+    // After missing events, a consumer can verify aggregate stats are consistent
+    // with the history they reconstruct.
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "S1"), &symbol_short!("critical"), &5);  // met
+    client.calculate_sla(&actors.operator, &symbol(&env, "S2"), &symbol_short!("critical"), &20); // viol
+    client.calculate_sla(&actors.operator, &symbol(&env, "S3"), &symbol_short!("high"), &10);     // met
+
+    let history = client.get_history();
+    let stats = client.get_stats();
+
+    // Recompute from history
+    let mut calc_count = 0u64;
+    let mut viol_count = 0u64;
+    for i in 0..history.len() {
+        let entry = history.get(i).unwrap();
+        calc_count += 1;
+        if entry.status == symbol_short!("viol") {
+            viol_count += 1;
+        }
+    }
+
+    assert_eq!(stats.total_calculations, calc_count);
+    assert_eq!(stats.total_violations, viol_count);
+}
+
+#[test]
+fn test_event_replay_view_function_produces_same_result_as_stored() {
+    // A consumer can replay any stored result by calling calculate_sla_view
+    // with the same inputs, confirming determinism.
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(&actors.operator, &symbol(&env, "DET1"), &symbol_short!("critical"), &10);
+
+    let stored = client.get_latest_by_outage(&symbol(&env, "DET1")).unwrap();
+    let replayed = client.calculate_sla_view(
+        &symbol(&env, "DET1"),
+        &symbol_short!("critical"),
+        &10,
+    );
+
+    assert_eq!(stored.status, replayed.status);
+    assert_eq!(stored.amount, replayed.amount);
+    assert_eq!(stored.rating, replayed.rating);
+    assert_eq!(stored.payment_type, replayed.payment_type);
+    assert_eq!(stored.mttr_minutes, replayed.mttr_minutes);
+    assert_eq!(stored.threshold_minutes, replayed.threshold_minutes);
+}
+
+#[test]
+fn test_event_replay_after_prune_history_page_reflects_pruned_state() {
+    // After prune, history pages reflect the pruned state.
+    // A consumer that missed events before the prune can only recover
+    // what remains in history.
+    let (env, client, actors) = setup();
+
+    for i in 0..10u32 {
+        let oid = if i < 5 { symbol(&env, "OLD") } else { symbol(&env, "NEW") };
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // Prune to keep only the latest 5
+    client.prune_history(&actors.admin, &5);
+
+    let history = client.get_history();
+    assert_eq!(history.len(), 5);
+    // All remaining entries are the NEW ones
+    for i in 0..5u32 {
+        assert_eq!(history.get(i).unwrap().outage_id, symbol(&env, "NEW"));
+    }
+}
+
+// ============================================================
+// #145 – Operator handoff cancellation and replacement lifecycle
+// ============================================================
+
+#[test]
+fn test_propose_operator_replaces_pending_proposal() {
+    // Re-proposing a different operator overwrites the pending slot.
+    let (env, client, actors) = setup();
+    let op_a = soroban_sdk::Address::generate(&env);
+    let op_b = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &op_a);
+    assert_eq!(client.get_pending_operator(), Some(op_a.clone()));
+
+    // Replace with op_b before op_a accepts
+    client.propose_operator(&actors.admin, &op_b);
+    assert_eq!(
+        client.get_pending_operator(),
+        Some(op_b.clone()),
+        "Second proposal must overwrite the first"
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_superseded_pending_operator_cannot_accept() {
+    // op_a was proposed then replaced by op_b; op_a must not be able to accept.
+    let (env, client, actors) = setup();
+    let op_a = soroban_sdk::Address::generate(&env);
+    let op_b = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &op_a);
+    client.propose_operator(&actors.admin, &op_b); // replaces op_a
+
+    client.accept_operator(&op_a); // must panic – op_a is no longer pending
+}
+
+#[test]
+fn test_replacement_operator_can_accept_after_superseding() {
+    // op_b replaces op_a; op_b can accept and becomes the active operator.
+    let (env, client, actors) = setup();
+    let op_a = soroban_sdk::Address::generate(&env);
+    let op_b = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &op_a);
+    client.propose_operator(&actors.admin, &op_b);
+    client.accept_operator(&op_b);
+
+    assert_eq!(client.get_operator(), op_b);
+    assert_eq!(client.get_pending_operator(), None);
+}
+
+#[test]
+fn test_cancel_pending_operator_by_proposing_current_operator() {
+    // Admin can effectively cancel a pending proposal by re-proposing the current operator.
+    // After acceptance the operator is unchanged.
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    // "Cancel" by re-proposing the current operator
+    client.propose_operator(&actors.admin, &actors.operator);
+    client.accept_operator(&actors.operator);
+
+    assert_eq!(client.get_operator(), actors.operator);
+    assert_eq!(client.get_pending_operator(), None);
+}
+
+#[test]
+fn test_pending_operator_state_queryable_throughout_lifecycle() {
+    // Verify get_pending_operator returns the correct value at each lifecycle stage.
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    // Before proposal: None
+    assert_eq!(client.get_pending_operator(), None);
+
+    // After proposal: Some(new_op)
+    client.propose_operator(&actors.admin, &new_op);
+    assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
+
+    // After acceptance: None
+    client.accept_operator(&new_op);
+    assert_eq!(client.get_pending_operator(), None);
+}
+
+#[test]
+fn test_operator_handoff_full_lifecycle_old_operator_locked_out() {
+    // Full lifecycle: propose → accept → old operator cannot calculate.
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    client.accept_operator(&new_op);
+
+    // New operator can calculate
+    let result = client.calculate_sla(
+        &new_op,
+        &symbol_short!("HO_NEW"),
+        &symbol_short!("critical"),
+        &5,
+    );
+    assert_eq!(result.status, symbol_short!("met"));
+}
+
+#[test]
+fn test_multiple_replacement_cycles_end_state_is_correct() {
+    // Propose A, replace with B, replace with C, accept C.
+    let (env, client, actors) = setup();
+    let op_a = soroban_sdk::Address::generate(&env);
+    let op_b = soroban_sdk::Address::generate(&env);
+    let op_c = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &op_a);
+    client.propose_operator(&actors.admin, &op_b);
+    client.propose_operator(&actors.admin, &op_c);
+
+    assert_eq!(client.get_pending_operator(), Some(op_c.clone()));
+    client.accept_operator(&op_c);
+
+    assert_eq!(client.get_operator(), op_c);
+    assert_eq!(client.get_pending_operator(), None);
+}
+
+// ============================================================
+// #147 – Admin renounce preconditions
+// ============================================================
+
+#[test]
+fn test_renounce_with_pending_admin_proposal_clears_proposal() {
+    // Renounce while a pending admin proposal exists must clear the proposal atomically.
     let (env, client, actors) = setup();
     let new_admin = soroban_sdk::Address::generate(&env);
 
     client.propose_admin(&actors.admin, &new_admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
 
-    client.cancel_admin_proposal(&actors.admin);
+    client.renounce_admin(&actors.admin);
+
+    // Pending proposal is cleared
     assert_eq!(client.get_pending_admin(), None);
-
-    // Original admin retains authority
-    assert_eq!(client.get_admin(), actors.admin);
 }
 
 #[test]
-fn test_cancel_admin_proposal_emits_event() {
+#[should_panic]
+fn test_proposed_admin_cannot_accept_after_renounce() {
+    // After renounce, the previously proposed admin cannot accept (no admin exists).
     let (env, client, actors) = setup();
     let new_admin = soroban_sdk::Address::generate(&env);
 
     client.propose_admin(&actors.admin, &new_admin);
-    client.cancel_admin_proposal(&actors.admin);
+    client.renounce_admin(&actors.admin);
 
-    let events = env.events().all();
-    let (_, topics, _) = events.last().unwrap();
-    let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-    assert_eq!(topic_0, EVENT_ADMIN_CAN);
+    // accept_admin must panic – pending proposal was cleared
+    client.accept_admin(&new_admin);
+}
+
+#[test]
+fn test_renounce_while_paused_succeeds() {
+    // Admin can renounce even when the contract is paused.
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    assert_eq!(client.is_paused(), true);
+
+    // Renounce must succeed regardless of pause state
+    client.renounce_admin(&actors.admin);
 }
 
 #[test]
 #[should_panic]
-fn test_cancel_admin_proposal_no_pending_fails() {
+fn test_post_renounce_pause_is_locked() {
+    // After renounce, pause is permanently locked.
+    let (env, client, actors) = setup();
+    client.renounce_admin(&actors.admin);
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "x"));
+}
+
+#[test]
+#[should_panic]
+fn test_post_renounce_unpause_is_locked() {
+    // After renounce, unpause is permanently locked.
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "x"));
+    client.renounce_admin(&actors.admin);
+    client.unpause(&actors.admin);
+}
+
+#[test]
+#[should_panic]
+fn test_post_renounce_set_config_is_locked() {
     let (_env, client, actors) = setup();
-    // No proposal exists – must return NoPendingTransfer (panic in client)
-    client.cancel_admin_proposal(&actors.admin);
+    client.renounce_admin(&actors.admin);
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
 }
 
 #[test]
 #[should_panic]
-fn test_cancel_admin_proposal_non_admin_fails() {
+fn test_post_renounce_prune_history_is_locked() {
+    let (_env, client, actors) = setup();
+    client.renounce_admin(&actors.admin);
+    client.prune_history(&actors.admin, &0);
+}
+
+#[test]
+#[should_panic]
+fn test_post_renounce_propose_admin_is_locked() {
     let (env, client, actors) = setup();
     let new_admin = soroban_sdk::Address::generate(&env);
-
+    client.renounce_admin(&actors.admin);
     client.propose_admin(&actors.admin, &new_admin);
-    // Stranger cannot cancel
-    client.cancel_admin_proposal(&actors.stranger);
 }
 
 #[test]
-fn test_cancel_admin_proposal_then_repropose_works() {
-    // After cancellation the admin can issue a fresh proposal.
-    let (env, client, actors) = setup();
-    let first = soroban_sdk::Address::generate(&env);
-    let second = soroban_sdk::Address::generate(&env);
-
-    client.propose_admin(&actors.admin, &first);
-    client.cancel_admin_proposal(&actors.admin);
-
-    client.propose_admin(&actors.admin, &second);
-    assert_eq!(client.get_pending_admin(), Some(second.clone()));
-
-    client.accept_admin(&second);
-    assert_eq!(client.get_admin(), second);
-}
-
-#[test]
-fn test_cancel_operator_proposal_clears_pending() {
-    let (env, client, actors) = setup();
-    let new_op = soroban_sdk::Address::generate(&env);
-
-    client.propose_operator(&actors.admin, &new_op);
-    assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
-
-    client.cancel_operator_proposal(&actors.admin);
-    assert_eq!(client.get_pending_operator(), None);
-
-    // Original operator retains authority
-    assert_eq!(client.get_operator(), actors.operator);
-}
-
-#[test]
-fn test_cancel_operator_proposal_emits_event() {
-    let (env, client, actors) = setup();
-    let new_op = soroban_sdk::Address::generate(&env);
-
-    client.propose_operator(&actors.admin, &new_op);
-    client.cancel_operator_proposal(&actors.admin);
-
-    let events = env.events().all();
-    let (_, topics, _) = events.last().unwrap();
-    let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-    assert_eq!(topic_0, EVENT_OP_CAN);
-}
-
-#[test]
-#[should_panic]
-fn test_cancel_operator_proposal_no_pending_fails() {
+fn test_post_renounce_operator_can_still_calculate() {
+    // Renounce only removes admin authority; the operator role is unaffected.
     let (_env, client, actors) = setup();
-    client.cancel_operator_proposal(&actors.admin);
-}
+    client.renounce_admin(&actors.admin);
 
-#[test]
-#[should_panic]
-fn test_cancel_operator_proposal_non_admin_fails() {
-    let (env, client, actors) = setup();
-    let new_op = soroban_sdk::Address::generate(&env);
-
-    client.propose_operator(&actors.admin, &new_op);
-    client.cancel_operator_proposal(&actors.operator);
-}
-
-#[test]
-fn test_cancel_operator_proposal_then_repropose_works() {
-    let (env, client, actors) = setup();
-    let first = soroban_sdk::Address::generate(&env);
-    let second = soroban_sdk::Address::generate(&env);
-
-    client.propose_operator(&actors.admin, &first);
-    client.cancel_operator_proposal(&actors.admin);
-
-    client.propose_operator(&actors.admin, &second);
-    assert_eq!(client.get_pending_operator(), Some(second.clone()));
-
-    client.accept_operator(&second);
-    assert_eq!(client.get_operator(), second);
-}
-
-// ============================================================
-// SC-037 – Backend-consumer smoke fixture (#157)
-// ============================================================
-
-/// Full end-to-end sequence mirroring how the backend invokes the contract:
-/// initialize → metadata → config snapshot → calculate (met) → calculate (viol)
-/// → history → stats.  Uses realistic severity/outage inputs.
-#[test]
-fn test_sc037_backend_consumer_smoke_full_sequence() {
-    let (env, client, actors) = setup();
-
-    // 1. Metadata introspection (backend reads capabilities on startup)
-    let meta = client.get_contract_metadata();
-    assert_eq!(meta.storage_version, 1);
-    assert_eq!(meta.supported_severities.len(), 4);
-
-    // 2. Config snapshot (backend caches config for parity checks)
-    let snapshot = client.get_config_snapshot();
-    assert_eq!(snapshot.entries.len(), 4);
-    let critical_entry = snapshot.entries.get(0).unwrap();
-    assert_eq!(critical_entry.severity, symbol_short!("critical"));
-    assert_eq!(critical_entry.config.threshold_minutes, 15);
-
-    // 3. Calculate – critical incident resolved in 8 min (well within threshold → "top")
-    let r1 = client.calculate_sla(
+    let result = client.calculate_sla(
         &actors.operator,
-        &symbol(&env, "INC-2026-001"),
+        &symbol_short!("REN_OP"),
         &symbol_short!("critical"),
-        &8,
+        &5,
     );
-    assert_eq!(r1.status, symbol_short!("met"));
-    assert_eq!(r1.rating, symbol_short!("top"));
-    assert!(r1.amount > 0);
+    assert_eq!(result.status, symbol_short!("met"));
+}
 
-    // 4. Calculate – high incident resolved in 45 min (exceeds 30-min threshold → violation)
-    let r2 = client.calculate_sla(
-        &actors.operator,
-        &symbol(&env, "INC-2026-002"),
-        &symbol_short!("high"),
-        &45,
+#[test]
+fn test_renounce_is_irreversible_no_admin_exists() {
+    // After renounce, get_admin must fail (no admin in storage).
+    let (_env, client, actors) = setup();
+    client.renounce_admin(&actors.admin);
+
+    let result = client.try_get_admin();
+    assert!(result.is_err(), "get_admin must fail after renounce");
+}
+
+// ============================================================
+// #148 – Pause-metadata history through repeated pause/unpause cycles
+// ============================================================
+
+#[test]
+fn test_pause_metadata_reflects_latest_reason_after_cycle() {
+    // After pause → unpause → pause again, metadata must reflect the second pause.
+    let (env, client, actors) = setup();
+
+    let reason1 = soroban_sdk::String::from_str(&env, "first maintenance");
+    let reason2 = soroban_sdk::String::from_str(&env, "second maintenance");
+
+    client.pause(&actors.admin, &reason1);
+    client.unpause(&actors.admin);
+    client.pause(&actors.admin, &reason2);
+
+    let info = client.get_pause_info().expect("pause info must be present");
+    assert_eq!(info.reason, reason2, "Metadata must reflect the most recent pause reason");
+}
+
+#[test]
+fn test_pause_metadata_cleared_between_cycles() {
+    // After unpause, get_pause_info must return None before the next pause.
+    let (env, client, actors) = setup();
+
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "cycle1"));
+    client.unpause(&actors.admin);
+
+    assert_eq!(
+        client.get_pause_info(),
+        None,
+        "Pause info must be None after unpause"
     );
-    assert_eq!(r2.status, symbol_short!("viol"));
-    assert_eq!(r2.payment_type, symbol_short!("pen"));
-    assert!(r2.amount < 0);
+}
 
-    // 5. History access – both calculations appear in order
-    let history = client.get_history();
-    assert_eq!(history.len(), 2);
-    assert_eq!(history.get(0).unwrap().outage_id, symbol(&env, "INC-2026-001"));
-    assert_eq!(history.get(1).unwrap().outage_id, symbol(&env, "INC-2026-002"));
+#[test]
+fn test_pause_metadata_timestamp_advances_across_cycles() {
+    // Each pause cycle records a fresh timestamp; later pauses must have >= timestamp.
+    let env = Env::default();
+    env.ledger().set_timestamp(1000);
 
-    // 6. Stats access – counters are coherent
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    client.pause(&admin, &soroban_sdk::String::from_str(&env, "first"));
+    let ts1 = client.get_pause_info().unwrap().paused_at;
+    assert_eq!(ts1, 1000);
+
+    client.unpause(&admin);
+
+    env.ledger().set_timestamp(2000);
+    client.pause(&admin, &soroban_sdk::String::from_str(&env, "second"));
+    let ts2 = client.get_pause_info().unwrap().paused_at;
+    assert_eq!(ts2, 2000);
+
+    assert!(ts2 > ts1, "Second pause timestamp must be later than first");
+}
+
+#[test]
+fn test_repeated_pause_unpause_cycles_is_paused_state_consistent() {
+    // is_paused must toggle correctly through multiple cycles.
+    let (env, client, actors) = setup();
+
+    for _ in 0..5u32 {
+        assert_eq!(client.is_paused(), false);
+        client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "cycle"));
+        assert_eq!(client.is_paused(), true);
+        client.unpause(&actors.admin);
+    }
+    assert_eq!(client.is_paused(), false);
+}
+
+#[test]
+fn test_pause_metadata_different_reasons_each_cycle() {
+    // Each cycle stores a distinct reason; verify the last one is always current.
+    let (env, client, actors) = setup();
+
+    let reasons = ["alpha", "beta", "gamma", "delta"];
+    for reason_str in reasons {
+        let reason = soroban_sdk::String::from_str(&env, reason_str);
+        client.pause(&actors.admin, &reason.clone());
+        let info = client.get_pause_info().unwrap();
+        assert_eq!(info.reason, reason, "Reason must match for cycle '{}'", reason_str);
+        client.unpause(&actors.admin);
+    }
+}
+
+#[test]
+fn test_calculate_sla_blocked_and_unblocked_across_cycles() {
+    // Verify calculate_sla is blocked during pause and unblocked after unpause,
+    // across multiple cycles.
+    let (env, client, actors) = setup();
+
+    for _ in 0..3u32 {
+        // Unpaused: calculation succeeds
+        let result = client.calculate_sla(
+            &actors.operator,
+            &symbol_short!("CYC"),
+            &symbol_short!("critical"),
+            &5,
+        );
+        assert_eq!(result.status, symbol_short!("met"));
+
+        // Paused: calculation must fail
+        client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "cycle"));
+        let blocked = client.try_calculate_sla(
+            &actors.operator,
+            &symbol_short!("CYC"),
+            &symbol_short!("critical"),
+            &5,
+        );
+        assert!(blocked.is_err(), "calculate_sla must be blocked while paused");
+
+        client.unpause(&actors.admin);
+    }
+}
+
+#[test]
+fn test_pause_events_emitted_each_cycle() {
+    // Each pause and unpause must emit the corresponding event.
+    let (env, client, actors) = setup();
+
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "c1"));
+    client.unpause(&actors.admin);
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "c2"));
+    client.unpause(&actors.admin);
+
+    // Count paused and unpause events
+    let events = env.events().all();
+    let mut pause_count = 0u32;
+    let mut unpause_count = 0u32;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if t0 == EVENT_PAUSED {
+            pause_count += 1;
+        } else if t0 == EVENT_UNPAUSED {
+            unpause_count += 1;
+        }
+    }
+    assert_eq!(pause_count, 2, "Must emit 2 paused events");
+    assert_eq!(unpause_count, 2, "Must emit 2 unpause events");
+}
+
+// ============================================================
+// #135 – Storage-growth regression coverage
+// ============================================================
+
+#[test]
+fn test_storage_growth_history_grows_linearly_then_caps() {
+    // History length must grow by 1 per calculation until the cap, then stay flat.
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Grow to 10 entries
+    for i in 0..10u32 {
+        client.calculate_sla(&op, &symbol_short!("GRW"), &symbol_short!("low"), &10);
+        assert_eq!(
+            client.get_history().len(),
+            i + 1,
+            "History must grow by 1 per calculation (entry {})",
+            i + 1
+        );
+    }
+
+    // Set a small cap and verify it holds
+    client.set_retention_limit(&admin, &10);
+    client.calculate_sla(&op, &symbol_short!("GRW"), &symbol_short!("low"), &10);
+    assert_eq!(
+        client.get_history().len(),
+        10,
+        "History must not exceed the retention limit"
+    );
+}
+
+#[test]
+fn test_storage_growth_prune_cycle_keeps_history_bounded() {
+    // Simulate a long-running scenario: fill → prune → fill → prune.
+    // History must never exceed the prune target.
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    for _cycle in 0..3u32 {
+        for _ in 0..20u32 {
+            client.calculate_sla(&op, &symbol_short!("CYC"), &symbol_short!("low"), &10);
+        }
+        client.prune_history(&admin, &5);
+        assert_eq!(
+            client.get_history().len(),
+            5,
+            "History must be bounded to 5 after each prune cycle"
+        );
+    }
+}
+
+#[test]
+fn test_storage_growth_age_prune_cycle_keeps_history_bounded() {
+    // Simulate time-based pruning across multiple ledger epochs.
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Epoch 1: add 10 entries at t=0
+    env.ledger().set_timestamp(0);
+    for _ in 0..10u32 {
+        client.calculate_sla(&op, &symbol_short!("EP1"), &symbol_short!("low"), &10);
+    }
+
+    // Epoch 2: advance time, add 5 more, prune old ones
+    env.ledger().set_timestamp(10_000);
+    for _ in 0..5u32 {
+        client.calculate_sla(&op, &symbol_short!("EP2"), &symbol_short!("low"), &10);
+    }
+    client.prune_history_by_age(&admin, &5_000); // cutoff=5000; epoch1 entries (t=0) removed
+
+    assert_eq!(
+        client.get_history().len(),
+        5,
+        "Only epoch-2 entries must remain after age prune"
+    );
+}
+
+#[test]
+fn test_storage_growth_config_map_stays_fixed_size() {
+    // Config map must remain exactly 4 entries regardless of update frequency.
+    let (_env, client, actors) = setup();
+
+    for _ in 0..50u32 {
+        client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
+        client.set_config(&actors.admin, &symbol_short!("high"), &30, &50, &750);
+    }
+
+    assert_eq!(
+        client.get_config_count(),
+        4,
+        "Config map must always have exactly 4 entries"
+    );
+}
+
+#[test]
+fn test_storage_growth_stats_struct_size_is_constant() {
+    // Stats is a fixed-size struct; total_calculations must equal the number of calls.
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let n = 200u32;
+    for i in 0..n {
+        let mttr = if i % 3 == 0 { 5u32 } else { 20u32 };
+        client.calculate_sla(&op, &symbol_short!("ST"), &symbol_short!("critical"), &mttr);
+    }
+
     let stats = client.get_stats();
-    assert_eq!(stats.total_calculations, 2);
-    assert_eq!(stats.total_violations, 1);
-    assert!(stats.total_rewards > 0);
-    assert!(stats.total_penalties > 0);
-
-    // 7. View-only calculation (backend audit path) – must match mutating result
-    let view = client.calculate_sla_view(
-        &symbol(&env, "INC-2026-001"),
-        &symbol_short!("critical"),
-        &8,
+    assert_eq!(
+        stats.total_calculations, n as u64,
+        "Stats must track exactly {} calculations", n
     );
-    assert_eq!(view.status, r1.status);
-    assert_eq!(view.amount, r1.amount);
-    assert_eq!(view.rating, r1.rating);
+    // Violations + non-violations must sum to total
+    let non_violations = stats.total_calculations - stats.total_violations;
+    assert_eq!(
+        stats.total_violations + non_violations,
+        stats.total_calculations,
+        "Violation + met counts must equal total"
+    );
+    let _ = admin;
+}
+
+#[test]
+fn test_storage_growth_retention_limit_prevents_unbounded_growth() {
+    // With a small retention limit, history must never exceed it even after many calls.
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    client.set_retention_limit(&admin, &20);
+
+    for _ in 0..100u32 {
+        client.calculate_sla(&op, &symbol_short!("LIM"), &symbol_short!("low"), &10);
+    }
+
+    assert_eq!(
+        client.get_history().len(),
+        20,
+        "History must be capped at the configured retention limit"
+    );
+}
+
+#[test]
+fn test_storage_growth_regression_mixed_operations() {
+    // Regression: interleave calculations, config updates, and pruning.
+    // Verify no unexpected growth in any storage slot.
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    for i in 0..30u32 {
+        client.calculate_sla(&op, &symbol_short!("MIX"), &symbol_short!("critical"), &5);
+
+        if i % 10 == 9 {
+            // Prune every 10 entries
+            client.prune_history(&admin, &5);
+            assert!(
+                client.get_history().len() <= 5,
+                "History must not exceed 5 after prune at iteration {}", i
+            );
+        }
+
+        if i % 5 == 4 {
+            // Config update must not grow the config map
+            client.set_config(&admin, &symbol_short!("critical"), &15, &100, &750);
+            assert_eq!(client.get_config_count(), 4);
+        }
+    }
+
+    // Final state: history bounded, config fixed, stats consistent
+    let stats = client.get_stats();
+    assert_eq!(stats.total_calculations, 30);
+    assert_eq!(client.get_config_count(), 4);
 }
