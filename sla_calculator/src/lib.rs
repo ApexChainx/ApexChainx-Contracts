@@ -88,12 +88,12 @@ pub enum SLAError {
     Unauthorized = 3,
     ConfigNotFound = 4,
     VersionMismatch = 5,
-    ContractPaused = 6,    // #27
-    NoPendingTransfer = 7, // #63 #64
-    InvalidThreshold = 8,   // #70
-    InvalidPenalty = 9,    // #70
-    InvalidReward = 10,    // #70
-    InvalidSeverity = 11,  // #70
+    ContractPaused = 6,            // #27
+    NoPendingTransfer = 7,         // #63 #64
+    InvalidThreshold = 8,          // #70
+    InvalidPenalty = 9,            // #70
+    InvalidReward = 10,            // #70
+    InvalidSeverity = 11,          // #70
     RetentionLimitOutOfRange = 12, // SC-013
 }
 
@@ -317,9 +317,7 @@ impl SLACalculatorContract {
 
         // v0 → v1: stamp the version; all other fields were set by initialize
         if current == 0 {
-            env.storage()
-                .instance()
-                .set(&STORAGE_VERSION_KEY, &1u32);
+            env.storage().instance().set(&STORAGE_VERSION_KEY, &1u32);
             current = 1;
         }
 
@@ -445,9 +443,7 @@ impl SLACalculatorContract {
     ) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
-        env.storage()
-            .instance()
-            .set(&PENDING_OP_KEY, &new_operator);
+        env.storage().instance().set(&PENDING_OP_KEY, &new_operator);
         env.events()
             .publish((EVENT_OP_PROP, EVENT_VERSION, caller), (new_operator,));
         Ok(())
@@ -565,9 +561,14 @@ impl SLACalculatorContract {
     ) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?; // #28 – admin role enforced
-        
+
         // #70 – Validate configuration parameters
-        Self::validate_config(&severity, threshold_minutes, penalty_per_minute, reward_base)?;
+        Self::validate_config(
+            &severity,
+            threshold_minutes,
+            penalty_per_minute,
+            reward_base,
+        )?;
 
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
@@ -633,7 +634,7 @@ impl SLACalculatorContract {
     ///
     /// The hash uses a polynomial rolling hash with a prime base and modulus
     /// to provide strong collision resistance while remaining deterministic.
-    /// It processes all severity config fields in canonical order 
+    /// It processes all severity config fields in canonical order
     /// (critical → high → medium → low) and is stable across repeated reads
     /// when config is unchanged.
     pub fn get_config_version_hash(env: Env) -> Result<u64, SLAError> {
@@ -644,46 +645,46 @@ impl SLACalculatorContract {
             symbol_short!("medium"),
             symbol_short!("low"),
         ];
-        
+
         // Polynomial rolling hash parameters for good collision resistance
         const BASE: u64 = 91138233; // Large prime number
         const MODULUS: u64 = (1u64 << 63) - 25; // Large prime (Mersenne-like)
-        
+
         let mut hash: u64 = 1; // Start with non-zero seed
         let mut power: u64 = 1;
-        
+
         for sev in severities {
             let cfg = Self::load_config(&env, &sev)?;
-            
+
             // Mix each field with position-dependent weights
             let field_hash = hash
                 .wrapping_mul(BASE)
                 .wrapping_add(cfg.threshold_minutes as u64)
                 .wrapping_mul(power)
                 % MODULUS;
-            
+
             hash = field_hash;
             power = power.wrapping_mul(BASE) % MODULUS;
-            
+
             // Add penalty_per_minute with different weight
             hash = hash
                 .wrapping_mul(BASE)
                 .wrapping_add(cfg.penalty_per_minute as u64)
                 .wrapping_mul(power)
                 % MODULUS;
-            
+
             power = power.wrapping_mul(BASE) % MODULUS;
-            
+
             // Add reward_base with different weight
             hash = hash
                 .wrapping_mul(BASE)
                 .wrapping_add(cfg.reward_base as u64)
                 .wrapping_mul(power)
                 % MODULUS;
-            
+
             power = power.wrapping_mul(BASE) % MODULUS;
         }
-        
+
         // Final mixing to improve distribution
         hash = hash.wrapping_mul(BASE).wrapping_add(0x9e3779b97f4a7c15u64) % MODULUS;
         Ok(hash)
@@ -759,8 +760,15 @@ impl SLACalculatorContract {
         // We bypass pause and operator checks to allow continuous, public verification
         let cfg = Self::load_config(&env, &severity)?;
 
-        // Delegate to pure internal math; recorded_at=0 for view-only calls
-        Ok(Self::compute_result(outage_id, mttr_minutes, &cfg, 0))
+        // Use the current ledger timestamp so the view result matches the mutating
+        // path for the same inputs executed in the same ledger, while still avoiding
+        // any state writes or event emission.
+        Ok(Self::compute_result(
+            outage_id,
+            mttr_minutes,
+            &cfg,
+            env.ledger().timestamp(),
+        ))
     }
 
     // -------------------------------------------------------------------
@@ -779,7 +787,12 @@ impl SLACalculatorContract {
         Self::require_operator(&env, &caller)?; // #28
 
         let cfg = Self::load_config(&env, &severity)?;
-        let result = Self::compute_result(outage_id.clone(), mttr_minutes, &cfg, env.ledger().timestamp());
+        let result = Self::compute_result(
+            outage_id.clone(),
+            mttr_minutes,
+            &cfg,
+            env.ledger().timestamp(),
+        );
         let mut history: Vec<SLAResult> = env
             .storage()
             .instance()
@@ -825,8 +838,14 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Pure helper to generate the SLAResult deterministically.
-    /// `recorded_at` is the ledger timestamp at call time (0 in view/audit mode).
-    fn compute_result(outage_id: Symbol, mttr_minutes: u32, cfg: &SLAConfig, recorded_at: u64) -> SLAResult {
+    /// `recorded_at` is the ledger timestamp at call time for both view and mutating
+    /// execution so off-chain callers can rely on field parity within the same ledger.
+    fn compute_result(
+        outage_id: Symbol,
+        mttr_minutes: u32,
+        cfg: &SLAConfig,
+        recorded_at: u64,
+    ) -> SLAResult {
         let threshold = cfg.threshold_minutes;
 
         // Case 1: SLA violated → penalty
@@ -1135,10 +1154,8 @@ impl SLACalculatorContract {
         if removed > 0 {
             let kept = new_history.len();
             env.storage().instance().set(&HISTORY_KEY, &new_history);
-            env.events().publish(
-                (EVENT_PRUNED_AGE, EVENT_VERSION, caller),
-                (removed, kept),
-            );
+            env.events()
+                .publish((EVENT_PRUNED_AGE, EVENT_VERSION, caller), (removed, kept));
         }
 
         Ok(())
@@ -1176,10 +1193,7 @@ impl SLACalculatorContract {
 
     /// Returns all history entries whose `outage_id` matches the given value.
     /// Returns an empty Vec when no matching entries exist.
-    pub fn get_history_by_outage(
-        env: Env,
-        outage_id: Symbol,
-    ) -> Result<Vec<SLAResult>, SLAError> {
+    pub fn get_history_by_outage(env: Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
         Self::check_version(&env)?;
         let history: Vec<SLAResult> = env
             .storage()
