@@ -128,6 +128,7 @@ fn test_result_schema_is_explicit_and_stable() {
     assert_eq!(schema.rating_excellent, symbol_short!("excel"));
     assert_eq!(schema.rating_good, symbol_short!("good"));
     assert_eq!(schema.rating_poor, symbol_short!("poor"));
+    assert_eq!(schema.includes_config_version_hash, true);
 }
 
 #[test]
@@ -3508,6 +3509,46 @@ fn test_event_replay_view_function_produces_same_result_as_stored() {
     assert_eq!(stored.payment_type, replayed.payment_type);
     assert_eq!(stored.mttr_minutes, replayed.mttr_minutes);
     assert_eq!(stored.threshold_minutes, replayed.threshold_minutes);
+    assert_eq!(stored.config_version_hash, replayed.config_version_hash);
+}
+
+#[test]
+fn test_calculation_result_is_bound_to_current_config_hash() {
+    let (_env, client, actors) = setup();
+
+    let expected_hash = client.get_config_version_hash();
+    let result = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("BIND1"),
+        &symbol_short!("critical"),
+        &10,
+    );
+
+    assert_eq!(result.config_version_hash, expected_hash);
+}
+
+#[test]
+fn test_stored_result_retains_original_config_binding_after_config_change() {
+    let (env, client, actors) = setup();
+
+    client.calculate_sla(
+        &actors.operator,
+        &symbol(&env, "BIND2"),
+        &symbol_short!("critical"),
+        &10,
+    );
+    let before_change = client.get_latest_by_outage(&symbol(&env, "BIND2")).unwrap();
+    let original_hash = before_change.config_version_hash;
+
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+    let after_hash = client.get_config_version_hash();
+    let stored_after_change = client.get_latest_by_outage(&symbol(&env, "BIND2")).unwrap();
+    let replayed_after_change =
+        client.calculate_sla_view(&symbol(&env, "BIND2"), &symbol_short!("critical"), &10);
+
+    assert_eq!(stored_after_change.config_version_hash, original_hash);
+    assert_ne!(original_hash, after_hash);
+    assert_eq!(replayed_after_change.config_version_hash, after_hash);
     assert_eq!(stored.recorded_at, replayed.recorded_at);
 }
 
