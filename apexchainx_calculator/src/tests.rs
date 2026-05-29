@@ -547,6 +547,91 @@ fn test_backend_parity_threshold_boundary_cases() {
 }
 
 #[test]
+fn test_exact_threshold_mttr_is_always_met_never_violated() {
+    let (_env, client, actors) = setup();
+    let cases = [
+        (symbol_short!("critical"), 15u32, 750i128),
+        (symbol_short!("high"), 30u32, 750i128),
+        (symbol_short!("medium"), 60u32, 750i128),
+        (symbol_short!("low"), 120u32, 600i128),
+    ];
+
+    for (severity, threshold, expected_amount) in cases {
+        let view = client.calculate_sla_view(&symbol_short!("BNDV"), &severity, &threshold);
+        let mutating = client.calculate_sla(
+            &actors.operator,
+            &symbol_short!("BNDM"),
+            &severity,
+            &threshold,
+        );
+
+        assert_eq!(view.status, symbol_short!("met"));
+        assert_eq!(view.payment_type, symbol_short!("rew"));
+        assert_eq!(view.rating, symbol_short!("good"));
+        assert_eq!(view.amount, expected_amount);
+        assert_eq!(view.threshold_minutes, threshold);
+
+        assert_eq!(mutating.status, symbol_short!("met"));
+        assert_eq!(mutating.payment_type, symbol_short!("rew"));
+        assert_eq!(mutating.rating, symbol_short!("good"));
+        assert_eq!(mutating.amount, expected_amount);
+        assert_eq!(mutating.threshold_minutes, threshold);
+    }
+}
+
+#[test]
+fn test_exact_threshold_boundary_is_stable_after_config_update() {
+    let (_env, client, actors) = setup();
+
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+
+    let exact = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EXACT"),
+        &symbol_short!("critical"),
+        &20,
+    );
+    let over = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("OVER"),
+        &symbol_short!("critical"),
+        &21,
+    );
+
+    assert_eq!(exact.status, symbol_short!("met"));
+    assert_eq!(exact.payment_type, symbol_short!("rew"));
+    assert_eq!(exact.rating, symbol_short!("good"));
+    assert_eq!(exact.amount, 1000);
+
+    assert_eq!(over.status, symbol_short!("viol"));
+    assert_eq!(over.payment_type, symbol_short!("pen"));
+    assert_eq!(over.amount, -200);
+}
+
+#[test]
+fn test_backend_replay_exact_threshold_outcome_is_deterministic_before_config_change() {
+    let (env, client, actors) = setup();
+
+    let severity = symbol_short!("high");
+    let mttr = 30u32;
+    let outage_id = symbol(&env, "THR001");
+
+    let stored = client.calculate_sla(&actors.operator, &outage_id, &severity, &mttr);
+    let replayed = client.calculate_sla_view(&outage_id, &severity, &mttr);
+
+    assert_eq!(stored.status, symbol_short!("met"));
+    assert_eq!(stored.payment_type, symbol_short!("rew"));
+    assert_eq!(stored.rating, symbol_short!("good"));
+    assert_eq!(stored.amount, 750);
+
+    assert_eq!(stored.status, replayed.status);
+    assert_eq!(stored.payment_type, replayed.payment_type);
+    assert_eq!(stored.rating, replayed.rating);
+    assert_eq!(stored.amount, replayed.amount);
+    assert_eq!(stored.threshold_minutes, replayed.threshold_minutes);
+}
+
+#[test]
 fn test_backend_parity_reward_tier_cases() {
     let (env, client, actors) = setup();
     let cases = [
@@ -1557,6 +1642,22 @@ fn test_get_contract_metadata_returns_expected_fields() {
 fn test_get_contract_metadata_severities_are_canonical() {
     let (_env, client, _actors) = setup();
     let meta = client.get_contract_metadata();
+    assert_eq!(
+        meta.supported_severities.get(0).unwrap(),
+        symbol_short!("critical")
+    );
+    assert_eq!(
+        meta.supported_severities.get(1).unwrap(),
+        symbol_short!("high")
+    );
+    assert_eq!(
+        meta.supported_severities.get(2).unwrap(),
+        symbol_short!("medium")
+    );
+    assert_eq!(
+        meta.supported_severities.get(3).unwrap(),
+        symbol_short!("low")
+    );
     let expected = [
         symbol_short!("critical"),
         symbol_short!("high"),
@@ -4102,6 +4203,8 @@ fn assert_invariant(
         "rating mismatch mttr={}",
         mttr
     );
+    // Documented allowed difference: recorded_at is 0 for view, ledger timestamp for mutating.
+    assert_eq!(view.recorded_at, 0, "view recorded_at must always be 0");
     assert_eq!(
         view.recorded_at, mutating.recorded_at,
         "recorded_at mismatch mttr={}",

@@ -46,9 +46,26 @@ describe("SC-046 Threshold Edge Cases", () => {
     }
   });
 
+  it("exact-threshold results are deterministic for backend replay", () => {
+    for (const cfg of Object.values(CONFIGS)) {
+      const first = evaluateSla(cfg.threshold, cfg);
+      const second = evaluateSla(cfg.threshold, cfg);
+      expect(first).toBe("met");
+      expect(second).toBe("met");
+      expect(second).toBe(first);
+    }
+  });
+
   it("MTTR one above threshold is violated", () => {
     for (const severity of CANONICAL_SEVERITIES) {
       const cfg = CONFIGS[severity];
+      expect(evaluateSla(cfg.threshold + 1, cfg)).toBe("violated");
+    }
+  });
+
+  it("exact threshold does not drift into violation due to boundary math", () => {
+    for (const cfg of Object.values(CONFIGS)) {
+      expect(evaluateSla(cfg.threshold, cfg)).not.toBe("violated");
       expect(evaluateSla(cfg.threshold + 1, cfg)).toBe("violated");
     }
   });
