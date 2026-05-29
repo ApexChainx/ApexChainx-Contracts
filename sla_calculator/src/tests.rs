@@ -814,7 +814,7 @@ fn test_calculate_sla_view_matches_mutating_and_does_not_mutate() {
         "Mutating function must mutate stats"
     );
 
-    // 6. Ensure results are perfectly identical
+    // 6. Ensure results are perfectly identical, including backend-visible metadata.
     assert_eq!(view_result.status, mut_result.status);
     assert_eq!(view_result.amount, mut_result.amount);
     assert_eq!(view_result.rating, mut_result.rating);
@@ -822,6 +822,7 @@ fn test_calculate_sla_view_matches_mutating_and_does_not_mutate() {
     assert_eq!(view_result.mttr_minutes, mut_result.mttr_minutes);
     assert_eq!(view_result.threshold_minutes, mut_result.threshold_minutes);
     assert_eq!(view_result.outage_id, mut_result.outage_id);
+    assert_eq!(view_result.recorded_at, mut_result.recorded_at);
 }
 // ============================================================
 // #32 – Contract Economic Stress Test Suite
@@ -3406,6 +3407,7 @@ fn test_event_replay_view_function_produces_same_result_as_stored() {
     assert_eq!(stored.payment_type, replayed.payment_type);
     assert_eq!(stored.mttr_minutes, replayed.mttr_minutes);
     assert_eq!(stored.threshold_minutes, replayed.threshold_minutes);
+    assert_eq!(stored.recorded_at, replayed.recorded_at);
 }
 
 #[test]
@@ -4054,7 +4056,7 @@ fn test_storage_growth_regression_mixed_operations() {
 // are explicitly documented and isolated below.
 // ============================================================
 
-/// Helper: call both paths and assert all result fields except `recorded_at` match.
+/// Helper: call both paths and assert full result parity.
 fn assert_invariant(
     client: &SLACalculatorContractClient,
     operator: &soroban_sdk::Address,
@@ -4100,8 +4102,11 @@ fn assert_invariant(
         "rating mismatch mttr={}",
         mttr
     );
-    // Documented allowed difference: recorded_at is 0 for view, ledger timestamp for mutating.
-    assert_eq!(view.recorded_at, 0, "view recorded_at must always be 0");
+    assert_eq!(
+        view.recorded_at, mutating.recorded_at,
+        "recorded_at mismatch mttr={}",
+        mttr
+    );
 }
 
 #[test]

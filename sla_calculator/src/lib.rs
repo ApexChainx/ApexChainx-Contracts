@@ -745,8 +745,15 @@ impl SLACalculatorContract {
         // We bypass pause and operator checks to allow continuous, public verification
         let cfg = Self::load_config(&env, &severity)?;
 
-        // Delegate to pure internal math; recorded_at=0 for view-only calls
-        Ok(Self::compute_result(outage_id, mttr_minutes, &cfg, 0))
+        // Use the current ledger timestamp so the view result matches the mutating
+        // path for the same inputs executed in the same ledger, while still avoiding
+        // any state writes or event emission.
+        Ok(Self::compute_result(
+            outage_id,
+            mttr_minutes,
+            &cfg,
+            env.ledger().timestamp(),
+        ))
     }
 
     // -------------------------------------------------------------------
