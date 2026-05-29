@@ -9,16 +9,19 @@ interface SlaConfig {
 }
 
 // Mirrors contract-side SLA evaluation logic
-function evaluateSla(mttr: number, config: SlaConfig): "met" | "violated" | "invalid" {
+function evaluateSla(
+  mttr: number,
+  config: SlaConfig,
+): "met" | "violated" | "invalid" {
   if (mttr < 0 || config.threshold < 0) return "invalid";
   if (config.threshold === 0) return "invalid"; // zero threshold is rejected by contract
   return mttr <= config.threshold ? "met" : "violated";
 }
 
 const CONFIGS: Record<string, SlaConfig> = {
-  critical: { threshold: 60,  penaltyBps: 500 },
-  high:     { threshold: 240, penaltyBps: 300 },
-  medium:   { threshold: 480, penaltyBps: 100 },
+  critical: { threshold: 60, penaltyBps: 500 },
+  high: { threshold: 240, penaltyBps: 300 },
+  medium: { threshold: 480, penaltyBps: 100 },
 };
 
 describe("SC-046 Threshold Edge Cases", () => {
@@ -40,8 +43,25 @@ describe("SC-046 Threshold Edge Cases", () => {
     }
   });
 
+  it("exact-threshold results are deterministic for backend replay", () => {
+    for (const cfg of Object.values(CONFIGS)) {
+      const first = evaluateSla(cfg.threshold, cfg);
+      const second = evaluateSla(cfg.threshold, cfg);
+      expect(first).toBe("met");
+      expect(second).toBe("met");
+      expect(second).toBe(first);
+    }
+  });
+
   it("MTTR one above threshold is violated", () => {
     for (const cfg of Object.values(CONFIGS)) {
+      expect(evaluateSla(cfg.threshold + 1, cfg)).toBe("violated");
+    }
+  });
+
+  it("exact threshold does not drift into violation due to boundary math", () => {
+    for (const cfg of Object.values(CONFIGS)) {
+      expect(evaluateSla(cfg.threshold, cfg)).not.toBe("violated");
       expect(evaluateSla(cfg.threshold + 1, cfg)).toBe("violated");
     }
   });
