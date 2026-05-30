@@ -760,7 +760,6 @@ impl SLACalculatorContract {
             mttr_minutes,
             &cfg,
             config_version_hash,
-            0,
             env.ledger().timestamp(),
         ))
     }
@@ -794,6 +793,17 @@ impl SLACalculatorContract {
             .instance()
             .get(&HISTORY_KEY)
             .unwrap_or_else(|| Vec::new(&env));
+
+        let mut existing: Option<SLAResult> = None;
+        for i in 0..history.len() {
+            let entry = history.get(i).unwrap();
+            if entry.outage_id == outage_id {
+                existing = Some(entry);
+            }
+        }
+        if let Some(prev) = existing {
+            return Ok(prev);
+        }
 
         history.push_back(result.clone());
 
@@ -850,7 +860,7 @@ impl SLACalculatorContract {
         // Case 1: SLA violated → penalty
         if mttr_minutes > threshold {
             let overtime = (mttr_minutes - threshold) as i128;
-            let penalty = overtime * cfg.penalty_per_minute;
+            let penalty = overtime.saturating_mul(cfg.penalty_per_minute);
 
             SLAResult {
                 outage_id,
@@ -879,7 +889,10 @@ impl SLACalculatorContract {
                 (100u32, symbol_short!("good"))
             };
 
-            let reward = (cfg.reward_base * multiplier as i128) / 100;
+            let reward = cfg
+                .reward_base
+                .saturating_mul(multiplier as i128)
+                .div_euclid(100);
 
             SLAResult {
                 outage_id,
@@ -1108,13 +1121,13 @@ impl SLACalculatorContract {
                 total_penalties: 0,
             });
 
-        stats.total_calculations += 1;
+        stats.total_calculations = stats.total_calculations.saturating_add(1);
 
         if met {
-            stats.total_rewards += reward;
+            stats.total_rewards = stats.total_rewards.saturating_add(reward);
         } else {
-            stats.total_violations += 1;
-            stats.total_penalties += penalty;
+            stats.total_violations = stats.total_violations.saturating_add(1);
+            stats.total_penalties = stats.total_penalties.saturating_add(penalty);
         }
 
         env.storage().instance().set(&STATS_KEY, &stats);
