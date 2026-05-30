@@ -18,6 +18,21 @@ export function assertMigrationGuard(stored: number | null): void {
   if (status === "unsupported") throw new Error(`Unsupported storage version: ${stored}`);
 }
 
+export function assertHistoricalDecodeCompatibility(stored: number): void {
+  const status = classifyVersion(stored);
+  if (status === "older") return; // explicit forward-upgrade decode posture
+  if (status === "current") return;
+  throw new Error(`Historical decode blocked for version: ${stored}`);
+}
+
+export function assertRollbackInvariant(before: number, after: number): void {
+  if (after < before) throw new Error(`Rollback invariant violated: ${before} -> ${after}`);
+}
+
+export function assertCircuitBreakerExecutionHalt(paused: boolean): void {
+  if (paused) throw new Error("Execution halted: contract paused");
+}
+
 // --- guard tests ---
 
 function test(label: string, fn: () => void): void {
@@ -45,3 +60,13 @@ test("version 99 returns unsupported", () => expect(classifyVersion(99), "unsupp
 test("guard throws on uninitialized", () => expectThrows(() => assertMigrationGuard(null), "not initialized"));
 test("guard throws on unsupported", () => expectThrows(() => assertMigrationGuard(99), "Unsupported"));
 test("guard passes on current version", () => assertMigrationGuard(2));
+test("historical decode allows older version", () => assertHistoricalDecodeCompatibility(1));
+test("historical decode allows current version", () => assertHistoricalDecodeCompatibility(2));
+test("historical decode rejects unsupported version", () =>
+  expectThrows(() => assertHistoricalDecodeCompatibility(99), "Historical decode blocked"));
+test("rollback invariant allows monotonic version", () => assertRollbackInvariant(1, 2));
+test("rollback invariant rejects rollback", () =>
+  expectThrows(() => assertRollbackInvariant(2, 1), "Rollback invariant violated"));
+test("circuit breaker allows execution when unpaused", () => assertCircuitBreakerExecutionHalt(false));
+test("circuit breaker halts execution when paused", () =>
+  expectThrows(() => assertCircuitBreakerExecutionHalt(true), "Execution halted"));
