@@ -4951,3 +4951,412 @@ fn test_set_config_rejects_threshold_zero_for_low() {
     let (_env, client, actors) = setup();
     client.set_config(&actors.admin, &symbol_short!("low"), &0, &10, &600);
 }
+
+// ============================================================
+// Issue #254 – Invariant checks: config bounds and payout ceilings
+// ============================================================
+
+#[test]
+fn test_254_threshold_upper_bound_accepted() {
+    // threshold_minutes == 1440 (24 h) is the maximum allowed value.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &10, &600);
+    assert_eq!(client.get_config(&symbol_short!("low")).threshold_minutes, 1440);
+}
+
+#[test]
+#[should_panic]
+fn test_254_threshold_above_upper_bound_rejected() {
+    // threshold_minutes == 1441 must be rejected.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &1441, &10, &600);
+}
+
+#[test]
+#[should_panic]
+fn test_254_threshold_zero_rejected() {
+    // threshold_minutes == 0 must be rejected for all severities.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("critical"), &0, &100, &750);
+}
+
+#[test]
+#[should_panic]
+fn test_254_penalty_zero_rejected() {
+    // penalty_per_minute == 0 must be rejected.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &0, &600);
+}
+
+#[test]
+#[should_panic]
+fn test_254_penalty_above_ceiling_rejected() {
+    // penalty_per_minute > 10000 must be rejected.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10001, &600);
+}
+
+#[test]
+#[should_panic]
+fn test_254_reward_zero_rejected() {
+    // reward_base == 0 must be rejected.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &0);
+}
+
+#[test]
+#[should_panic]
+fn test_254_reward_above_ceiling_rejected() {
+    // reward_base > 100000 must be rejected.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &100001);
+}
+
+#[test]
+fn test_254_valid_boundary_values_accepted() {
+    // Minimum valid values for low severity must be accepted.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &1, &1, &1);
+    let cfg = client.get_config(&symbol_short!("low"));
+    assert_eq!(cfg.threshold_minutes, 1);
+    assert_eq!(cfg.penalty_per_minute, 1);
+    assert_eq!(cfg.reward_base, 1);
+}
+
+#[test]
+fn test_254_payout_ceiling_not_exceeded_on_calculation() {
+    // reward_base at ceiling (100000) must produce a positive reward without overflow.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &100000);
+    let result = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("OUT1"),
+        &symbol_short!("low"),
+        &1, // well within threshold → top-tier reward
+    );
+    assert!(result.amount > 0, "reward must be positive");
+}
+
+#[test]
+fn test_254_invalid_config_does_not_corrupt_existing() {
+    // A rejected set_config call must leave the previous config intact.
+    let (_env, client, actors) = setup();
+    let original = client.get_config(&symbol_short!("critical"));
+    let _ = client.try_set_config(&actors.admin, &symbol_short!("critical"), &0, &100, &750);
+    assert_eq!(
+        client.get_config(&symbol_short!("critical")).threshold_minutes,
+        original.threshold_minutes
+    );
+}
+
+// ============================================================
+// Issue #255 – Invariant checks: history index and sequence integrity
+// ============================================================
+
+#[test]
+fn test_255_history_grows_monotonically() {
+    // Each calculate_sla call must append exactly one entry.
+    let (_env, client, actors) = setup();
+    for i in 1u32..=5 {
+        let h = client.get_history();
+        assert_eq!(h.len(), i - 1, "history length before call {}", i);
+        client.calculate_sla(
+            &actors.operator,
+            &soroban_sdk::Symbol::new(&_env, &format!("O{}", i)),
+            &symbol_short!("high"),
+            &10,
+        );
+        assert_eq!(client.get_history().len(), i, "history length after call {}", i);
+    }
+}
+
+#[test]
+fn test_255_history_order_is_insertion_order() {
+    // Entries must appear in the order they were inserted (oldest first).
+    let (env, client, actors) = setup();
+    let ids = ["A", "B", "C"];
+    for id in ids {
+        client.calculate_sla(
+            &actors.operator,
+            &soroban_sdk::Symbol::new(&env, id),
+            &symbol_short!("high"),
+            &10,
+        );
+    }
+    let history = client.get_history();
+    assert_eq!(history.len(), 3);
+    assert_eq!(history.get(0).unwrap().outage_id, soroban_sdk::Symbol::new(&env, "A"));
+    assert_eq!(history.get(1).unwrap().outage_id, soroban_sdk::Symbol::new(&env, "B"));
+    assert_eq!(history.get(2).unwrap().outage_id, soroban_sdk::Symbol::new(&env, "C"));
+}
+
+#[test]
+fn test_255_duplicate_outage_id_is_idempotent() {
+    // Submitting the same outage_id with identical inputs must not add a second entry.
+    let (_env, client, actors) = setup();
+    client.calculate_sla(&actors.operator, &symbol_short!("DUP"), &symbol_short!("high"), &10);
+    client.calculate_sla(&actors.operator, &symbol_short!("DUP"), &symbol_short!("high"), &10);
+    assert_eq!(client.get_history().len(), 1);
+}
+
+#[test]
+#[should_panic]
+fn test_255_duplicate_outage_id_with_different_mttr_panics() {
+    // Same outage_id but different mttr_minutes must panic (mismatched inputs).
+    let (_env, client, actors) = setup();
+    client.calculate_sla(&actors.operator, &symbol_short!("DUP"), &symbol_short!("high"), &10);
+    client.calculate_sla(&actors.operator, &symbol_short!("DUP"), &symbol_short!("high"), &20);
+}
+
+#[test]
+fn test_255_prune_reduces_history_to_keep_latest() {
+    // After prune_history(keep=3), exactly 3 entries remain (the most recent).
+    let (env, client, actors) = setup();
+    for i in 1u32..=10 {
+        client.calculate_sla(
+            &actors.operator,
+            &soroban_sdk::Symbol::new(&env, &format!("O{}", i)),
+            &symbol_short!("high"),
+            &10,
+        );
+    }
+    client.prune_history(&actors.admin, &3);
+    assert_eq!(client.get_history().len(), 3);
+}
+
+#[test]
+fn test_255_prune_to_zero_clears_history() {
+    let (env, client, actors) = setup();
+    for i in 1u32..=5 {
+        client.calculate_sla(
+            &actors.operator,
+            &soroban_sdk::Symbol::new(&env, &format!("O{}", i)),
+            &symbol_short!("high"),
+            &10,
+        );
+    }
+    client.prune_history(&actors.admin, &0);
+    assert_eq!(client.get_history().len(), 0);
+}
+
+#[test]
+fn test_255_history_page_offset_and_limit() {
+    // get_history_page must return the correct slice.
+    let (env, client, actors) = setup();
+    for i in 1u32..=6 {
+        client.calculate_sla(
+            &actors.operator,
+            &soroban_sdk::Symbol::new(&env, &format!("O{}", i)),
+            &symbol_short!("high"),
+            &10,
+        );
+    }
+    let page = client.get_history_page(&2, &3);
+    assert_eq!(page.len(), 3);
+    assert_eq!(page.get(0).unwrap().outage_id, soroban_sdk::Symbol::new(&env, "O3"));
+}
+
+#[test]
+fn test_255_history_page_beyond_end_returns_empty() {
+    let (_env, client, actors) = setup();
+    client.calculate_sla(&actors.operator, &symbol_short!("O1"), &symbol_short!("high"), &10);
+    let page = client.get_history_page(&100, &10);
+    assert_eq!(page.len(), 0);
+}
+
+// ============================================================
+// Issue #256 – Invariant checks: pause-state write prohibition
+// ============================================================
+
+#[test]
+#[should_panic]
+fn test_256_calculate_sla_blocked_when_paused() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    client.calculate_sla(&actors.operator, &symbol_short!("O1"), &symbol_short!("high"), &10);
+}
+
+#[test]
+fn test_256_calculate_sla_allowed_after_unpause() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    client.unpause(&actors.admin);
+    let result = client.calculate_sla(&actors.operator, &symbol_short!("O1"), &symbol_short!("high"), &10);
+    assert_eq!(result.status, symbol_short!("met"));
+}
+
+#[test]
+fn test_256_set_config_allowed_while_paused() {
+    // Admin config updates must succeed even when the contract is paused.
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
+    assert_eq!(client.get_config(&symbol_short!("low")).threshold_minutes, 120);
+}
+
+#[test]
+fn test_256_history_not_mutated_while_paused() {
+    // History must not grow while the contract is paused.
+    let (env, client, actors) = setup();
+    client.calculate_sla(&actors.operator, &symbol_short!("O1"), &symbol_short!("high"), &10);
+    let len_before = client.get_history().len();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    let _ = client.try_calculate_sla(&actors.operator, &symbol_short!("O2"), &symbol_short!("high"), &10);
+    assert_eq!(client.get_history().len(), len_before, "history must not grow while paused");
+}
+
+#[test]
+fn test_256_stats_not_mutated_while_paused() {
+    // Stats must not change while the contract is paused.
+    let (env, client, actors) = setup();
+    client.calculate_sla(&actors.operator, &symbol_short!("O1"), &symbol_short!("high"), &10);
+    let stats_before = client.get_stats();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    let _ = client.try_calculate_sla(&actors.operator, &symbol_short!("O2"), &symbol_short!("high"), &10);
+    let stats_after = client.get_stats();
+    assert_eq!(stats_before.total_calculations, stats_after.total_calculations);
+}
+
+#[test]
+fn test_256_calculate_sla_view_allowed_while_paused() {
+    // The read-only audit view must remain accessible while paused.
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    let result = client.calculate_sla_view(&symbol_short!("O1"), &symbol_short!("high"), &10);
+    assert_eq!(result.status, symbol_short!("met"));
+}
+
+#[test]
+#[should_panic]
+fn test_256_stranger_cannot_pause() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.stranger, &soroban_sdk::String::from_str(&env, "unauthorized"));
+}
+
+#[test]
+#[should_panic]
+fn test_256_operator_cannot_pause() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.operator, &soroban_sdk::String::from_str(&env, "unauthorized"));
+}
+
+// ============================================================
+// Issue #257 – Canonical serialization parity with backend adapter
+// ============================================================
+
+#[test]
+fn test_257_config_version_hash_is_deterministic() {
+    // Same config must always produce the same hash.
+    let (_env, client, _actors) = setup();
+    let h1 = client.get_config_version_hash();
+    let h2 = client.get_config_version_hash();
+    assert_eq!(h1, h2, "hash must be stable across repeated reads");
+}
+
+#[test]
+fn test_257_config_version_hash_changes_on_config_update() {
+    // Updating any config field must change the hash.
+    let (_env, client, actors) = setup();
+    let h_before = client.get_config_version_hash();
+    client.set_config(&actors.admin, &symbol_short!("low"), &200, &10, &600);
+    let h_after = client.get_config_version_hash();
+    assert_ne!(h_before, h_after, "hash must change after config update");
+}
+
+#[test]
+fn test_257_config_version_hash_stable_after_no_op_read() {
+    // Reading config must not change the hash.
+    let (_env, client, _actors) = setup();
+    let h1 = client.get_config_version_hash();
+    let _ = client.get_config(&symbol_short!("critical"));
+    let h2 = client.get_config_version_hash();
+    assert_eq!(h1, h2);
+}
+
+#[test]
+fn test_257_sla_result_config_version_hash_matches_standalone() {
+    // The config_version_hash embedded in SLAResult must equal get_config_version_hash().
+    let (_env, client, actors) = setup();
+    let result = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("O1"),
+        &symbol_short!("high"),
+        &10,
+    );
+    let standalone_hash = client.get_config_version_hash();
+    assert_eq!(
+        result.config_version_hash, standalone_hash,
+        "embedded hash must match standalone hash"
+    );
+}
+
+#[test]
+fn test_257_calculate_sla_view_hash_matches_standalone() {
+    // calculate_sla_view must embed the same config_version_hash.
+    let (_env, client, _actors) = setup();
+    let view_result = client.calculate_sla_view(&symbol_short!("O1"), &symbol_short!("high"), &10);
+    let standalone_hash = client.get_config_version_hash();
+    assert_eq!(view_result.config_version_hash, standalone_hash);
+}
+
+#[test]
+fn test_257_config_snapshot_entry_order_is_canonical() {
+    // get_config_snapshot must return entries in canonical order: critical, high, medium, low.
+    let (env, client, _actors) = setup();
+    let snapshot = client.get_config_snapshot();
+    let expected = [
+        symbol_short!("critical"),
+        symbol_short!("high"),
+        symbol_short!("medium"),
+        symbol_short!("low"),
+    ];
+    assert_eq!(snapshot.entries.len(), 4);
+    for (i, sev) in expected.iter().enumerate() {
+        assert_eq!(
+            snapshot.entries.get(i as u32).unwrap().severity,
+            *sev,
+            "entry {} must be {:?}",
+            i,
+            sev
+        );
+    }
+}
+
+#[test]
+fn test_257_result_schema_fields_are_stable() {
+    // get_result_schema must return the expected symbol constants.
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert_eq!(schema.status_met, symbol_short!("met"));
+    assert_eq!(schema.status_violated, symbol_short!("viol"));
+    assert_eq!(schema.payment_reward, symbol_short!("rew"));
+    assert_eq!(schema.payment_penalty, symbol_short!("pen"));
+    assert_eq!(schema.rating_exceptional, symbol_short!("top"));
+    assert_eq!(schema.rating_excellent, symbol_short!("excel"));
+    assert_eq!(schema.rating_good, symbol_short!("good"));
+    assert_eq!(schema.rating_poor, symbol_short!("poor"));
+    assert!(schema.includes_config_version_hash);
+}
+
+#[test]
+fn test_257_hash_differs_across_all_four_severities() {
+    // Updating each severity independently must produce a distinct hash.
+    let (_env, client, actors) = setup();
+    let h0 = client.get_config_version_hash();
+
+    client.set_config(&actors.admin, &symbol_short!("critical"), &30, &100, &750);
+    let h1 = client.get_config_version_hash();
+    assert_ne!(h0, h1);
+
+    client.set_config(&actors.admin, &symbol_short!("high"), &60, &50, &750);
+    let h2 = client.get_config_version_hash();
+    assert_ne!(h1, h2);
+
+    client.set_config(&actors.admin, &symbol_short!("medium"), &120, &25, &750);
+    let h3 = client.get_config_version_hash();
+    assert_ne!(h2, h3);
+
+    client.set_config(&actors.admin, &symbol_short!("low"), &240, &10, &600);
+    let h4 = client.get_config_version_hash();
+    assert_ne!(h3, h4);
+}
