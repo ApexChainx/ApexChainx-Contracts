@@ -96,44 +96,65 @@ make test
 
 ## 📝 Development Workflow
 
-### 1. Create a Branch
+### Step 1: Create a Feature Branch
 
-Always create a new branch for your work:
+Always create a new branch for your work. Use a descriptive name:
 
 ```bash
 git checkout -b feature/wallet-integration
-# or
 git checkout -b fix/payment-bug
-# or
 git checkout -b docs/stellar-guide
+git checkout -b test/api-coverage
+git checkout -b refactor/storage-layer
 ```
 
-**Branch naming convention:**
-- `feature/description` - New features
-- `fix/description` - Bug fixes
-- `docs/description` - Documentation
-- `test/description` - Adding tests
-- `refactor/description` - Code refactoring
+#### Branch Naming Convention
 
-### 2. Make Your Changes
+| Prefix | Purpose | Example |
+|--------|---------|---------|
+| `feature/` | New features | `feature/wallet-integration` |
+| `fix/` | Bug fixes | `fix/payment-timeout` |
+| `docs/` | Documentation | `docs/stellar-guide` |
+| `test/` | Test additions | `test/api-coverage` |
+| `refactor/` | Code restructuring | `refactor/storage-layer` |
 
-- Write clean, readable code
-- Follow the project's code style (see below)
+### Step 2: Make Your Changes
+
+- Write clean, readable code following project conventions
 - Add tests for new functionality
 - Update documentation as needed
-- Keep commits focused and atomic
-- Update `CHANGELOG.md` for any interface-affecting changes (added/changed/removed public functions)
+- Keep commits **focused and atomic** — one logical change per commit
+- Update `CHANGELOG.md` for any interface-affecting changes
 
-### 3. Test Your Changes
+### Step 3: Run Tests
 
-**Frontend:**
+#### Smart Contracts
+
+```bash
+# Run full test suite
+cd apexchainx_calculator
+cargo test
+
+# Run with linting
+cargo clippy -- -D warnings
+
+# Check formatting
+cargo fmt -- --check
+
+# Verify no-std compliance
+cargo check --target wasm32-unknown-unknown --lib
+```
+
+#### Frontend
+
 ```bash
 npm run test
 npm run lint
 npm run type-check
 ```
 
-**Backend:**
+#### Backend
+
 ```bash
 pytest
 pytest --cov=app --cov-report=html
@@ -142,15 +163,35 @@ flake8 app/
 mypy app/
 ```
 
-**Smart Contracts:**
-```bash
-cargo test
-cargo clippy -- -D warnings
+### Step 4: Commit Using Conventional Commits
+
+We follow [Conventional Commits](https://www.conventionalcommits.org/) for all
+commit messages.
+
+#### Format
+
+```
+<type>: <short description>
+
+[optional body with additional context]
+
+[optional footer referencing issues]
 ```
 
-### 4. Commit Your Changes
+#### Commit Types
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
+| Type | Usage | Example |
+|------|-------|---------|
+| `feat` | New feature | `feat: add wallet balance display` |
+| `fix` | Bug fix | `fix: resolve payment timeout issue` |
+| `docs` | Documentation | `docs: update stellar integration guide` |
+| `style` | Formatting | `style: reformat config module` |
+| `refactor` | Code restructuring | `refactor: extract storage layer` |
+| `test` | Test additions | `test: add SLA boundary cases` |
+| `chore` | Maintenance | `chore: update dependencies` |
+| `perf` | Performance | `perf: optimize config lookup` |
+
+#### Examples
 
 ```bash
 git commit -m "feat: add wallet balance display"
@@ -159,36 +200,18 @@ git commit -m "docs: update stellar integration guide"
 git commit -m "test: add unit tests for SLA calculator"
 ```
 
-**Commit message format:**
-```
-<type>: <description>
-
-[optional body]
-
-[optional footer]
-```
-
-**Types:**
-- `feat`: New feature
-- `fix`: Bug fix
-- `docs`: Documentation changes
-- `style`: Code style changes (formatting, semicolons, etc.)
-- `refactor`: Code refactoring
-- `test`: Adding or updating tests
-- `chore`: Maintenance tasks
-- `perf`: Performance improvements
-
-### 5. Push and Create Pull Request
+### Step 5: Push and Open a Pull Request
 
 ```bash
 git push origin feature/wallet-integration
 ```
 
 Then open a pull request on GitHub with:
+
 - **Clear title** following conventional commit format
-- **Description** of what you changed and why
+- **Description** explaining what and why
 - **Screenshots** (for UI changes)
-- **Testing notes** (how you tested the changes)
+- **Testing notes** (how you verified the changes)
 - **Related issue**: `Closes #123` or `Fixes #456`
 
 ## 🎨 Code Style Guidelines
