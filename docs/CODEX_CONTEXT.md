@@ -3,6 +3,13 @@
 > **Technical deep-dive:** Architecture, constraints, event conventions, and
 > integration guidance for the ApexChainx Soroban smart contract ecosystem.
 
+<p align="center">
+  <img src="https://img.shields.io/badge/last_updated-2026-green" alt="Last Updated: 2026">
+  <img src="https://img.shields.io/badge/status-maintained-success" alt="Status: Maintained">
+  <img src="https://img.shields.io/badge/audience-developers-blue" alt="Audience: Developers">
+</p>
+> integration guidance for the ApexChainx Soroban smart contract ecosystem.
+
 ## Table of Contents
 
 - [Overview](#overview)
