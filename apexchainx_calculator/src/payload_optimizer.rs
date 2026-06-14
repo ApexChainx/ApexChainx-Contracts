@@ -3,15 +3,40 @@
 //! This module provides optimized event payload encoding that reduces
 //! on-chain storage and gas costs while preserving full semantic meaning.
 //!
-//! Optimization strategies:
-//! 1. Derive `payment_type` from `status` — "viol" → "pen", "met" → "rew"
-//! 2. Use compact field ordering to minimize Soroban encoding overhead
-//! 3. Omit fields that are fully derivable from other event data
+//! # Optimization Strategies
+//!
+//! 1. **Derive `payment_type` from `status`** — "viol" → "pen", "met" → "rew"
+//!    eliminates the need to store payment_type separately in events
+//! 2. **Compact field ordering** — minimises Soroban encoding overhead by
+//!    grouping fields by type (Symbols together, integers together)
+//! 3. **Omit derivable fields** — fields that can be deterministically
+//!    reconstructed from other event data are not stored
+//!
+//! # Validations
+//!
+//! | Function | Purpose |
+//! |----------|---------|
+//! | `derive_payment_type` | Deterministic payment type from SLA status |
+//! | `is_valid_status` | Check if status is "met" or "viol" |
+//! | `is_consistent_payment` | Verify payment_type matches status |
+//! | `is_valid_rating` | Check if rating is "top"/"excel"/"good"/"poor" |
+//!
+//! # Backend Guidance
+//!
+//! Backend consumers can safely derive `payment_type` from `status`:
+//! - `status == "met"` → `payment_type == "rew"` (reward)
+//! - `status == "viol"` → `payment_type == "pen"` (penalty)
+//! This eliminates the need to store both fields in event payloads.
 
 use soroban_sdk::{symbol_short, Symbol};
 
 /// Derive payment type from SLA status.
-/// Returns "pen" for violation, "rew" for met.
+///
+/// Given an SLA status symbol, returns the corresponding payment type:
+/// - `"met"` → `"rew"` (reward)
+/// - `"viol"` → `"pen"` (penalty)
+///
+/// This is a pure function with no side effects.
 pub fn derive_payment_type(status: &Symbol) -> Symbol {
     if *status == symbol_short!("viol") {
         symbol_short!("pen")
