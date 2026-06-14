@@ -1,12 +1,41 @@
+//! SLA history snapshot analysis and normalization utilities.
+//!
+//! This module provides analytical utilities for inspecting the on-chain SLA
+//! calculation history. The `NormalizedSnapshot` struct summarizes the history
+//! in a form that backend consumers can use for dashboards and alerting.
+//!
+//! # Usage
+//!
+//! ```ignore
+//! let history = contract.get_history();
+//! let snapshot = normalize_history(&history);
+//! println!("Total entries: {}", snapshot.count);
+//! println!("Has violations: {}", snapshot.has_violations);
+//! ```
+//!
+//! The normalization is deterministic: identical history inputs always produce
+//! identical snapshot outputs.
+
 use soroban_sdk::{Vec, Symbol};
 use crate::SLAResult;
 
+/// Summarised view of SLA calculation history.
+///
+/// Provides a lightweight aggregate of the full history without exposing
+/// individual record details. Suitable for dashboard telemetry.
 pub struct NormalizedSnapshot {
+    /// Total number of SLA calculation entries in the history.
     pub count: u32,
+    /// Whether any entry has a "viol" (violated) status.
     pub has_violations: bool,
+    /// Whether any entry has a "rew" (reward) payment type.
     pub has_rewards: bool,
 }
 
+/// Scans the full history and produces a `NormalizedSnapshot`.
+///
+/// Iterates through all history entries once, checking each for violation
+/// status and reward payment type. Runtime is O(n) in the history size.
 pub fn normalize_history(history: &Vec<SLAResult>) -> NormalizedSnapshot {
     let mut has_violations = false;
     let mut has_rewards = false;
