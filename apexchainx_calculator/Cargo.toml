@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 description = "Soroban SLA calculator contract for the ApexChainx system"
 license = "MIT"
-repository = "https://github.com/OpSoll/ApexChainx-Contracts"
+repository = "https://github.com/ApexChainx/ApexChainx-Contracts"
 publish = false
 
 [lib]
