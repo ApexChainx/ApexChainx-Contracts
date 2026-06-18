@@ -183,6 +183,7 @@ apexchainx-contracts/
 ├── CONTRIBUTING.md
 ├── CHANGELOG.md
 ├── README.md
+├── SECURITY.md
 ├── TODO.md
 └── pers-store/                    # Persistent storage test fixtures
 ```
@@ -475,6 +476,8 @@ proposal. The active operator is unchanged.
 requiring off-chain state tracking.
 
 ## Security Considerations
+
+Please refer to our [Security Policy](SECURITY.md) for information on supported versions, our disclosure policy, and how to report a vulnerability.
 
 ### Smart Contract Security
 
