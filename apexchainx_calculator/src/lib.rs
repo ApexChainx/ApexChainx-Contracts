@@ -12,6 +12,7 @@ pub struct SLACalculatorContract;
 #[cfg(test)]
 mod tests;
 
+pub mod config_metadata;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
 pub mod event_correlation;
@@ -75,6 +76,10 @@ const MAX_HISTORY_SIZE: u32 = 1000;
 /// Optional configurable retention limit override. (SC-013)
 /// When set, overrides MAX_HISTORY_SIZE for history trimming.
 const RETENTION_LIMIT_KEY: Symbol = symbol_short!("RETLIM");
+
+/// On-chain key storing the ledger sequence of the last config update. Re-exported
+/// here so the storage-key namespace regression test catches any future collisions.
+pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 
 // -----------------------------------------------------------------------
 // Event Constants
@@ -370,6 +375,19 @@ pub struct PauseInfo {
     pub reason: String,
     pub paused_at: u64, // ledger timestamp (seconds)
     pub paused_by: Address,
+}
+
+/// #4 – Metadata about the most recent configuration update.
+///
+/// Wrapping the ledger sequence in a contract type (rather than exposing it
+/// directly as `Option<u32>`) preserves the `Some`/`None` distinction when
+/// the value crosses the Soroban contract client boundary — primitives
+/// wrapped in `Option` are otherwise flattened and lose the null case.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ConfigUpdateInfo {
+    /// Ledger sequence at which the most recent `set_config` succeeded.
+    pub sequence: u32,
 }
 
 /// SC-021 – Storage version and migration posture for off-chain consumers.
@@ -840,6 +858,12 @@ impl SLACalculatorContract {
         );
         env.storage().instance().set(&CONFIG_KEY, &configs);
 
+        // Issue #4 – stamp the ledger sequence of the most recent config
+        // update so backends can detect when their cached configuration is
+        // stale. Called after the storage write so the recorded sequence
+        // always reflects a successful update.
+        config_metadata::record_config_update(&env);
+
         env.events().publish(
             (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
             (threshold_minutes, penalty_per_minute, reward_base),
@@ -858,6 +882,25 @@ impl SLACalculatorContract {
             .instance()
             .get(&CONFIG_KEY)
             .ok_or(SLAError::NotInitialized)
+    }
+
+    /// #4 – Returns metadata about the most recent configuration update,
+    /// or `None` if no `set_config` call has been recorded since
+    /// initialization.
+    ///
+    /// Backend consumers compare `update.sequence` against the ledger
+    /// sequence they observed at their last `get_config_snapshot()` to
+    /// decide whether their cached configuration is stale and needs to be
+    /// re-fetched. This enables cheap cache invalidation without polling the
+    /// full configuration on every health check.
+    ///
+    /// The result is wrapped in `Option<ConfigUpdateInfo>` (rather than
+    /// `Option<u32>`) so the `Some`/`None` distinction survives the
+    /// Soroban contract client boundary.
+    pub fn get_last_config_update(env: Env) -> Result<Option<ConfigUpdateInfo>, SLAError> {
+        Self::check_version(&env)?;
+        Ok(config_metadata::get_last_config_update(&env)
+            .map(|seq| ConfigUpdateInfo { sequence: seq }))
     }
 
     /// Returns a deterministic backend-friendly snapshot of all config values.

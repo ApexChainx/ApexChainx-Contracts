@@ -6131,3 +6131,97 @@ fn test_257_hash_differs_across_all_four_severities() {
     let h4 = client.get_config_version_hash();
     assert_ne!(h3, h4);
 }
+
+// ============================================================
+// Issue #4 – Config update metadata tracking
+// ============================================================
+//
+// These tests cover (1) declaring the existing `config_metadata` module,
+// (2) wiring `record_config_update()` into `set_config()` after the
+// successful storage write, and (3) exposing the recorded ledger sequence
+// through `get_last_config_update()`. Backends use the returned sequence as
+// a cheap cache-invalidation signal: compare it against the ledger sequence
+// observed at the last `get_config_snapshot()` and re-fetch only when it has
+// advanced.
+
+/// Acceptance criterion (a): after `initialize()` but before any
+/// `set_config` call, no update has been recorded – the getter must
+/// return `None`.
+#[test]
+fn test_issue4_get_last_config_update_is_none_after_initialize() {
+    let (_env, client, _actors) = setup();
+    assert_eq!(client.get_last_config_update(), None);
+}
+
+/// Acceptance criterion (b): once `set_config` succeeds, the getter must
+/// return `Some(ConfigUpdateInfo)`.
+#[test]
+fn test_issue4_get_last_config_update_is_some_after_set_config() {
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+    let recorded = client.get_last_config_update();
+    assert!(
+        recorded.is_some(),
+        "get_last_config_update must be Some(_) after set_config"
+    );
+}
+
+/// Acceptance criterion (c): the recorded sequence must equal the
+/// ledger sequence observed at the moment of the `set_config` call.
+#[test]
+fn test_issue4_get_last_config_update_matches_ledger_sequence() {
+    let (env, client, actors) = setup();
+    let sequence_before = env.ledger().sequence();
+
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+
+    let recorded = client.get_last_config_update().unwrap();
+    // Within a single test ledger the sequence never advances on its own,
+    // so any read during this test must match the recorded one.
+    assert_eq!(
+        recorded.sequence, sequence_before,
+        "recorded sequence must match the ledger sequence at update time"
+    );
+    assert_eq!(
+        recorded.sequence,
+        env.ledger().sequence(),
+        "recorded sequence must match the current ledger sequence within the same test ledger"
+    );
+}
+
+/// Acceptance criterion (d): repeated `set_config` calls performed at
+/// strictly increasing ledger sequences must produce strictly increasing
+/// recorded sequences.
+#[test]
+fn test_issue4_repeated_set_config_produces_increasing_sequences() {
+    let env = Env::default();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Advance the ledger to a known starting sequence and trigger an update.
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 100;
+    });
+    client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
+    let first = client.get_last_config_update().unwrap();
+    assert_eq!(first.sequence, 100);
+
+    // Advance further and trigger another update on a different severity.
+    env.ledger().with_mut(|li| {
+        li.sequence_number = 250;
+    });
+    client.set_config(&admin, &symbol_short!("high"), &45, &75, &800);
+    let second = client.get_last_config_update().unwrap();
+    assert_eq!(second.sequence, 250);
+
+    assert!(
+        second.sequence > first.sequence,
+        "Repeated updates must produce an increasing sequence: second={} first={}",
+        second.sequence,
+        first.sequence
+    );
+}

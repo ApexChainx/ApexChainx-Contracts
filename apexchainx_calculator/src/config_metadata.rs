@@ -15,15 +15,13 @@ use soroban_sdk::{symbol_short, Env, Symbol};
 
 /// On-chain key storing the ledger sequence of the last config update.
 /// "LCFGUPD" = Last ConFiG UPDate.
-const LAST_CFG_UPDATE_KEY: Symbol = symbol_short!("LCFGUPD");
+pub const LAST_CFG_UPDATE_KEY: Symbol = symbol_short!("LCFGUPD");
 
 /// Records the current ledger sequence as the time of the latest config update.
 /// Called internally by `set_config` after a successful update.
 pub fn record_config_update(env: &Env) {
     let ledger = env.ledger().sequence();
-    env.storage()
-        .instance()
-        .set(&LAST_CFG_UPDATE_KEY, &ledger);
+    env.storage().instance().set(&LAST_CFG_UPDATE_KEY, &ledger);
 }
 
 /// Returns the ledger sequence of the last configuration update.
@@ -35,19 +33,29 @@ pub fn get_last_config_update(env: &Env) -> Option<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::SLACalculatorContract;
     use soroban_sdk::Env;
 
+    // These tests exercise the helper functions in isolation through the
+    // contract's instance-storage context. Without `env.as_contract(...)`,
+    // Soroban rejects instance-storage access from a bare `Env::default()`.
     #[test]
     fn test_last_config_update_unset() {
         let env = Env::default();
-        assert_eq!(get_last_config_update(&env), None);
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        env.as_contract(&contract_id, || {
+            assert_eq!(get_last_config_update(&env), None);
+        });
     }
 
     #[test]
     fn test_record_and_read_config_update() {
         let env = Env::default();
-        record_config_update(&env);
-        let ledger = get_last_config_update(&env);
-        assert!(ledger.is_some());
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        env.as_contract(&contract_id, || {
+            record_config_update(&env);
+            let ledger = get_last_config_update(&env);
+            assert!(ledger.is_some());
+        });
     }
 }
