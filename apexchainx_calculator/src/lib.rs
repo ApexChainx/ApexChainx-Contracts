@@ -12,11 +12,14 @@ pub struct SLACalculatorContract;
 #[cfg(test)]
 mod tests;
 
+pub mod config_bundle;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
 pub mod event_correlation;
 mod event_schema;
 pub mod version_negotiation;
+
+use crate::config_bundle::ConfigBundle;
 
 // -----------------------------------------------------------------------
 // Storage Keys
@@ -957,6 +960,25 @@ impl SLACalculatorContract {
             rating_poor: symbol_short!("poor"),
             includes_config_version_hash: true,
         })
+    }
+
+    /// #1 – Combined configuration snapshot and result schema for one-shot
+    /// backend bootstrap reads.
+    ///
+    /// Returns the result of composing `get_config_snapshot()` with
+    /// `get_result_schema()` into a single [`ConfigBundle`] so consumers
+    /// can populate their config cache and symbol map in a single RPC.
+    /// `check_version()` is enforced by the two delegated methods, so a
+    /// pre-migration contract transparently reports its migration error.
+    ///
+    /// The auto-generated client unwraps the contract method's
+    /// `Result<Option<T>, SLAError>` envelope, surfacing
+    /// `Option<ConfigBundle>` here. `Some(_)` is returned once the
+    /// contract is initialised and on the current storage version.
+    pub fn get_config_bundle(env: Env) -> Result<Option<ConfigBundle>, SLAError> {
+        let snapshot = Self::get_config_snapshot(env.clone())?;
+        let schema = Self::get_result_schema(env)?;
+        Ok(Some(ConfigBundle { snapshot, schema }))
     }
 
     /// #60 – Returns static contract capabilities for backend introspection.
