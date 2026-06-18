@@ -9,6 +9,9 @@
 
 # ApexChainx Smart Contracts
 
+We follow a contributor code of conduct. See [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+and [`CONTRIBUTING.md`](CONTRIBUTING.md) before contributing.
+
 ## Frequently Asked Questions
 
 ### What is ApexChainx?
