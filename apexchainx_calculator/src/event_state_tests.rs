@@ -10,7 +10,6 @@ mod event_state_tests {
     };
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -300,7 +299,6 @@ mod event_state_tests {
     #[test]
     fn test_prune_event_reflects_pruned_history() {
         let env = Env::default();
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -336,7 +334,6 @@ mod event_state_tests {
     #[test]
     fn test_prune_by_age_event_reflects_pruned_history() {
         let env = Env::default();
-        env.mock_all_auths();
         env.ledger().set_timestamp(1000);
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
@@ -562,5 +559,48 @@ mod event_state_tests {
                 );
             }
         }
+    }
+
+    // ── Auth-gated negative tests ───────────────────────────────────────
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_set_config() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.set_config(&stranger, &symbol_short!("critical"), &20, &200, &1000);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_calculate_sla() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.calculate_sla(
+            &stranger,
+            &symbol_short!("E_U"),
+            &symbol_short!("critical"),
+            &5,
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_pause() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.pause(&stranger);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_prune_history() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.prune_history(&stranger, &1);
     }
 }

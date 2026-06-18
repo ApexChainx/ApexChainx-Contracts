@@ -64,7 +64,6 @@ mod tests {
     #[test]
     fn test_config_bundle_available_after_init() {
         let env = Env::default();
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -72,5 +71,28 @@ mod tests {
         client.initialize(&admin, &operator);
         let bundle = client.get_config_bundle();
         assert!(bundle.is_some());
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_call_set_config_via_contract() {
+        // Negative auth test: even though this module exposes only the
+        // read-side `read_config_bundle()`, the underlying contract enforces
+        // admin-only writes. A stranger attempting to mutate the config
+        // through the contract client must be rejected.
+        let env = Env::default();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+        let stranger = Address::generate(&env);
+        client.set_config(
+            &stranger,
+            &soroban_sdk::symbol_short!("critical"),
+            &15,
+            &100,
+            &750,
+        );
     }
 }

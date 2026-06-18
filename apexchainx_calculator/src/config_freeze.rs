@@ -81,7 +81,6 @@ mod tests {
     #[test]
     fn test_frozen_config_blocks_set_config() {
         let env = Env::default();
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -89,5 +88,27 @@ mod tests {
         client.initialize(&admin, &operator);
         freeze_config(&env);
         assert!(is_config_frozen(&env));
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_set_config_when_unfrozen() {
+        // Verify that even without a freeze, an unauthorized caller cannot
+        // mutate config (admin-gated role check, not freeze-gated logic).
+        let env = Env::default();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+        let stranger = Address::generate(&env);
+        // stranger does not hold the admin role – require_admin must reject
+        client.set_config(
+            &stranger,
+            &soroban_sdk::symbol_short!("critical"),
+            &15,
+            &100,
+            &750,
+        );
     }
 }

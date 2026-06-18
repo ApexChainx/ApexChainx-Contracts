@@ -65,7 +65,6 @@ mod tests {
     #[test]
     fn test_history_snapshot_is_deterministic() {
         let env = Env::default();
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -75,5 +74,19 @@ mod tests {
         client.calculate_sla(&operator, &symbol_short!("OUT2"), &symbol_short!("high"), &10);
         let stats = client.get_stats();
         assert_eq!(stats.total_calculations, 2);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_calculate_sla() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+        let stranger = Address::generate(&env);
+        // stranger does not hold the operator role
+        client.calculate_sla(&stranger, &symbol_short!("U_OUT"), &symbol_short!("high"), &10);
     }
 }

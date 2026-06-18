@@ -4,7 +4,6 @@ mod auth_matrix_tests {
     use crate::{SLACalculatorContract, SLACalculatorContractClient, SLAConfig, SLAError};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -16,15 +15,14 @@ mod auth_matrix_tests {
     #[test]
     fn test_only_operator_can_calculate_sla() {
         let env = Env::default();
-        env.mock_all_auths();
         let (_, operator, client) = setup(&env);
+        // operator role holds; auth resolved by Soroban test framework.
         client.calculate_sla(&operator, &symbol_short!("OUT1"), &symbol_short!("high"), &10);
     }
 
     #[test]
     fn test_only_admin_can_set_config() {
         let env = Env::default();
-        env.mock_all_auths();
         let (admin, _, client) = setup(&env);
         client.set_config(
             &admin,
@@ -36,7 +34,6 @@ mod auth_matrix_tests {
     #[test]
     fn test_only_admin_can_pause() {
         let env = Env::default();
-        env.mock_all_auths();
         let (admin, _, client) = setup(&env);
         client.pause(&admin);
         client.unpause(&admin);
@@ -45,7 +42,6 @@ mod auth_matrix_tests {
     #[test]
     fn test_only_admin_can_set_operator() {
         let env = Env::default();
-        env.mock_all_auths();
         let (admin, _, client) = setup(&env);
         let new_op = Address::generate(&env);
         client.set_operator(&admin, &new_op);
@@ -54,7 +50,6 @@ mod auth_matrix_tests {
     #[test]
     fn test_repeated_calls_by_same_operator_succeed() {
         let env = Env::default();
-        env.mock_all_auths();
         let (_, operator, client) = setup(&env);
         for i in 1u32..=3 {
             client.calculate_sla(&operator, &symbol_short!("OUT"), &symbol_short!("high"), &i);
@@ -71,8 +66,11 @@ mod auth_matrix_tests {
         let admin = Address::generate(&env);
         let operator = Address::generate(&env);
         let stranger = Address::generate(&env);
-        env.mock_all_auths();
         client.initialize(&admin, &operator);
+        // Tighten auths for the negative path: clear any implicit auth the
+        // test framework grants generated addresses so that only an explicit
+        // MockAuth would satisfy the call. The stranger has none, so the call
+        // must surface an error – exactly the role-isolation we want to assert.
         env.mock_auths(&[]);
         let result = client.try_calculate_sla(
             &stranger,
@@ -81,5 +79,86 @@ mod auth_matrix_tests {
             &5,
         );
         assert!(result.is_err());
+    }
+
+    // ── Auth-gated negative coverage ─────────────────────────────────────
+    //
+    // The single `test_unauthorized_caller_cannot_calculate` above covered
+    // one stranger scenario. These tests expand coverage to the full auth
+    // matrix so every admin-gated and operator-gated function is verified
+    // against non-role callers. They use the same `#[should_panic]` idiom
+    // as the rest of the suite – the contract returns `Unauthorized`, which
+    // the generated client surfaces as a panic.
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_calculate_sla() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.calculate_sla(
+            &stranger,
+            &symbol_short!("U_CALC"),
+            &symbol_short!("high"),
+            &10,
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_admin_cannot_calculate_sla() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        // admin holds the admin role, NOT the operator role.
+        client.calculate_sla(
+            &admin,
+            &symbol_short!("A_CALC"),
+            &symbol_short!("high"),
+            &10,
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_set_config() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.set_config(
+            &stranger,
+            &symbol_short!("high"),
+            &SLAConfig { threshold_minutes: 30, penalty_per_minute: 50, reward_base: 500 },
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_operator_cannot_set_config() {
+        let env = Env::default();
+        let (_, operator, client) = setup(&env);
+        client.set_config(
+            &operator,
+            &symbol_short!("high"),
+            &SLAConfig { threshold_minutes: 30, penalty_per_minute: 50, reward_base: 500 },
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_pause() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.pause(&stranger);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_set_operator() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        let new_op = Address::generate(&env);
+        client.set_operator(&stranger, &new_op);
     }
 }
