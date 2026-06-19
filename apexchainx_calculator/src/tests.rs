@@ -5078,7 +5078,6 @@ fn test_error_config_not_found_is_retryable_after_set_config() {
     // (We can't remove a config directly, so we verify the error code via
     // a freshly-registered contract with no configs set.)
     let env = Env::default();
-    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     let admin = soroban_sdk::Address::generate(&env);

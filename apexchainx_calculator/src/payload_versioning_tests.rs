@@ -22,7 +22,6 @@ mod payload_versioning_tests {
     };
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -171,7 +170,6 @@ mod payload_versioning_tests {
     #[test]
     fn test_prune_payload_is_two_u32s() {
         let env = Env::default();
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -258,5 +256,39 @@ mod payload_versioning_tests {
             }
         }
         panic!("sla_calc event not found");
+    }
+
+    // ── Auth-gated negative tests ───────────────────────────────────────
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_set_config() {
+        let env = Env::default();
+        let (_admin, _operator, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.set_config(&stranger, &symbol_short!("critical"), &20, &200, &1000);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_calculate_sla() {
+        let env = Env::default();
+        let (_admin, _operator, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.calculate_sla(
+            &stranger,
+            &symbol_short!("U_PAYV"),
+            &symbol_short!("critical"),
+            &5,
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_pause() {
+        let env = Env::default();
+        let (_admin, _operator, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        client.pause(&stranger);
     }
 }

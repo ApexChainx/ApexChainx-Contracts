@@ -27,7 +27,6 @@ mod pruning_perf_tests {
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
     fn setup_with_history(env: &Env, count: u32) -> (Address, Address, SLACalculatorContractClient) {
-        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -42,6 +41,30 @@ mod pruning_perf_tests {
             );
         }
         (admin, operator, client)
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_prune_history() {
+        let env = Env::default();
+        let (_admin, _operator, client) = setup_with_history(&env, 5);
+        let stranger = Address::generate(&env);
+        // require_admin must reject the stranger
+        client.prune_history(&stranger, &1);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_admin_without_operator_role_cannot_calculate() {
+        // admin holds the admin role but not the operator role
+        let env = Env::default();
+        let (admin, _operator, client) = setup_with_history(&env, 0);
+        client.calculate_sla(
+            &admin,
+            &symbol_short!("PR_ADMIN"),
+            &symbol_short!("high"),
+            &1,
+        );
     }
 
     #[test]
