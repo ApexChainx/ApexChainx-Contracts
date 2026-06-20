@@ -16,8 +16,8 @@
 //! The normalization is deterministic: identical history inputs always produce
 //! identical snapshot outputs.
 
-use soroban_sdk::{symbol_short, Vec};
 use crate::SLAResult;
+use soroban_sdk::{symbol_short, Vec};
 
 /// Summarised view of SLA calculation history.
 ///
@@ -59,8 +59,9 @@ pub fn normalize_history(history: &Vec<SLAResult>) -> NormalizedSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+    use super::normalize_history;
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
     #[test]
     fn test_history_snapshot_is_deterministic() {
@@ -70,10 +71,80 @@ mod tests {
         let admin = Address::generate(&env);
         let operator = Address::generate(&env);
         client.initialize(&admin, &operator);
-        client.calculate_sla(&operator, &symbol_short!("OUT1"), &symbol_short!("high"), &10);
-        client.calculate_sla(&operator, &symbol_short!("OUT2"), &symbol_short!("high"), &10);
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("OUT1"),
+            &symbol_short!("high"),
+            &10,
+        );
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("OUT2"),
+            &symbol_short!("high"),
+            &10,
+        );
         let stats = client.get_stats();
         assert_eq!(stats.total_calculations, 2);
+    }
+
+    #[test]
+    fn test_normalize_history_flags_rewards_and_violations() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("REW1"),
+            &symbol_short!("high"),
+            &10,
+        );
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("VIO1"),
+            &symbol_short!("high"),
+            &31,
+        );
+
+        let history = client.get_history();
+        let snapshot = normalize_history(&history);
+
+        assert_eq!(snapshot.count, 2);
+        assert!(snapshot.has_rewards);
+        assert!(snapshot.has_violations);
+    }
+
+    #[test]
+    fn test_normalize_history_met_entries_have_rewards_without_violations() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("MET1"),
+            &symbol_short!("high"),
+            &10,
+        );
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("MET2"),
+            &symbol_short!("high"),
+            &20,
+        );
+
+        let history = client.get_history();
+        let snapshot = normalize_history(&history);
+
+        assert_eq!(snapshot.count, 2);
+        assert!(snapshot.has_rewards);
+        assert!(!snapshot.has_violations);
     }
 
     #[test]
@@ -87,6 +158,11 @@ mod tests {
         client.initialize(&admin, &operator);
         let stranger = Address::generate(&env);
         // stranger does not hold the operator role
-        client.calculate_sla(&stranger, &symbol_short!("U_OUT"), &symbol_short!("high"), &10);
+        client.calculate_sla(
+            &stranger,
+            &symbol_short!("U_OUT"),
+            &symbol_short!("high"),
+            &10,
+        );
     }
 }
