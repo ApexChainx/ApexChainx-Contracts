@@ -6,7 +6,7 @@ mod event_state_tests {
     };
     use crate::{
         EVENT_CONFIG_UPD, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
-        EVENT_VERSION, SLACalculatorContract, SLACalculatorContractClient, SLAConfig, SLAError,
+        EVENT_VERSION, SLACalculatorContract, SLACalculatorContractClient, SLAConfig,
     };
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {

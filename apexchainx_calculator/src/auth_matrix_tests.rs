@@ -147,7 +147,7 @@ mod auth_matrix_tests {
             &50,
             &500,
         );
-
+    }
     #[test]
     #[should_panic]
     fn test_stranger_cannot_pause() {

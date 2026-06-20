@@ -5991,8 +5991,8 @@ fn test_exclusivity_at_exact_threshold_boundary_is_met() {
     assert!(result.amount > 0);
 }
 
+#[test]
 fn test_257_result_schema_fields_are_stable() {
-    // get_result_schema must return the expected symbol constants.
     let (_env, client, _actors) = setup();
     let schema = client.get_result_schema();
     assert_eq!(schema.status_met, symbol_short!("met"));
