@@ -7,6 +7,7 @@
 #   2. Linting     (clippy)
 #   3. Build       (cargo build)
 #   4. Tests       (cargo test)
+#   5. WASM        (no-std compliance check)
 # =============================================================================
 
 name: CI
@@ -22,8 +23,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Build, Test & Verify
+  client-checks:
+    name: Client Checks
     runs-on: ubuntu-latest
 
     steps:
@@ -32,12 +33,22 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
-      - name: Cache Cargo dependencies
+      - name: Cache Cargo dependencies (native + WASM targets)
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: apexchainx_calculator
+          # Include WASM target in cache key for cross-compilation artifacts
+          key: client-checks-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          # Cache both native and WASM target directories
+          cache-directories: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            apexchainx_calculator/target/
+            apexchainx_calculator/target/wasm32-unknown-unknown/
 
       - name: Check formatting
         run: cargo fmt --manifest-path apexchainx_calculator/Cargo.toml -- --check
@@ -48,5 +59,73 @@ jobs:
       - name: Build
         run: cargo build --manifest-path apexchainx_calculator/Cargo.toml
 
+      - name: WASM no-std compliance check
+        run: cargo check --manifest-path apexchainx_calculator/Cargo.toml --target wasm32-unknown-unknown --lib
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apexchainx_calculator
+          key: e2e-tests-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+
       - name: Run tests
         run: cargo test --manifest-path apexchainx_calculator/Cargo.toml
+
+  provenance-hashes:
+    name: Provenance & Hashes
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo dependencies (WASM-optimized)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apexchainx_calculator
+          # WASM-specific cache key including target in hash
+          key: wasm-build-${{ runner.os }}-wasm32-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('apexchainx_calculator/Cargo.toml') }}
+          # Explicit WASM target directories for cross-compilation cache
+          cache-directories: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            apexchainx_calculator/target/wasm32-unknown-unknown/
+
+      - name: Build WASM for provenance
+        run: cargo build --manifest-path apexchainx_calculator/Cargo.toml --target wasm32-unknown-unknown --release
+
+      - name: Generate provenance hash
+        run: |
+          WASM=apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          if [ -f "$WASM" ]; then
+            sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
+            echo "=== Provenance Hash ==="
+            cat provenance.sha256
+            echo "=== WASM size (bytes) ==="
+            wc -c < "$WASM"
+          else
+            echo "❌ WASM artifact not found at $WASM"
+            exit 1
+          fi
+
+      - name: Upload provenance artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-provenance-hash
+          path: provenance.sha256
+          retention-days: 30
