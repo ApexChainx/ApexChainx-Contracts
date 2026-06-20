@@ -99,7 +99,7 @@
 //! end) are NOT considered breaking and do not require a version bump as long
 //! as old consumers ignore unrecognised trailing fields.
 
-#![expect(dead_code)]
+#![allow(dead_code)]
 
 use soroban_sdk::{symbol_short, Symbol};
 

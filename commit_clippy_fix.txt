@@ -1,0 +1,5 @@
+fix: replace expect attribute with allow for older Rust compatibility
+
+- Change #![expect(dead_code)] to #![allow(dead_code)] in event_schema.rs
+- Ensure compatibility with stable Rust toolchain used in GitHub Actions
+- The expect attribute is newer syntax that may not be supported in all environments
