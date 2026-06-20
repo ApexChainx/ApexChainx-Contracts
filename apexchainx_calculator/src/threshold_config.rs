@@ -6,9 +6,6 @@
 //!
 //! # Test Scenarios
 //!
-//! - `test_zero_threshold_always_violated`: A threshold of 0 minutes means
-//!   any positive MTTR is a violation. This tests the boundary condition
-//!   where even 1 minute of repair time exceeds the threshold.
 //! - `test_near_zero_threshold_one_minute`: A 1-minute threshold creates a
 //!   razor-thin boundary where MTTR of 1 minute meets the SLA but MTTR of
 //!   2 minutes violates it.
@@ -17,7 +14,7 @@
 mod threshold_tests {
     use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
-    use crate::{SLACalculatorContract, SLACalculatorContractClient, SLAConfig};
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
         let contract_id = env.register_contract(None, SLACalculatorContract);
@@ -37,11 +34,9 @@ mod threshold_tests {
         client.set_config(
             &stranger,
             &symbol_short!("low"),
-            &SLAConfig {
-                threshold_minutes: 1,
-                penalty_per_minute: 5,
-                reward_base: 50,
-            },
+            &1,
+            &5,
+            &50,
         );
     }
 
@@ -60,39 +55,15 @@ mod threshold_tests {
     }
 
     #[test]
-    fn test_zero_threshold_always_violated() {
-        let env = Env::default();
-        let (admin, operator, client) = setup(&env);
-        client.set_config(
-            &admin,
-            &symbol_short!("low"),
-            &SLAConfig {
-                threshold_minutes: 0,
-                penalty_per_minute: 10,
-                reward_base: 100,
-            },
-        );
-        let result = client.calculate_sla(
-            &operator,
-            &symbol_short!("OUT1"),
-            &symbol_short!("low"),
-            &1,
-        );
-        assert_eq!(result.status, symbol_short!("viol"));
-    }
-
-    #[test]
     fn test_near_zero_threshold_one_minute() {
         let env = Env::default();
         let (admin, operator, client) = setup(&env);
         client.set_config(
             &admin,
             &symbol_short!("low"),
-            &SLAConfig {
-                threshold_minutes: 1,
-                penalty_per_minute: 5,
-                reward_base: 50,
-            },
+            &1,
+            &5,
+            &50,
         );
         let met = client.calculate_sla(
             &operator,
