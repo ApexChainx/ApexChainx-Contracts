@@ -227,7 +227,9 @@ mod coordination_harness_tests {
 
         // Simulate two successful calls by directly registering compensations
         // (the actual call path would register them via safety.call())
+        let mock_contract = Address::generate(&env);
         safety.compensation_stack.push_back((
+            mock_contract.clone(),
             symbol_short!("lock_fnds"),
             cross_contract_safety::CompensationAction {
                 tag: cross_contract_safety::COMP_UNLOCK_FUNDS,
@@ -235,6 +237,7 @@ mod coordination_harness_tests {
             },
         ));
         safety.compensation_stack.push_back((
+            mock_contract,
             symbol_short!("rel_pay"),
             cross_contract_safety::CompensationAction {
                 tag: cross_contract_safety::COMP_REVERSE_SETTLE,
