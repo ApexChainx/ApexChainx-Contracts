@@ -38,20 +38,26 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apexchainx_calculator
 
       - name: Check formatting
-        run: cargo fmt --manifest-path apexchainx_calculator/Cargo.toml -- --check
+        run: |
+          cd apexchainx_calculator
+          cargo fmt -- --check
 
       - name: Clippy linting
-        run: cargo clippy --manifest-path apexchainx_calculator/Cargo.toml -- -D warnings
+        run: |
+          cd apexchainx_calculator
+          cargo clippy -- -D warnings
 
       - name: Build
-        run: cargo build --manifest-path apexchainx_calculator/Cargo.toml
+        run: |
+          cd apexchainx_calculator
+          cargo build
 
       - name: WASM no-std compliance check
-        run: cargo check --manifest-path apexchainx_calculator/Cargo.toml --target wasm32-unknown-unknown --lib
+        run: |
+          cd apexchainx_calculator
+          cargo check --target wasm32-unknown-unknown --lib
 
   e2e-tests:
     name: E2E Tests
@@ -65,11 +71,11 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apexchainx_calculator
 
       - name: Run tests
-        run: cargo test --manifest-path apexchainx_calculator/Cargo.toml
+        run: |
+          cd apexchainx_calculator
+          cargo test
 
   provenance-hashes:
     name: Provenance & Hashes
@@ -85,11 +91,11 @@ jobs:
 
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apexchainx_calculator
 
       - name: Build WASM for provenance
-        run: cargo build --manifest-path apexchainx_calculator/Cargo.toml --target wasm32-unknown-unknown --release
+        run: |
+          cd apexchainx_calculator
+          cargo build --target wasm32-unknown-unknown --release
 
       - name: Generate provenance hash
         run: |

@@ -1373,13 +1373,22 @@ fn test_repeated_config_updates_across_severities_are_independent() {
 #[cfg(feature = "export-snapshots")]
 mod snapshots {
     use super::*;
+    
+    #[cfg(not(target_arch = "wasm32"))]
     use std::fs;
+    #[cfg(not(target_arch = "wasm32"))]
     use std::path::Path;
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn write_snapshot(name: &str, json: &str) {
         let dir = Path::new("test_snapshots/tests");
         fs::create_dir_all(dir).unwrap();
         fs::write(dir.join(format!("{}.json", name)), json).unwrap();
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn write_snapshot(_name: &str, _json: &str) {
+        // No-op for WASM builds - snapshots not supported
     }
 
     #[test]
