@@ -192,16 +192,12 @@ impl CrossContractSafety {
     /// This should be called after a fatal error to undo all prior
     /// successful cross-contract calls.
     pub fn rollback_all(&mut self, env: &Env) {
-        while let Some((contract_id, _function_name, action)) = self.compensation_stack.pop_back()
-        {
+        while let Some((contract_id, _function_name, action)) = self.compensation_stack.pop_back() {
             // Invoke the compensation function on the original target contract.
             // We ignore the result because there is no further recovery possible
             // during rollback.
-            let _ = env.try_invoke_contract::<Val, Val>(
-                &contract_id,
-                &action.tag,
-                action.args.clone(),
-            );
+            let _ =
+                env.try_invoke_contract::<Val, Val>(&contract_id, &action.tag, action.args.clone());
         }
     }
 
