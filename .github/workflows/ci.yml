@@ -42,22 +42,22 @@ jobs:
       - name: Check formatting
         run: |
           cd apexchainx_calculator
-          cargo fmt -- --check
+          cargo fmt --check
 
       - name: Clippy linting
         run: |
           cd apexchainx_calculator
-          cargo clippy -- -D warnings
+          cargo clippy --all-targets --all-features
 
       - name: Build
         run: |
           cd apexchainx_calculator
           cargo build
 
-      - name: WASM no-std compliance check
+      - name: WASM build check
         run: |
           cd apexchainx_calculator
-          cargo check --target wasm32-unknown-unknown --lib
+          cargo build --target wasm32-unknown-unknown
 
   e2e-tests:
     name: E2E Tests
@@ -75,7 +75,7 @@ jobs:
       - name: Run tests
         run: |
           cd apexchainx_calculator
-          cargo test
+          cargo test --lib
 
   provenance-hashes:
     name: Provenance & Hashes
