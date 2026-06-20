@@ -31,19 +31,9 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: apexchainx_calculator
-          # WASM release-specific cache key with soroban-sdk version and target triple
-          key: wasm-release-${{ runner.os }}-wasm32-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('apexchainx_calculator/Cargo.toml') }}-soroban21-target
-          # Comprehensive WASM target cache including std lib for target
-          cache-directories: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ~/.rustup/toolchains/*/lib/rustlib/wasm32-unknown-unknown/
-            apexchainx_calculator/target/wasm32-unknown-unknown/
-          # Save additional cache paths for WASM target dependencies
+          # Enhanced cache configuration for WASM cross-compilation
+          shared-key: wasm-shared-${{ runner.os }}
           save-if: true
-          # Include shared key for cross-job cache reuse if PR workflow ran first
-          shared-key: wasm-shared-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Build release WASM
         run: |

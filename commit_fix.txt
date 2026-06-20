@@ -1,0 +1,8 @@
+fix: simplify cache configuration to resolve CI workflow failures
+
+- Remove complex custom cache directories that may cause permission issues
+- Use standard Swatinem/rust-cache@v2 configuration for better compatibility
+- Keep enhanced clippy linting with -D warnings for strict validation
+- Maintain WASM target installation and cross-compilation checks
+- Simplify release workflow cache to use shared-key for cross-job reuse
+- Ensure all job names match the required CI check patterns

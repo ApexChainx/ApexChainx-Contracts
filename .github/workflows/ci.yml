@@ -36,25 +36,16 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
-      - name: Cache Cargo dependencies (native + WASM targets)
+      - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: apexchainx_calculator
-          # Include WASM target in cache key for cross-compilation artifacts
-          key: client-checks-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          # Cache both native and WASM target directories
-          cache-directories: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            apexchainx_calculator/target/
-            apexchainx_calculator/target/wasm32-unknown-unknown/
 
       - name: Check formatting
         run: cargo fmt --manifest-path apexchainx_calculator/Cargo.toml -- --check
 
       - name: Clippy linting
-        run: cargo clippy --manifest-path apexchainx_calculator/Cargo.toml
+        run: cargo clippy --manifest-path apexchainx_calculator/Cargo.toml -- -D warnings
 
       - name: Build
         run: cargo build --manifest-path apexchainx_calculator/Cargo.toml
@@ -76,7 +67,6 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: apexchainx_calculator
-          key: e2e-tests-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Run tests
         run: cargo test --manifest-path apexchainx_calculator/Cargo.toml
@@ -93,18 +83,10 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Cargo dependencies (WASM-optimized)
+      - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: apexchainx_calculator
-          # WASM-specific cache key including target in hash
-          key: wasm-build-${{ runner.os }}-wasm32-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('apexchainx_calculator/Cargo.toml') }}
-          # Explicit WASM target directories for cross-compilation cache
-          cache-directories: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            apexchainx_calculator/target/wasm32-unknown-unknown/
 
       - name: Build WASM for provenance
         run: cargo build --manifest-path apexchainx_calculator/Cargo.toml --target wasm32-unknown-unknown --release
