@@ -16,8 +16,8 @@
 //! The normalization is deterministic: identical history inputs always produce
 //! identical snapshot outputs.
 
-use soroban_sdk::{symbol_short, Vec};
 use crate::SLAResult;
+use soroban_sdk::{symbol_short, Vec};
 
 /// Summarised view of SLA calculation history.
 ///
@@ -59,9 +59,9 @@ pub fn normalize_history(history: &Vec<SLAResult>) -> NormalizedSnapshot {
 
 #[cfg(test)]
 mod tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
-    use crate::{SLACalculatorContract, SLACalculatorContractClient};
     use super::normalize_history;
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
     fn setup() -> (Env, SLACalculatorContractClient<'static>, Address, Address) {
         let env = Env::default();
@@ -76,8 +76,18 @@ mod tests {
     #[test]
     fn test_history_snapshot_is_deterministic() {
         let (_env, client, _admin, operator) = setup();
-        client.calculate_sla(&operator, &symbol_short!("OUT1"), &symbol_short!("high"), &10);
-        client.calculate_sla(&operator, &symbol_short!("OUT2"), &symbol_short!("high"), &10);
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("OUT1"),
+            &symbol_short!("high"),
+            &10,
+        );
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("OUT2"),
+            &symbol_short!("high"),
+            &10,
+        );
         let stats = client.get_stats();
         assert_eq!(stats.total_calculations, 2);
     }
@@ -88,7 +98,12 @@ mod tests {
         let (env, client, _admin, _operator) = setup();
         let stranger = Address::generate(&env);
         // stranger does not hold the operator role
-        client.calculate_sla(&stranger, &symbol_short!("U_OUT"), &symbol_short!("high"), &10);
+        client.calculate_sla(
+            &stranger,
+            &symbol_short!("U_OUT"),
+            &symbol_short!("high"),
+            &10,
+        );
     }
 
     /// Empty history: both flags false, count zero.
