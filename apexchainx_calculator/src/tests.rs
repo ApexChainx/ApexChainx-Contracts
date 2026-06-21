@@ -605,6 +605,26 @@ fn test_exact_threshold_mttr_is_always_met_never_violated() {
 }
 
 #[test]
+fn test_threshold_boundary_keeps_equality_met_and_plus_one_violated() {
+    let (_env, client, _actors) = setup();
+
+    let exact =
+        client.calculate_sla_view(&symbol_short!("BND_EX"), &symbol_short!("critical"), &15);
+    let plus_one =
+        client.calculate_sla_view(&symbol_short!("BND_P1"), &symbol_short!("critical"), &16);
+
+    assert_eq!(exact.status, symbol_short!("met"));
+    assert_eq!(exact.payment_type, symbol_short!("rew"));
+    assert_eq!(exact.rating, symbol_short!("good"));
+    assert!(exact.amount > 0);
+
+    assert_eq!(plus_one.status, symbol_short!("viol"));
+    assert_eq!(plus_one.payment_type, symbol_short!("pen"));
+    assert_eq!(plus_one.rating, symbol_short!("poor"));
+    assert!(plus_one.amount < 0);
+}
+
+#[test]
 fn test_exact_threshold_boundary_is_stable_after_config_update() {
     let (_env, client, actors) = setup();
 
