@@ -6304,3 +6304,211 @@ fn test_issue4_repeated_set_config_produces_increasing_sequences() {
         first.sequence
     );
 }
+
+#[test]
+fn test_issue27_mttr_minutes_overflow_surfaces_err() {
+    let (_env, client, actors) = setup();
+    
+    // Configure 'critical' to have a very large threshold (e.g. u32::MAX)
+    // so that any large mttr_minutes is still <= threshold and goes to Case 2.
+    client.set_config(
+        &actors.admin,
+        &symbol_short!("critical"),
+        &u32::MAX,
+        &100,
+        &750,
+    );
+
+    // Call try_calculate_sla with mttr_minutes = u32::MAX (which will overflow mttr_minutes * 100).
+    let result = client.try_calculate_sla(
+        &actors.operator,
+        &symbol_short!("INC_OVER"),
+        &symbol_short!("critical"),
+        &u32::MAX,
+    );
+
+    assert_eq!(result.unwrap_err().unwrap(), SLAError::InputOutOfRange);
+}
+
+#[test]
+fn test_mttr_overflow_exact_boundary() {
+    let (_env, client, actors) = setup();
+    
+    // The overflow boundary is when mttr_minutes * 100 > u32::MAX
+    // u32::MAX = 4_294_967_295, so mttr_minutes > 42_949_672.95
+    // Therefore, mttr_minutes = 42_949_673 is the first value that overflows.
+    
+    // Configure with a threshold larger than the overflow boundary
+    client.set_config(
+        &actors.admin,
+        &symbol_short!("critical"),
+        &u32::MAX,
+        &100,
+        &750,
+    );
+
+    // Test: Value just at overflow boundary (should fail with InputOutOfRange)
+    let overflow_boundary = 42_949_673u32;
+    let result = client.try_calculate_sla(
+        &actors.operator,
+        &symbol_short!("OVER_BND"),
+        &symbol_short!("critical"),
+        &overflow_boundary,
+    );
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        SLAError::InputOutOfRange,
+        "mttr_minutes=42_949_673 must trigger InputOutOfRange"
+    );
+}
+
+#[test]
+fn test_mttr_just_below_overflow_succeeds() {
+    let (_env, client, actors) = setup();
+    
+    // Configure with a threshold larger than the safe value
+    let safe_mttr = 42_949_672u32; // Just below overflow boundary
+    client.set_config(
+        &actors.admin,
+        &symbol_short!("critical"),
+        &u32::MAX,
+        &100,
+        &750,
+    );
+
+    // Test: Value just below overflow boundary (should succeed)
+    let result = client.try_calculate_sla(
+        &actors.operator,
+        &symbol_short!("SAFE_VAL"),
+        &symbol_short!("critical"),
+        &safe_mttr,
+    );
+    
+    // Should succeed and return a valid result
+    assert!(
+        result.is_ok(),
+        "mttr_minutes=42_949_672 must not overflow and should succeed"
+    );
+    
+    let res = result.unwrap();
+    assert_eq!(res.status, symbol_short!("met"));
+    assert_eq!(res.mttr_minutes, safe_mttr);
+}
+
+#[test]
+fn test_mttr_overflow_does_not_pay_inflated_reward() {
+    let (_env, client, actors) = setup();
+    
+    // This is the critical security test: ensure that when overflow occurs,
+    // we do NOT silently wrap to 0 and pay out the top-tier (200%) reward.
+    // The bug was: mttr_minutes * 100 overflows to a small value,
+    // performance_ratio becomes 0, triggers top-tier reward (200%).
+    
+    client.set_config(
+        &actors.admin,
+        &symbol_short!("critical"),
+        &u32::MAX,
+        &100,
+        &750,
+    );
+
+    // Use a value that would overflow: u32::MAX
+    let result = client.try_calculate_sla(
+        &actors.operator,
+        &symbol_short!("EXPLOIT"),
+        &symbol_short!("critical"),
+        &u32::MAX,
+    );
+
+    // Must return error, not an inflated reward
+    assert!(
+        result.is_err(),
+        "Overflow case must return error, not a reward"
+    );
+    assert_eq!(result.unwrap_err().unwrap(), SLAError::InputOutOfRange);
+}
+
+#[test]
+fn test_mttr_overflow_violation_path_unaffected() {
+    let (_env, client, actors) = setup();
+    
+    // The violation path (mttr > threshold) uses i128 arithmetic and should
+    // handle large values correctly without overflow. Verify this.
+    
+    // Use default critical config: threshold = 15 minutes
+    // mttr_minutes = u32::MAX >> threshold, so it goes down violation path
+    let result = client.try_calculate_sla(
+        &actors.operator,
+        &symbol_short!("VIOL_BIG"),
+        &symbol_short!("critical"),
+        &u32::MAX,
+    );
+
+    // Should succeed with a penalty (violation path uses i128)
+    assert!(
+        result.is_ok(),
+        "Large mttr in violation path should not overflow"
+    );
+    
+    let res = result.unwrap();
+    assert_eq!(res.status, symbol_short!("viol"));
+    assert_eq!(res.payment_type, symbol_short!("pen"));
+    assert!(res.amount < 0, "Violation must result in negative amount");
+}
+
+#[test]
+fn test_mttr_large_value_below_threshold_triggers_overflow() {
+    let (env, client, actors) = setup();
+    
+    // Edge case: very large mttr that is still <= threshold should trigger
+    // overflow check in the reward calculation path.
+    
+    let large_mttr = 100_000_000u32; // 100 million minutes
+    client.set_config(
+        &actors.admin,
+        &symbol_short!("low"),
+        &large_mttr, // Set threshold equal to mttr
+        &10,
+        &600,
+    );
+
+    // This mttr * 100 will overflow u32
+    let result = client.try_calculate_sla(
+        &actors.operator,
+        &Symbol::new(&env, "LARGE_EQ"),
+        &symbol_short!("low"),
+        &large_mttr,
+    );
+
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        SLAError::InputOutOfRange,
+        "Large mttr equal to threshold must trigger overflow check"
+    );
+}
+
+#[test]
+fn test_calculate_sla_view_also_detects_overflow() {
+    let (_env, client, _actors) = setup();
+    
+    // Ensure the view function (non-mutating) also properly detects overflow
+    client.set_config(
+        &_actors.admin,
+        &symbol_short!("critical"),
+        &u32::MAX,
+        &100,
+        &750,
+    );
+
+    let result = client.try_calculate_sla_view(
+        &symbol_short!("VIEW_OVR"),
+        &symbol_short!("critical"),
+        &u32::MAX,
+    );
+
+    assert_eq!(
+        result.unwrap_err().unwrap(),
+        SLAError::InputOutOfRange,
+        "calculate_sla_view must also detect overflow"
+    );
+}
