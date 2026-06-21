@@ -17,7 +17,28 @@ pub mod config_metadata;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
 pub mod event_correlation;
-mod event_schema;
+pub mod event_schema;
+
+// Re-export canonical event schema constants so callers can rely on a single source of truth.
+pub use crate::event_schema::{
+    EVENT_VERSION,
+    EVENT_SLA_CALC,
+    EVENT_SETTLE_INTENT,
+    EVENT_CONFIG_UPD,
+    EVENT_PAUSED,
+    EVENT_UNPAUSED,
+    EVENT_OP_SET,
+    EVENT_PRUNED,
+    EVENT_PRUNED_AGE,
+    EVENT_ADMIN_PROP,
+    EVENT_ADMIN_ACC,
+    EVENT_ADMIN_CAN,
+    EVENT_ADMIN_REN,
+    EVENT_OP_PROP,
+    EVENT_OP_ACC,
+    EVENT_OP_CAN,
+};
+
 pub mod version_negotiation;
 
 use crate::config_bundle::ConfigBundle;
@@ -151,53 +172,8 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 //   context: severity Symbol
 // -----------------------------------------------------------------------
 
-/// Emitted on successful SLA calculation. Primary event for backend consumers.
-const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
+// Event constants are defined canonically in `event_schema.rs` and re-exported above.
 
-/// Emitted alongside sla_calc for settlement intent reconciliation.
-const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
-
-/// Emitted when configuration is updated via set_config.
-const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
-
-/// Emitted when the contract is paused by admin. (#27)
-const EVENT_PAUSED: Symbol = symbol_short!("paused");
-
-/// Emitted when the contract is unpaused by admin. (#27)
-const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
-
-/// Emitted when the operator address is changed. (#28)
-const EVENT_OP_SET: Symbol = symbol_short!("op_set");
-
-/// Emitted after a prune_history call removes entries.
-const EVENT_PRUNED: Symbol = symbol_short!("pruned");
-
-/// Emitted after a prune_history_by_age call removes entries. (SC-063)
-const EVENT_PRUNED_AGE: Symbol = symbol_short!("pruned_a");
-
-/// Emitted when a new admin is proposed. (#63)
-const EVENT_ADMIN_PROP: Symbol = symbol_short!("adm_prop");
-
-/// Emitted when a pending admin proposal is accepted. (#63)
-const EVENT_ADMIN_ACC: Symbol = symbol_short!("adm_acc");
-
-/// Emitted when a pending admin proposal is cancelled. (SC-024)
-const EVENT_ADMIN_CAN: Symbol = symbol_short!("adm_can");
-
-/// Emitted when the admin permanently renounces their role. (#65)
-const EVENT_ADMIN_REN: Symbol = symbol_short!("adm_ren");
-
-/// Emitted when a new operator is proposed. (#64)
-const EVENT_OP_PROP: Symbol = symbol_short!("op_prop");
-
-/// Emitted when a pending operator proposal is accepted. (#64)
-const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
-
-/// Emitted when a pending operator proposal is cancelled. (SC-024)
-const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
-
-/// Canonical event version symbol used by all events.
-const EVENT_VERSION: Symbol = symbol_short!("v1");
 
 // -----------------------------------------------------------------------
 // Error Codes
