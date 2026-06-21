@@ -17,7 +17,7 @@
 mod threshold_tests {
     use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
-    use crate::{SLACalculatorContract, SLACalculatorContractClient, SLAConfig};
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
         let contract_id = env.register_contract(None, SLACalculatorContract);
@@ -37,11 +37,9 @@ mod threshold_tests {
         client.set_config(
             &stranger,
             &symbol_short!("low"),
-            &SLAConfig {
-                threshold_minutes: 1,
-                penalty_per_minute: 5,
-                reward_base: 50,
-            },
+            &1,
+            &5,
+            &50,
         );
     }
 
@@ -66,11 +64,9 @@ mod threshold_tests {
         client.set_config(
             &admin,
             &symbol_short!("low"),
-            &SLAConfig {
-                threshold_minutes: 0,
-                penalty_per_minute: 10,
-                reward_base: 100,
-            },
+            &0,
+            &10,
+            &100,
         );
         let result = client.calculate_sla(
             &operator,
@@ -88,11 +84,9 @@ mod threshold_tests {
         client.set_config(
             &admin,
             &symbol_short!("low"),
-            &SLAConfig {
-                threshold_minutes: 1,
-                penalty_per_minute: 5,
-                reward_base: 50,
-            },
+            &1,
+            &5,
+            &50,
         );
         let met = client.calculate_sla(
             &operator,
