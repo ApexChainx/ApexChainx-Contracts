@@ -247,6 +247,8 @@ pub enum SLAError {
     InvalidPenaltyAmount = 14,
     /// Computed reward amount is invalid (e.g., zero or negative). (SC-W5-046)
     InvalidRewardAmount = 15,
+    /// mttr_minutes * 100 overflowed u32 limits.
+    InputOutOfRange = 16,
 }
 
 // -----------------------------------------------------------------------
@@ -952,7 +954,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 15] = [
+        let entries: [(u32, &str, &str); 16] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -972,6 +974,7 @@ impl SLACalculatorContract {
             (13, "DuplicateOutageInput", "Duplicate outage input"),
             (14, "InvalidPenaltyAmount", "Invalid penalty amount"),
             (15, "InvalidRewardAmount", "Invalid reward amount"),
+            (16, "InputOutOfRange", "Input value out of range"),
         ];
 
         for (code, label, description) in entries {
@@ -1218,7 +1221,11 @@ impl SLACalculatorContract {
             })
         } else {
             // Case 2: SLA met → reward
-            let performance_ratio = (mttr_minutes * 100).checked_div(threshold).unwrap_or(0);
+            let performance_ratio = mttr_minutes
+                .checked_mul(100)
+                .ok_or(SLAError::InputOutOfRange)?
+                .checked_div(threshold)
+                .unwrap_or(0);
 
             let (multiplier, rating) = if performance_ratio < 50 {
                 (200u32, symbol_short!("top"))
