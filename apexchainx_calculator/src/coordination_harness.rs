@@ -26,13 +26,11 @@ mod coordination_harness_tests {
     use soroban_sdk::testutils::Address as _;
     use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
-    use crate::cross_contract_safety::{
-        self, CrossContractCallStatus, CrossContractSafety, SafeCallResult,
-    };
+    use crate::cross_contract_safety::{self, CrossContractCallStatus, CrossContractSafety};
     use crate::event_correlation;
     use crate::version_negotiation::{
-        self, build_negotiation_info, negotiate_contract_versions, NegotiationOutcome,
-        VersionMismatchDetail, VersionNegotiationInfo,
+        build_negotiation_info, negotiate_contract_versions, NegotiationOutcome,
+        VersionNegotiationInfo,
     };
 
     // -----------------------------------------------------------------------
@@ -282,7 +280,7 @@ mod coordination_harness_tests {
         assert_ne!(corr_id, 0, "Step 2: Correlation ID must be non-zero");
 
         // Step 3: Prepare safety tracker for calls
-        let mut safety = CrossContractSafety::new(&env);
+        let safety = CrossContractSafety::new(&env);
         assert!(!safety.has_pending(), "Step 3: Safety tracker starts empty");
 
         // Step 4: Verify correlation topics propagate

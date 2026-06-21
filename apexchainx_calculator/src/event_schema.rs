@@ -132,7 +132,6 @@ pub fn current_event_version() -> Symbol {
 mod tests {
     use super::*;
     use alloc::format;
-    use soroban_sdk::Env;
 
     #[test]
     fn test_event_version_is_stable() {

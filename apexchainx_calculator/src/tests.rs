@@ -129,7 +129,7 @@ fn test_result_schema_is_explicit_and_stable() {
     assert_eq!(schema.rating_excellent, symbol_short!("excel"));
     assert_eq!(schema.rating_good, symbol_short!("good"));
     assert_eq!(schema.rating_poor, symbol_short!("poor"));
-    assert_eq!(schema.includes_config_version_hash, true);
+    assert!(schema.includes_config_version_hash);
 }
 
 #[test]
@@ -374,7 +374,7 @@ fn test_old_operator_locked_out_after_rotation() {
 #[test]
 fn test_contract_starts_unpaused() {
     let (_env, client, _actors) = setup();
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
@@ -382,10 +382,10 @@ fn test_admin_can_pause_and_unpause() {
     let (_env, client, actors) = setup();
 
     client.pause(&actors.admin, &soroban_sdk::String::from_str(&_env, "test"));
-    assert_eq!(client.is_paused(), true);
+    assert!(client.is_paused());
 
     client.unpause(&actors.admin);
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
@@ -1728,9 +1728,9 @@ fn test_backend_smoke_violation_path() {
 #[test]
 #[should_panic]
 fn test_admin_gated_call_fails_after_renounce() {
-    let (env, client, actors) = setup();
+    let (_env, client, actors) = setup();
     client.renounce_admin(&actors.admin);
-    // set_config must now panic – no admin exists
+
     client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
 }
 
@@ -3726,7 +3726,7 @@ fn test_renounce_while_paused_succeeds() {
         &actors.admin,
         &soroban_sdk::String::from_str(&env, "maintenance"),
     );
-    assert_eq!(client.is_paused(), true);
+    assert!(client.is_paused());
 
     // Renounce must succeed regardless of pause state
     client.renounce_admin(&actors.admin);
@@ -3874,12 +3874,12 @@ fn test_repeated_pause_unpause_cycles_is_paused_state_consistent() {
     let (env, client, actors) = setup();
 
     for _ in 0..5u32 {
-        assert_eq!(client.is_paused(), false);
+        assert!(!client.is_paused());
         client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "cycle"));
-        assert_eq!(client.is_paused(), true);
+        assert!(client.is_paused());
         client.unpause(&actors.admin);
     }
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
@@ -3991,7 +3991,7 @@ fn test_storage_growth_history_grows_linearly_then_caps() {
 
     // Set a small cap and verify it holds
     client.set_retention_limit(&admin, &10);
-    let oid = Symbol::new(&env, &alloc::format!("GRW_last"));
+    let oid = Symbol::new(&env, "GRW_last");
     client.calculate_sla(&op, &oid, &symbol_short!("low"), &10);
     assert_eq!(
         client.get_history().len(),
@@ -4387,8 +4387,8 @@ fn test_invariance_boundary_mttr_zero() {
     .enumerate()
     {
         let oid = Symbol::new(&_env, &alloc::format!("Z_{}", idx));
-        let view = client.calculate_sla_view(&oid, &sev, &0);
-        let mutating = client.calculate_sla(&actors.operator, &oid, &sev, &0);
+        let view = client.calculate_sla_view(&oid, sev, &0);
+        let mutating = client.calculate_sla(&actors.operator, &oid, sev, &0);
         assert_eq!(view.status, symbol_short!("met"));
         assert_eq!(view.status, mutating.status);
         assert_eq!(view.amount, mutating.amount);
@@ -4927,7 +4927,7 @@ fn test_error_invalid_reward_is_terminal() {
 
 #[test]
 fn test_error_invalid_severity_is_terminal() {
-    let (env, client, actors) = setup();
+    let (_env, client, actors) = setup();
     let result = client.try_set_config(&actors.admin, &symbol_short!("bogus"), &30, &50, &500);
     assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidSeverity);
 }
@@ -5119,11 +5119,11 @@ fn test_failed_set_retention_limit_leaves_limit_unchanged() {
 #[test]
 fn test_failed_pause_unauthorized_leaves_pause_state_unchanged() {
     let (_env, client, actors) = setup();
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 
     let _ = client.try_pause(&actors.stranger, &soroban_sdk::String::from_str(&_env, "x"));
 
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 // ============================================================
@@ -5898,8 +5898,7 @@ fn test_257_calculate_sla_view_hash_matches_standalone() {
 
 #[test]
 fn test_257_config_snapshot_entry_order_is_canonical() {
-    // get_config_snapshot must return entries in canonical order: critical, high, medium, low.
-    let (env, client, _actors) = setup();
+    let (_env, client, _actors) = setup();
     let snapshot = client.get_config_snapshot();
     let expected = [
         symbol_short!("critical"),
