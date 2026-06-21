@@ -96,7 +96,7 @@ jobs:
 
       - name: Generate hash
         run: |
-          WASM=apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           if [ -f "$WASM" ]; then
             sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
             echo "Hash generated successfully"
