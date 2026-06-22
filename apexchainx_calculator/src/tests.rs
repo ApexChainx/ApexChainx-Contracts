@@ -1919,7 +1919,7 @@ fn test_pause_stores_reason_and_timestamp() {
 }
 
 #[test]
-#[should_panic(expected = "HostError")]
+#[should_panic(expected = "#16")]
 fn test_pause_rejects_long_reason() {
     let (env, client, actors) = setup();
     // 257-byte reason exceeds MAX_REASON_LEN (256)
