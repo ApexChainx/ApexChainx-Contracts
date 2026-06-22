@@ -112,5 +112,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pr-provenance-hash
-          path: apexchainx_calculator/provenance.sha256
+          path: provenance.sha256
           retention-days: 30
