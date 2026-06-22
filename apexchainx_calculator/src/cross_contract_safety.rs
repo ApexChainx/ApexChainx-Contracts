@@ -20,16 +20,23 @@
 //!
 //! ```ignore
 //! let mut safety = CrossContractSafety::new(&env);
-//! safety.call(contract_id, "lock_funds", args, || {
-//!     // compensation: unlock the funds
-//! });
-//! safety.call(contract_id, "release_payment", args, || {
-//!     // compensation: reverse the release
-//! });
-//! let result = safety.finalize()?; // rolls back on error
+//! safety.call(&env, &contract_id, &lock_funds_fn, args, unlock_tag, unlock_args);
+//! safety.call(&env, &contract_id, &release_fn, args, release_tag, release_args);
+//! safety.finalize(&env); // happy path – clear the compensation stack
+//! ```
+//!
+//! On a fatal error, call `rollback_all()` to invoke all registered
+//! compensations in reverse order:
+//!
+//! ```ignore
+//! if let Err(result) = safety.call(&env, &contract_id, &fn_name, args, tag, comp_args) {
+//!     safety.rollback_all(&env);
+//!     return Err(result);
+//! }
+//! safety.finalize(&env);
 //! ```
 
-use soroban_sdk::{contracttype, Env, Symbol, Val, Vec};
+use soroban_sdk::{contracttype, Address, Env, Symbol, Val, Vec};
 
 /// Status of a cross-contract call.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -116,7 +123,8 @@ pub fn requires_rollback(status: CrossContractCallStatus) -> bool {
 /// are compensated in reverse order.
 pub struct CrossContractSafety {
     /// Stack of compensation actions registered for each successful call.
-    pub(crate) compensation_stack: Vec<(Symbol, CompensationAction)>,
+    /// Each entry stores (contract_id, function_name, compensation_action).
+    pub(crate) compensation_stack: Vec<(Address, Symbol, CompensationAction)>,
 }
 
 impl CrossContractSafety {
@@ -132,7 +140,8 @@ impl CrossContractSafety {
     ///
     /// Returns `Ok(SafeCallResult)` on success or recoverable errors, and
     /// `Err(result)` on fatal errors.  When `Err` is returned the caller
-    /// should call `rollback_all()` to unwind prior calls.
+    /// should call [`rollback_all`](Self::rollback_all) to unwind prior
+    /// calls.
     pub fn call(
         &mut self,
         env: &Env,
@@ -148,6 +157,7 @@ impl CrossContractSafety {
             CrossContractCallStatus::Success | CrossContractCallStatus::RecoverableError => {
                 // Register compensation so we can undo this call later if needed
                 self.compensation_stack.push_back((
+                    contract_id.clone(),
                     function_name.clone(),
                     CompensationAction {
                         tag: compensation_tag,
@@ -175,6 +185,29 @@ impl CrossContractSafety {
     pub fn has_pending(&self) -> bool {
         !self.compensation_stack.is_empty()
     }
+
+    /// Walk the compensation stack in reverse order and invoke each
+    /// registered compensation action on its target contract.
+    ///
+    /// This should be called after a fatal error to undo all prior
+    /// successful cross-contract calls.
+    pub fn rollback_all(&mut self, env: &Env) {
+        while let Some((contract_id, _function_name, action)) = self.compensation_stack.pop_back() {
+            // Invoke the compensation function on the original target contract.
+            // We ignore the result because there is no further recovery possible
+            // during rollback.
+            let _ =
+                env.try_invoke_contract::<Val, Val>(&contract_id, &action.tag, action.args.clone());
+        }
+    }
+
+    /// Confirm the happy path and clear all registered compensations.
+    ///
+    /// Call this after all cross-contract calls have succeeded to signal
+    /// that no rollback is needed.
+    pub fn finalize(&mut self, env: &Env) {
+        self.compensation_stack = Vec::new(env);
+    }
 }
 
 // -----------------------------------------------------------------------
@@ -195,7 +228,7 @@ pub const FN_CANCEL_SETTLEMENT: Symbol = soroban_sdk::symbol_short!("can_setl");
 mod tests {
     use super::*;
     use soroban_sdk::testutils::Address as _;
-    use soroban_sdk::{symbol_short, Address, Env};
+    use soroban_sdk::{symbol_short, Address, Env, Vec};
 
     #[test]
     fn test_safe_invoke_unknown_contract_returns_fatal_error() {
@@ -228,9 +261,11 @@ mod tests {
     fn test_safety_tracker_registers_compensation_on_success() {
         let env = Env::default();
         let mut safety = CrossContractSafety::new(&env);
+        let mock_contract = Address::generate(&env);
         // Even though the call will fail (unknown address), we test
         // the registration path via a direct push
         safety.compensation_stack.push_back((
+            mock_contract.clone(),
             FN_LOCK_FUNDS,
             CompensationAction {
                 tag: COMP_UNLOCK_FUNDS,
@@ -296,6 +331,74 @@ mod tests {
                 assert_ne!(fns[i], fns[j]);
             }
         }
+    }
+
+    #[test]
+    fn test_rollback_all_clears_stack() {
+        let env = Env::default();
+        let mut safety = CrossContractSafety::new(&env);
+        let mock_contract = Address::generate(&env);
+
+        safety.compensation_stack.push_back((
+            mock_contract.clone(),
+            FN_LOCK_FUNDS,
+            CompensationAction {
+                tag: COMP_UNLOCK_FUNDS,
+                args: Vec::new(&env),
+            },
+        ));
+        safety.compensation_stack.push_back((
+            mock_contract,
+            FN_RELEASE_PAYMENT,
+            CompensationAction {
+                tag: COMP_REVERSE_SETTLE,
+                args: Vec::new(&env),
+            },
+        ));
+        assert_eq!(safety.depth(), 2);
+
+        safety.rollback_all(&env);
+        assert_eq!(safety.depth(), 0);
+        assert!(!safety.has_pending());
+    }
+
+    #[test]
+    fn test_rollback_all_empty_stack_is_noop() {
+        let env = Env::default();
+        let mut safety = CrossContractSafety::new(&env);
+        safety.rollback_all(&env);
+        assert_eq!(safety.depth(), 0);
+        assert!(!safety.has_pending());
+    }
+
+    #[test]
+    fn test_finalize_clears_stack() {
+        let env = Env::default();
+        let mut safety = CrossContractSafety::new(&env);
+        let mock_contract = Address::generate(&env);
+
+        safety.compensation_stack.push_back((
+            mock_contract,
+            FN_LOCK_FUNDS,
+            CompensationAction {
+                tag: COMP_UNLOCK_FUNDS,
+                args: Vec::new(&env),
+            },
+        ));
+        assert_eq!(safety.depth(), 1);
+
+        safety.finalize(&env);
+        assert_eq!(safety.depth(), 0);
+        assert!(!safety.has_pending());
+    }
+
+    #[test]
+    fn test_finalize_empty_stack_is_noop() {
+        let env = Env::default();
+        let mut safety = CrossContractSafety::new(&env);
+        safety.finalize(&env);
+        assert_eq!(safety.depth(), 0);
+        assert!(!safety.has_pending());
     }
 
     #[test]

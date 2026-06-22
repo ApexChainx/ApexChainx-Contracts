@@ -3,6 +3,9 @@
  * Documents and validates contract policy for boundary MTTR inputs.
  */
 
+import { describe, it, expect } from '@jest/globals';
+
+
 interface SlaConfig {
   threshold: number; // minutes
   penaltyBps: number;
@@ -18,13 +21,16 @@ function evaluateSla(
   return mttr <= config.threshold ? "met" : "violated";
 }
 
-const CONFIGS: Record<string, SlaConfig> = {
+type Severity = "critical" | "high" | "medium";
+
+const CANONICAL_SEVERITIES = ["critical", "high", "medium"] as const;
+
+const CONFIGS: Record<Severity, SlaConfig> = {
   critical: { threshold: 60, penaltyBps: 500 },
   high: { threshold: 240, penaltyBps: 300 },
   medium: { threshold: 480, penaltyBps: 100 },
 };
-
-const CANONICAL_SEVERITIES = ["critical", "high", "medium"] as const;
+ 
 
 describe("SC-046 Threshold Edge Cases", () => {
   it("zero MTTR always meets any positive threshold", () => {
@@ -57,10 +63,11 @@ describe("SC-046 Threshold Edge Cases", () => {
   });
 
   it("MTTR one above threshold is violated", () => {
-    for (const severity of CANONICAL_SEVERITIES) {
-      const cfg = CONFIGS[severity];
-      expect(evaluateSla(cfg.threshold + 1, cfg)).toBe("violated");
-    }
+      for (const severity of CANONICAL_SEVERITIES) {
+        const cfg = CONFIGS[severity];
+        expect(evaluateSla(cfg.threshold + 1, cfg)).toBe("violated");
+      }
+
   });
 
   it("exact threshold does not drift into violation due to boundary math", () => {
@@ -76,7 +83,7 @@ describe("SC-046 Threshold Edge Cases", () => {
   });
 
   it("negative MTTR is rejected as invalid", () => {
-    expect(evaluateSla(-1, CONFIGS.critical)).toBe("invalid");
+    expect(evaluateSla(-1, CONFIGS['critical'])).toBe("invalid");
   });
 
   it("uses a documented canonical severity order for backend fixtures", () => {
@@ -86,6 +93,6 @@ describe("SC-046 Threshold Edge Cases", () => {
 
   it("near-zero MTTR (0.001) treated as zero — rounds to met", () => {
     const nearZero = Math.floor(0.001); // contract uses integer minutes
-    expect(evaluateSla(nearZero, CONFIGS.critical)).toBe("met");
+    expect(evaluateSla(nearZero, CONFIGS['critical'])).toBe("met");
   });
 });

@@ -605,6 +605,26 @@ fn test_exact_threshold_mttr_is_always_met_never_violated() {
 }
 
 #[test]
+fn test_threshold_boundary_keeps_equality_met_and_plus_one_violated() {
+    let (_env, client, _actors) = setup();
+
+    let exact =
+        client.calculate_sla_view(&symbol_short!("BND_EX"), &symbol_short!("critical"), &15);
+    let plus_one =
+        client.calculate_sla_view(&symbol_short!("BND_P1"), &symbol_short!("critical"), &16);
+
+    assert_eq!(exact.status, symbol_short!("met"));
+    assert_eq!(exact.payment_type, symbol_short!("rew"));
+    assert_eq!(exact.rating, symbol_short!("good"));
+    assert!(exact.amount > 0);
+
+    assert_eq!(plus_one.status, symbol_short!("viol"));
+    assert_eq!(plus_one.payment_type, symbol_short!("pen"));
+    assert_eq!(plus_one.rating, symbol_short!("poor"));
+    assert!(plus_one.amount < 0);
+}
+
+#[test]
 fn test_exact_threshold_boundary_is_stable_after_config_update() {
     let (_env, client, actors) = setup();
 
@@ -5631,6 +5651,86 @@ fn test_255_duplicate_outage_id_with_different_mttr_panics() {
         &symbol_short!("high"),
         &20,
     );
+}
+
+#[test]
+fn test_config_bumped_duplicate_treated_as_fresh_calculation() {
+    // After set_config changes the config_version_hash, a duplicate outage_id
+    // must be treated as a fresh calculation rather than returning stale cache.
+    let (_env, client, actors) = setup();
+    let outage_id = symbol_short!("CFG_BMP");
+    let severity = symbol_short!("high");
+    let mttr = 10u32;
+
+    let r1 = client.calculate_sla(&actors.operator, &outage_id, &severity, &mttr);
+    let hash1 = r1.config_version_hash;
+
+    // Change reward_base so config_version_hash changes but threshold stays same.
+    // This is the subtle case: old code would return cached result because
+    // threshold and mttr match, ignoring the config change.
+    client.set_config(&actors.admin, &severity, &30, &50, &1500);
+
+    let r2 = client.calculate_sla(&actors.operator, &outage_id, &severity, &mttr);
+    let hash2 = r2.config_version_hash;
+
+    assert_ne!(hash1, hash2);
+    assert_eq!(r2.amount, 3000); // 1500 * 200 / 100 = 3000 (top tier)
+
+    let history = client.get_history();
+    let mut count = 0u32;
+    for i in 0..history.len() {
+        if history.get(i).unwrap().outage_id == outage_id {
+            count += 1;
+        }
+    }
+    assert_eq!(count, 2);
+    assert_eq!(client.get_stats().total_calculations, 2);
+}
+
+#[test]
+fn test_config_bumped_duplicate_threshold_change_is_fresh() {
+    // Config change alters threshold so same mttr flips from met→viol.
+    let (_env, client, actors) = setup();
+    let outage_id = symbol_short!("CFG_THR");
+    let severity = symbol_short!("high");
+
+    let r1 = client.calculate_sla(&actors.operator, &outage_id, &severity, &25);
+    assert_eq!(r1.status, symbol_short!("met"));
+
+    // Lower threshold so the same mttr now violates
+    client.set_config(&actors.admin, &severity, &20, &50, &750);
+
+    let r2 = client.calculate_sla(&actors.operator, &outage_id, &severity, &25);
+    assert_eq!(r2.status, symbol_short!("viol"));
+    assert_eq!(r2.amount, -250);
+
+    assert_eq!(client.get_history().len(), 2);
+    assert_eq!(client.get_stats().total_calculations, 2);
+}
+
+#[test]
+fn test_duplicate_same_config_still_idempotent() {
+    // Without config change, identical duplicate still returns cached result.
+    let (_env, client, actors) = setup();
+    let outage_id = symbol_short!("IDEM_P");
+
+    let r1 = client.calculate_sla(&actors.operator, &outage_id, &symbol_short!("critical"), &5);
+    let r2 = client.calculate_sla(&actors.operator, &outage_id, &symbol_short!("critical"), &5);
+
+    assert_eq!(r1.config_version_hash, r2.config_version_hash);
+    assert_eq!(client.get_history().len(), 1);
+    assert_eq!(client.get_stats().total_calculations, 1);
+}
+
+#[test]
+#[should_panic(expected = "#13")]
+fn test_duplicate_same_config_with_different_mttr_still_panics() {
+    // Without config change, conflicting inputs still reject.
+    let (_env, client, actors) = setup();
+    let outage_id = symbol_short!("CONF");
+
+    client.calculate_sla(&actors.operator, &outage_id, &symbol_short!("high"), &10);
+    client.calculate_sla(&actors.operator, &outage_id, &symbol_short!("high"), &20);
 }
 
 #[test]

@@ -55,6 +55,26 @@ mod threshold_tests {
     }
 
     #[test]
+    fn test_zero_threshold_always_violated() {
+        let env = Env::default();
+        let (admin, operator, client) = setup(&env);
+        client.set_config(
+            &admin,
+            &symbol_short!("low"),
+            &0,
+            &10,
+            &100,
+        );
+        let result = client.calculate_sla(
+            &operator,
+            &symbol_short!("OUT1"),
+            &symbol_short!("low"),
+            &1,
+        );
+        assert_eq!(result.status, symbol_short!("viol"));
+    }
+
+    #[test]
     fn test_near_zero_threshold_one_minute() {
         let env = Env::default();
         let (admin, operator, client) = setup(&env);

@@ -18,6 +18,7 @@ pub mod coordination_harness;
 pub mod cross_contract_safety;
 pub mod event_correlation;
 mod event_schema;
+pub mod history_snapshot;
 pub mod version_negotiation;
 
 use crate::config_bundle::ConfigBundle;
@@ -1131,13 +1132,17 @@ impl SLACalculatorContract {
             }
         }
         if let Some(prev) = existing {
-            // Explicit duplicate policy: same outage_id is idempotent only when
-            // execution inputs resolve to the same deterministic result.
-            if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes
-            {
-                return Err(SLAError::DuplicateOutageInput);
+            if prev.config_version_hash == config_version_hash {
+                // Explicit duplicate policy: same outage_id is idempotent only when
+                // execution inputs resolve to the same deterministic result.
+                if prev.mttr_minutes != mttr_minutes
+                    || prev.threshold_minutes != cfg.threshold_minutes
+                {
+                    return Err(SLAError::DuplicateOutageInput);
+                }
+                return Ok(prev);
             }
-            return Ok(prev);
+            // Config changed: treat as a fresh calculation rather than a conflict.
         }
 
         history.push_back(result.clone());
