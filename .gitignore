@@ -1,5 +1,7 @@
 # Rust
 target/
+proptest-regressions/
+
 
 # Soroban
 test_snapshots/
