@@ -1919,6 +1919,16 @@ fn test_pause_stores_reason_and_timestamp() {
 }
 
 #[test]
+#[should_panic(expected = "HostError")]
+fn test_pause_rejects_long_reason() {
+    let (env, client, actors) = setup();
+    // 257-byte reason exceeds MAX_REASON_LEN (256)
+    let long_reason =
+        soroban_sdk::String::from_str(&env, &"A".repeat(257));
+    client.pause(&actors.admin, &long_reason);
+}
+
+#[test]
 fn test_unpause_clears_pause_info() {
     let (env, client, actors) = setup();
     client.pause(
