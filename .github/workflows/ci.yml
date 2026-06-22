@@ -97,7 +97,6 @@ jobs:
         run: cargo build --target wasm32-unknown-unknown --release
 
       - name: Generate hash
-        working-directory: apexchainx_calculator
         run: |
           WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           if [ -f "$WASM" ]; then
