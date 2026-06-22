@@ -55,6 +55,9 @@ const PAUSED_KEY: Symbol = symbol_short!("PAUSED");
 /// Pause metadata (reason, timestamp, caller). (#66)
 const PAUSE_INFO_KEY: Symbol = symbol_short!("PAUSEINF");
 
+/// Maximum length (in bytes) for the pause reason string. (#68)
+const MAX_REASON_LEN: usize = 256;
+
 /// Cumulative SLA statistics (SLAStats struct). (#29)
 const STATS_KEY: Symbol = symbol_short!("STATS");
 
@@ -247,6 +250,8 @@ pub enum SLAError {
     InvalidPenaltyAmount = 14,
     /// Computed reward amount is invalid (e.g., zero or negative). (SC-W5-046)
     InvalidRewardAmount = 15,
+    /// Input parameter violates documented constraints (e.g., reason too long). (#68)
+    InvalidInput = 16,
 }
 
 // -----------------------------------------------------------------------
@@ -781,6 +786,10 @@ impl SLACalculatorContract {
     pub fn pause(env: Env, caller: Address, reason: String) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
+
+        if reason.len() > MAX_REASON_LEN as u32 {
+            return Err(SLAError::InvalidInput);
+        }
 
         let paused_at = env.ledger().timestamp();
         env.storage().instance().set(&PAUSED_KEY, &true);
