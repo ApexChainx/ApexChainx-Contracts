@@ -97,6 +97,7 @@ jobs:
         run: cargo build --target wasm32-unknown-unknown --release
 
       - name: Generate hash
+        working-directory: apexchainx_calculator
         run: |
           WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           if [ -f "$WASM" ]; then
@@ -112,5 +113,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: pr-provenance-hash
-          path: provenance.sha256
+          path: apexchainx_calculator/provenance.sha256
           retention-days: 30
