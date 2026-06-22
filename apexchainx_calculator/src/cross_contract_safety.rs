@@ -403,7 +403,7 @@ mod tests {
 
     #[test]
     fn test_safe_call_result_debug() {
-        let env = Env::default();
+        let _env = Env::default();
         let result = SafeCallResult {
             status: CrossContractCallStatus::Success,
             raw_output: Val::from(true),

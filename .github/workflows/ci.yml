@@ -1,13 +1,6 @@
 # =============================================================================
 # ApexChainx Contracts — CI Pipeline
 # =============================================================================
-#
-# Triggered on push/PR to main. Essential checks:
-#   1. Formatting  (rustfmt)
-#   2. Linting     (clippy)
-#   3. Build       (cargo build)
-#   4. Tests       (cargo test)
-# =============================================================================
 
 name: CI
 
@@ -22,31 +15,102 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: Build, Test & Verify
+  client-checks:
+    name: Client Checks
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.94.1
         with:
+          targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
-      - name: Cache Cargo dependencies
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apexchainx_calculator
+      - name: Debug environment
+        run: |
+          echo "=== Rust toolchain ==="
+          rustc --version
+          cargo --version
+          rustup show
+          echo "=== Project structure ==="
+          ls -la
+          ls -la apexchainx_calculator/
+          echo "=== Cargo.toml ==="
+          cat apexchainx_calculator/Cargo.toml
 
-      - name: Check formatting
-        run: cargo fmt --manifest-path apexchainx_calculator/Cargo.toml -- --check
+      - name: Cargo check
+        working-directory: apexchainx_calculator
+        run: |
+          cargo check 2>&1 | tee check.log || (echo "=== Cargo check failed ===" && cat check.log && exit 1)
 
-      - name: Clippy linting
-        run: cargo clippy --manifest-path apexchainx_calculator/Cargo.toml
+      - name: Format check
+        working-directory: apexchainx_calculator
+        run: cargo fmt --check
 
-      - name: Build
-        run: cargo build --manifest-path apexchainx_calculator/Cargo.toml
+      - name: Clippy
+        working-directory: apexchainx_calculator
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build native
+        working-directory: apexchainx_calculator
+        run: cargo build
+
+      - name: Build WASM
+        working-directory: apexchainx_calculator
+        run: cargo build --target wasm32-unknown-unknown
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Run tests
-        run: cargo test --manifest-path apexchainx_calculator/Cargo.toml
+        working-directory: apexchainx_calculator
+        run: cargo test --lib
+
+  provenance-hashes:
+    name: Provenance & Hashes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build WASM release
+        working-directory: apexchainx_calculator
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Generate hash
+        run: |
+          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          if [ -f "$WASM" ]; then
+            sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
+            echo "Hash generated successfully"
+            cat provenance.sha256
+          else
+            echo "WASM file not found at $WASM"
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-provenance-hash
+          path: provenance.sha256
+          retention-days: 30

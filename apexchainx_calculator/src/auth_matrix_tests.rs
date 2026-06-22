@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod auth_matrix_tests {
     use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
-    use crate::{SLACalculatorContract, SLACalculatorContractClient, SLAConfig, SLAError};
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
         let contract_id = env.register_contract(None, SLACalculatorContract);
@@ -27,7 +27,9 @@ mod auth_matrix_tests {
         client.set_config(
             &admin,
             &symbol_short!("high"),
-            &SLAConfig { threshold_minutes: 30, penalty_per_minute: 50, reward_base: 500 },
+            &30,
+            &50,
+            &500,
         );
     }
 
@@ -127,7 +129,9 @@ mod auth_matrix_tests {
         client.set_config(
             &stranger,
             &symbol_short!("high"),
-            &SLAConfig { threshold_minutes: 30, penalty_per_minute: 50, reward_base: 500 },
+            &30,
+            &50,
+            &500,
         );
     }
 
@@ -139,10 +143,11 @@ mod auth_matrix_tests {
         client.set_config(
             &operator,
             &symbol_short!("high"),
-            &SLAConfig { threshold_minutes: 30, penalty_per_minute: 50, reward_base: 500 },
+            &30,
+            &50,
+            &500,
         );
     }
-
     #[test]
     #[should_panic]
     fn test_stranger_cannot_pause() {

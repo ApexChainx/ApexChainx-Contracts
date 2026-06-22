@@ -4,6 +4,7 @@
 #
 # Produces a SHA-256 hash manifest for the release WASM artifact.
 # Only runs on version tags (v*), not on every PR/push.
+# Optimized with WASM-specific caching for faster rebuilds.
 # =============================================================================
 
 name: Release Artifact Hash Manifest
@@ -26,13 +27,26 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Cache Cargo dependencies
+      - name: Cache Cargo dependencies (WASM-optimized for release)
         uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: apexchainx_calculator
 
       - name: Build release WASM
-        run: cargo build --release --manifest-path apexchainx_calculator/Cargo.toml --target wasm32-unknown-unknown
+        run: |
+          echo "🔨 Building WASM release artifact..."
+          cd apexchainx_calculator
+          
+          START_TIME=$(date +%s)
+          time cargo build --release --target wasm32-unknown-unknown
+          END_TIME=$(date +%s)
+          BUILD_DURATION=$((END_TIME - START_TIME))
+          
+          echo "✅ WASM build completed in ${BUILD_DURATION} seconds"
+          
+          # Log final artifact info for verification
+          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          if [ -f "$WASM" ]; then
+            echo "📦 Final WASM size: $(wc -c < "$WASM") bytes"
+          fi
 
       - name: Generate SHA-256 manifest
         run: |

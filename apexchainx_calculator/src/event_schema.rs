@@ -99,7 +99,7 @@
 //! end) are NOT considered breaking and do not require a version bump as long
 //! as old consumers ignore unrecognised trailing fields.
 
-#![expect(dead_code)]
+#![allow(dead_code)]
 
 use soroban_sdk::{symbol_short, Symbol};
 
@@ -132,7 +132,6 @@ pub fn current_event_version() -> Symbol {
 mod tests {
     use super::*;
     use alloc::format;
-    use soroban_sdk::Env;
 
     #[test]
     fn test_event_version_is_stable() {

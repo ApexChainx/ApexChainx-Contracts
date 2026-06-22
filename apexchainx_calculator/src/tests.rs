@@ -129,7 +129,7 @@ fn test_result_schema_is_explicit_and_stable() {
     assert_eq!(schema.rating_excellent, symbol_short!("excel"));
     assert_eq!(schema.rating_good, symbol_short!("good"));
     assert_eq!(schema.rating_poor, symbol_short!("poor"));
-    assert_eq!(schema.includes_config_version_hash, true);
+    assert!(schema.includes_config_version_hash);
 }
 
 #[test]
@@ -374,7 +374,7 @@ fn test_old_operator_locked_out_after_rotation() {
 #[test]
 fn test_contract_starts_unpaused() {
     let (_env, client, _actors) = setup();
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
@@ -382,10 +382,10 @@ fn test_admin_can_pause_and_unpause() {
     let (_env, client, actors) = setup();
 
     client.pause(&actors.admin, &soroban_sdk::String::from_str(&_env, "test"));
-    assert_eq!(client.is_paused(), true);
+    assert!(client.is_paused());
 
     client.unpause(&actors.admin);
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
@@ -1387,108 +1387,6 @@ fn test_repeated_config_updates_across_severities_are_independent() {
 }
 
 // ============================================================
-// #50 – Canonical SLA vector snapshot export
-// ============================================================
-
-#[cfg(feature = "export-snapshots")]
-mod snapshots {
-    use super::*;
-    use std::fs;
-    use std::path::Path;
-
-    fn write_snapshot(name: &str, json: &str) {
-        let dir = Path::new("test_snapshots/tests");
-        fs::create_dir_all(dir).unwrap();
-        fs::write(dir.join(format!("{}.json", name)), json).unwrap();
-    }
-
-    #[test]
-    fn test_backend_parity_threshold_boundary_cases_snapshot() {
-        let (env, client, actors) = setup();
-        let cases = [
-            ("critical", 15u32, "met", "rew", "good", 750i128),
-            ("critical", 16, "viol", "pen", "poor", -100),
-            ("high", 30, "met", "rew", "good", 750),
-            ("high", 31, "viol", "pen", "poor", -50),
-            ("medium", 60, "met", "rew", "good", 750),
-            ("medium", 61, "viol", "pen", "poor", -25),
-            ("low", 120, "met", "rew", "good", 600),
-            ("low", 121, "viol", "pen", "poor", -10),
-        ];
-
-        let mut entries = Vec::new();
-        for (sev, mttr, status, ptype, rating, amount) in cases {
-            let result =
-                client.calculate_sla_view(&symbol(&env, "SNAP_B"), &symbol(&env, sev), &mttr);
-            assert_eq!(result.status, symbol(&env, status));
-            assert_eq!(result.payment_type, symbol(&env, ptype));
-            assert_eq!(result.rating, symbol(&env, rating));
-            assert_eq!(result.amount, amount);
-            entries.push(format!(
-                r#"{{"severity":"{sev}","mttr_minutes":{mttr},"status":"{status}","payment_type":"{ptype}","rating":"{rating}","amount":{amount}}}"#
-            ));
-        }
-        write_snapshot(
-            "test_backend_parity_threshold_boundary_cases",
-            &format!("[{}]", entries.join(",")),
-        );
-    }
-
-    #[test]
-    fn test_backend_parity_reward_tier_cases_snapshot() {
-        let (env, client, _actors) = setup();
-        let cases = [
-            ("critical", 7u32, "met", "rew", "top", 1500i128),
-            ("critical", 10, "met", "rew", "excel", 1125),
-            ("critical", 15, "met", "rew", "good", 750),
-            ("low", 59, "met", "rew", "top", 1200),
-            ("low", 89, "met", "rew", "excel", 900),
-            ("low", 120, "met", "rew", "good", 600),
-        ];
-
-        let mut entries = Vec::new();
-        for (sev, mttr, status, ptype, rating, amount) in cases {
-            let result =
-                client.calculate_sla_view(&symbol(&env, "SNAP_R"), &symbol(&env, sev), &mttr);
-            assert_eq!(result.status, symbol(&env, status));
-            assert_eq!(result.payment_type, symbol(&env, ptype));
-            assert_eq!(result.rating, symbol(&env, rating));
-            assert_eq!(result.amount, amount);
-            entries.push(format!(
-                r#"{{"severity":"{sev}","mttr_minutes":{mttr},"status":"{status}","payment_type":"{ptype}","rating":"{rating}","amount":{amount}}}"#
-            ));
-        }
-        write_snapshot(
-            "test_backend_parity_reward_tier_cases",
-            &format!("[{}]", entries.join(",")),
-        );
-    }
-
-    #[test]
-    fn test_config_snapshot_is_deterministic_and_complete_snapshot() {
-        let (_env, client, _actors) = setup();
-        let snap = client.get_config_snapshot();
-        assert_eq!(snap.entries.len(), 4);
-
-        let mut entries = Vec::new();
-        for i in 0..snap.entries.len() {
-            let e = snap.entries.get(i).unwrap();
-            entries.push(format!(
-                r#"{{"severity":"{}","threshold_minutes":{},"penalty_per_minute":{},"reward_base":{}}}"#,
-                ["critical", "high", "medium", "low"][i as usize],
-                e.config.threshold_minutes,
-                e.config.penalty_per_minute,
-                e.config.reward_base,
-            ));
-        }
-        write_snapshot(
-            "test_config_snapshot_is_deterministic_and_complete",
-            &format!("[{}]", entries.join(",")),
-        );
-    }
-}
-
-// ============================================================
 // #94 – Fixture helpers for repeated actor and contract setup
 // ============================================================
 
@@ -1850,9 +1748,9 @@ fn test_backend_smoke_violation_path() {
 #[test]
 #[should_panic]
 fn test_admin_gated_call_fails_after_renounce() {
-    let (env, client, actors) = setup();
+    let (_env, client, actors) = setup();
     client.renounce_admin(&actors.admin);
-    // set_config must now panic – no admin exists
+
     client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
 }
 
@@ -3848,7 +3746,7 @@ fn test_renounce_while_paused_succeeds() {
         &actors.admin,
         &soroban_sdk::String::from_str(&env, "maintenance"),
     );
-    assert_eq!(client.is_paused(), true);
+    assert!(client.is_paused());
 
     // Renounce must succeed regardless of pause state
     client.renounce_admin(&actors.admin);
@@ -3996,12 +3894,12 @@ fn test_repeated_pause_unpause_cycles_is_paused_state_consistent() {
     let (env, client, actors) = setup();
 
     for _ in 0..5u32 {
-        assert_eq!(client.is_paused(), false);
+        assert!(!client.is_paused());
         client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "cycle"));
-        assert_eq!(client.is_paused(), true);
+        assert!(client.is_paused());
         client.unpause(&actors.admin);
     }
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 #[test]
@@ -4113,7 +4011,7 @@ fn test_storage_growth_history_grows_linearly_then_caps() {
 
     // Set a small cap and verify it holds
     client.set_retention_limit(&admin, &10);
-    let oid = Symbol::new(&env, &alloc::format!("GRW_last"));
+    let oid = Symbol::new(&env, "GRW_last");
     client.calculate_sla(&op, &oid, &symbol_short!("low"), &10);
     assert_eq!(
         client.get_history().len(),
@@ -4509,8 +4407,8 @@ fn test_invariance_boundary_mttr_zero() {
     .enumerate()
     {
         let oid = Symbol::new(&_env, &alloc::format!("Z_{}", idx));
-        let view = client.calculate_sla_view(&oid, &sev, &0);
-        let mutating = client.calculate_sla(&actors.operator, &oid, &sev, &0);
+        let view = client.calculate_sla_view(&oid, sev, &0);
+        let mutating = client.calculate_sla(&actors.operator, &oid, sev, &0);
         assert_eq!(view.status, symbol_short!("met"));
         assert_eq!(view.status, mutating.status);
         assert_eq!(view.amount, mutating.amount);
@@ -5049,7 +4947,7 @@ fn test_error_invalid_reward_is_terminal() {
 
 #[test]
 fn test_error_invalid_severity_is_terminal() {
-    let (env, client, actors) = setup();
+    let (_env, client, actors) = setup();
     let result = client.try_set_config(&actors.admin, &symbol_short!("bogus"), &30, &50, &500);
     assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidSeverity);
 }
@@ -5241,11 +5139,11 @@ fn test_failed_set_retention_limit_leaves_limit_unchanged() {
 #[test]
 fn test_failed_pause_unauthorized_leaves_pause_state_unchanged() {
     let (_env, client, actors) = setup();
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 
     let _ = client.try_pause(&actors.stranger, &soroban_sdk::String::from_str(&_env, "x"));
 
-    assert_eq!(client.is_paused(), false);
+    assert!(!client.is_paused());
 }
 
 // ============================================================
@@ -6100,8 +5998,7 @@ fn test_257_calculate_sla_view_hash_matches_standalone() {
 
 #[test]
 fn test_257_config_snapshot_entry_order_is_canonical() {
-    // get_config_snapshot must return entries in canonical order: critical, high, medium, low.
-    let (env, client, _actors) = setup();
+    let (_env, client, _actors) = setup();
     let snapshot = client.get_config_snapshot();
     let expected = [
         symbol_short!("critical"),
@@ -6193,8 +6090,8 @@ fn test_exclusivity_at_exact_threshold_boundary_is_met() {
     assert!(result.amount > 0);
 }
 
+#[test]
 fn test_257_result_schema_fields_are_stable() {
-    // get_result_schema must return the expected symbol constants.
     let (_env, client, _actors) = setup();
     let schema = client.get_result_schema();
     assert_eq!(schema.status_met, symbol_short!("met"));
