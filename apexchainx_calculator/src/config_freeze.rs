@@ -53,7 +53,6 @@ pub fn is_config_frozen(env: &Env) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
     use soroban_sdk::{testutils::Address as _, Address, Env};
 
