@@ -3224,7 +3224,7 @@ fn test_migrate_initialises_missing_fields() {
 
     // After migrate the keys should exist again and the stored version
     // should match the binary's STORAGE_VERSION.
-    let version = client.get_storage_version().unwrap();
+    let version = client.get_storage_version();
     assert_eq!(version, STORAGE_VERSION);
 
     env.as_contract(&cid, || {
