@@ -546,6 +546,71 @@ impl SLACalculatorContract {
         Ok(())
     }
 
+    // Initialise any storage keys that may be missing from older schema
+    // versions. This is intentionally conservative: only set a value when
+    // the key is absent so migration is idempotent and does not overwrite
+    // existing state.
+    fn init_missing_storage_defaults(env: &Env) {
+        let inst = env.storage().instance();
+
+        if !inst.has(&PAUSED_KEY) {
+            inst.set(&PAUSED_KEY, &false);
+        }
+
+        if !inst.has(&STATS_KEY) {
+            inst.set(
+                &STATS_KEY,
+                &SLAStats {
+                    total_calculations: 0,
+                    total_violations: 0,
+                    total_rewards: 0,
+                    total_penalties: 0,
+                },
+            );
+        }
+
+        if !inst.has(&HISTORY_KEY) {
+            inst.set(&HISTORY_KEY, &Vec::<SLAResult>::new(env));
+        }
+
+        if !inst.has(&CONFIG_KEY) {
+            let mut configs = Map::<Symbol, SLAConfig>::new(env);
+            configs.set(
+                symbol_short!("critical"),
+                SLAConfig {
+                    threshold_minutes: 15,
+                    penalty_per_minute: 100,
+                    reward_base: 750,
+                },
+            );
+            configs.set(
+                symbol_short!("high"),
+                SLAConfig {
+                    threshold_minutes: 30,
+                    penalty_per_minute: 50,
+                    reward_base: 750,
+                },
+            );
+            configs.set(
+                symbol_short!("medium"),
+                SLAConfig {
+                    threshold_minutes: 60,
+                    penalty_per_minute: 25,
+                    reward_base: 750,
+                },
+            );
+            configs.set(
+                symbol_short!("low"),
+                SLAConfig {
+                    threshold_minutes: 120,
+                    penalty_per_minute: 10,
+                    reward_base: 600,
+                },
+            );
+            inst.set(&CONFIG_KEY, &configs);
+        }
+    }
+
     // -------------------------------------------------------------------
     // #61 – Storage migration harness
     // -------------------------------------------------------------------
@@ -593,6 +658,11 @@ impl SLACalculatorContract {
 
         // v0 → v1: stamp the version; all other fields were set by initialize
         if current == 0 {
+            // Ensure any storage keys that might be missing from older
+            // deployments are initialised to deterministic defaults before
+            // we mark the storage version as migrated. This codifies the
+            // contract: migration arms must initialise newly-added keys.
+            Self::init_missing_storage_defaults(&env);
             env.storage().instance().set(&STORAGE_VERSION_KEY, &1u32);
             current = 1;
         }

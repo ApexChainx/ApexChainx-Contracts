@@ -3200,6 +3200,39 @@ fn test_get_migration_state_after_migrate_shows_no_migration_needed() {
     assert!(!info.needs_migration);
 }
 
+#[test]
+fn test_migrate_initialises_missing_fields() {
+    // Simulate a frozen older snapshot that lacks keys added in later
+    // schemas, then run migrate and verify deterministic defaults are set.
+    let env = Env::default();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Remove some keys to emulate an older schema state and force stored
+    // version to 0 so migrate will exercise the v0->v1 path.
+    env.as_contract(&cid, || {
+        env.storage().instance().remove(&CONFIG_KEY);
+        env.storage().instance().remove(&STATS_KEY);
+        env.storage().instance().set(&STORAGE_VERSION_KEY, &0u32);
+    });
+
+    // Run migration as admin
+    client.migrate(&admin);
+
+    // After migrate the keys should exist again and the stored version
+    // should match the binary's STORAGE_VERSION.
+    let version = client.get_storage_version();
+    assert_eq!(version, STORAGE_VERSION);
+
+    env.as_contract(&cid, || {
+        assert!(env.storage().instance().has(&CONFIG_KEY));
+        assert!(env.storage().instance().has(&STATS_KEY));
+    });
+}
+
 // ============================================================
 // SC-011 – Latest result by outage (issue #131) – additional coverage
 // ============================================================
