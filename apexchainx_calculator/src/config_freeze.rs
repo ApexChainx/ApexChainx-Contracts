@@ -53,48 +53,80 @@ pub fn is_config_frozen(env: &Env) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{testutils::Address as _, Address, Env};
 
-    #[test]
-    fn test_config_unfrozen_by_default() {
-        let env = Env::default();
-        assert!(!is_config_frozen(&env));
-    }
-
-    #[test]
-    fn test_freeze_and_query() {
-        let env = Env::default();
-        freeze_config(&env);
-        assert!(is_config_frozen(&env));
-    }
-
-    #[test]
-    fn test_unfreeze_restores_mutable_state() {
-        let env = Env::default();
-        freeze_config(&env);
-        unfreeze_config(&env);
-        assert!(!is_config_frozen(&env));
-    }
-
-    #[test]
-    fn test_frozen_config_blocks_set_config() {
+    fn setup() -> (Env, SLACalculatorContractClient<'static>, Address, Address) {
         let env = Env::default();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         let operator = Address::generate(&env);
         client.initialize(&admin, &operator);
-        freeze_config(&env);
-        assert!(is_config_frozen(&env));
+        (env, client, admin, operator)
+    }
+
+    #[test]
+    fn test_config_unfrozen_by_default() {
+        let (_env, client, _admin, _operator) = setup();
+        assert!(!client.is_config_frozen());
+    }
+
+    #[test]
+    fn test_freeze_and_query() {
+        let (_env, client, admin, _operator) = setup();
+        client.freeze_config(&admin);
+        assert!(client.is_config_frozen());
+    }
+
+    #[test]
+    fn test_unfreeze_restores_mutable_state() {
+        let (_env, client, admin, _operator) = setup();
+        client.freeze_config(&admin);
+        client.unfreeze_config(&admin);
+        assert!(!client.is_config_frozen());
+    }
+
+    #[test]
+    fn test_frozen_config_flag() {
+        let (_env, client, admin, _operator) = setup();
+        client.freeze_config(&admin);
+        assert!(client.is_config_frozen());
+    }
+
+    #[test]
+    #[should_panic(expected = "#16")]
+    fn test_set_config_fails_when_frozen() {
+        let (_env, client, admin, _operator) = setup();
+        client.freeze_config(&admin);
+        client.set_config(
+            &admin,
+            &soroban_sdk::symbol_short!("critical"),
+            &15,
+            &100,
+            &750,
+        );
+    }
+
+    #[test]
+    fn test_unfreeze_allows_set_config() {
+        let (_env, client, admin, _operator) = setup();
+        client.freeze_config(&admin);
+        assert!(client.is_config_frozen());
+        client.unfreeze_config(&admin);
+        assert!(!client.is_config_frozen());
+        client.set_config(
+            &admin,
+            &soroban_sdk::symbol_short!("critical"),
+            &15,
+            &100,
+            &750,
+        );
     }
 
     #[test]
     #[should_panic]
     fn test_stranger_cannot_set_config_when_unfrozen() {
-        // Verify that even without a freeze, an unauthorized caller cannot
-        // mutate config (admin-gated role check, not freeze-gated logic).
         let env = Env::default();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
@@ -102,7 +134,6 @@ mod tests {
         let operator = Address::generate(&env);
         client.initialize(&admin, &operator);
         let stranger = Address::generate(&env);
-        // stranger does not hold the admin role – require_admin must reject
         client.set_config(
             &stranger,
             &soroban_sdk::symbol_short!("critical"),
