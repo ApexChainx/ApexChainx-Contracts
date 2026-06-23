@@ -13,6 +13,7 @@ pub struct SLACalculatorContract;
 mod tests;
 
 pub mod config_bundle;
+pub mod config_freeze;
 pub mod config_metadata;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
@@ -200,6 +201,12 @@ const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 /// Emitted when a pending operator proposal is cancelled. (SC-024)
 const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
 
+/// Emitted when the configuration is frozen by admin.
+const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
+
+/// Emitted when the configuration is unfrozen by admin.
+const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
+
 /// Canonical event version symbol used by all events.
 const EVENT_VERSION: Symbol = symbol_short!("v1");
 
@@ -251,8 +258,10 @@ pub enum SLAError {
     InvalidPenaltyAmount = 14,
     /// Computed reward amount is invalid (e.g., zero or negative). (SC-W5-046)
     InvalidRewardAmount = 15,
+    /// Configuration is frozen — config changes are blocked.
+    ConfigFrozen = 16,
     /// Input parameter violates documented constraints (e.g., reason too long). (#68)
-    InvalidInput = 16,
+    InvalidInput = 17,
 }
 
 // -----------------------------------------------------------------------
@@ -833,6 +842,38 @@ impl SLACalculatorContract {
     }
 
     // -------------------------------------------------------------------
+    // Config freeze / unfreeze (admin only)
+    // -------------------------------------------------------------------
+
+    /// Freezes the configuration, blocking further config updates.
+    /// Admin only. Emits a `cfg_frz` event.
+    pub fn freeze_config(env: Env, caller: Address) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+        config_freeze::freeze_config(&env);
+        env.events()
+            .publish((EVENT_CONFIG_FREEZE, EVENT_VERSION, caller), ());
+        Ok(())
+    }
+
+    /// Unfreezes the configuration, re-allowing config updates.
+    /// Admin only. Emits a `cfg_unfrz` event.
+    pub fn unfreeze_config(env: Env, caller: Address) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+        config_freeze::unfreeze_config(&env);
+        env.events()
+            .publish((EVENT_CONFIG_UNFREEZE, EVENT_VERSION, caller), ());
+        Ok(())
+    }
+
+    /// Returns `true` when the configuration is currently frozen.
+    pub fn is_config_frozen(env: Env) -> Result<bool, SLAError> {
+        Self::check_version(&env)?;
+        Ok(config_freeze::is_config_frozen(&env))
+    }
+
+    // -------------------------------------------------------------------
     // Config management (admin only)                                 #28
     // -------------------------------------------------------------------
 
@@ -846,6 +887,7 @@ impl SLACalculatorContract {
     ) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?; // #28 – admin role enforced
+        Self::require_not_frozen(&env)?;
 
         // #70 – Validate configuration parameters
         Self::validate_config(
@@ -962,7 +1004,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 15] = [
+        let entries: [(u32, &str, &str); 17] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -982,6 +1024,8 @@ impl SLACalculatorContract {
             (13, "DuplicateOutageInput", "Duplicate outage input"),
             (14, "InvalidPenaltyAmount", "Invalid penalty amount"),
             (15, "InvalidRewardAmount", "Invalid reward amount"),
+            (16, "ConfigFrozen", "Configuration is frozen"),
+            (17, "InvalidInput", "Invalid input parameter"),
         ];
 
         for (code, label, description) in entries {
@@ -1049,6 +1093,7 @@ impl SLACalculatorContract {
         features.push_back(symbol_short!("safe_call"));
         features.push_back(symbol_short!("ver_nego"));
         features.push_back(symbol_short!("corr_id"));
+        features.push_back(symbol_short!("freeze"));
 
         Ok(ContractMetadata {
             contract_name: symbol_short!("sla_calc"),
@@ -1307,6 +1352,13 @@ impl SLACalculatorContract {
         let paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
         if paused {
             return Err(SLAError::ContractPaused);
+        }
+        Ok(())
+    }
+
+    fn require_not_frozen(env: &Env) -> Result<(), SLAError> {
+        if config_freeze::is_config_frozen(env) {
+            return Err(SLAError::ConfigFrozen);
         }
         Ok(())
     }

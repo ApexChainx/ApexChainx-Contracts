@@ -445,6 +445,106 @@ fn test_calculate_sla_works_after_unpause() {
 }
 
 // ============================================================
+// Config freeze / unfreeze
+// ============================================================
+
+#[test]
+fn test_config_starts_unfrozen() {
+    let (_env, client, _actors) = setup();
+    assert!(!client.is_config_frozen());
+}
+
+#[test]
+fn test_admin_can_freeze_and_unfreeze() {
+    let (_env, client, actors) = setup();
+    assert!(!client.is_config_frozen());
+
+    client.freeze_config(&actors.admin);
+    assert!(client.is_config_frozen());
+
+    client.unfreeze_config(&actors.admin);
+    assert!(!client.is_config_frozen());
+}
+
+#[test]
+#[should_panic]
+fn test_operator_cannot_freeze() {
+    let (_env, client, actors) = setup();
+    client.freeze_config(&actors.operator);
+}
+
+#[test]
+#[should_panic]
+fn test_stranger_cannot_freeze() {
+    let (_env, client, actors) = setup();
+    client.freeze_config(&actors.stranger);
+}
+
+#[test]
+#[should_panic]
+fn test_operator_cannot_unfreeze() {
+    let (_env, client, actors) = setup();
+    client.freeze_config(&actors.admin);
+    client.unfreeze_config(&actors.operator);
+}
+
+#[test]
+#[should_panic]
+fn test_set_config_blocked_when_frozen() {
+    let (_env, client, actors) = setup();
+    client.freeze_config(&actors.admin);
+    client.set_config(
+        &actors.admin,
+        &symbol_short!("critical"),
+        &15,
+        &100,
+        &750,
+    );
+}
+
+#[test]
+fn test_set_config_works_after_unfreeze() {
+    let (_env, client, actors) = setup();
+    client.freeze_config(&actors.admin);
+    client.unfreeze_config(&actors.admin);
+    // Should not panic after unfreeze
+    client.set_config(
+        &actors.admin,
+        &symbol_short!("critical"),
+        &15,
+        &100,
+        &750,
+    );
+}
+
+#[test]
+fn test_freeze_emits_event() {
+    let (env, client, actors) = setup();
+    client.freeze_config(&actors.admin);
+    let events = env.events().all();
+    let (_, topics, _) = events.last().unwrap();
+    assert_eq!(topics.len(), 3);
+    let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(name, symbol_short!("cfg_frz"));
+    assert_eq!(version, symbol_short!("v1"));
+}
+
+#[test]
+fn test_unfreeze_emits_event() {
+    let (env, client, actors) = setup();
+    client.freeze_config(&actors.admin);
+    client.unfreeze_config(&actors.admin);
+    let events = env.events().all();
+    let (_, topics, _) = events.last().unwrap();
+    assert_eq!(topics.len(), 3);
+    let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(name, symbol_short!("cfg_unfrz"));
+    assert_eq!(version, symbol_short!("v1"));
+}
+
+// ============================================================
 // SLA business logic correctness
 // ============================================================
 
@@ -1574,7 +1674,7 @@ fn test_get_contract_metadata_returns_expected_fields() {
     assert_eq!(meta.storage_version, 1);
     assert_eq!(meta.result_schema_version, 1);
     assert_eq!(meta.supported_severities.len(), 4);
-    assert_eq!(meta.features.len(), 9);
+    assert_eq!(meta.features.len(), 10);
 }
 
 #[test]
@@ -1837,7 +1937,7 @@ fn test_pause_stores_reason_and_timestamp() {
 }
 
 #[test]
-#[should_panic(expected = "#16")]
+#[should_panic(expected = "#17")]
 fn test_pause_rejects_long_reason() {
     let (env, client, actors) = setup();
     // 257-byte reason exceeds MAX_REASON_LEN (256)

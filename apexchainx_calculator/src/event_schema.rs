@@ -92,6 +92,16 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## cfg_frz (`cfg_frz`)
+//! Emitted when the configuration is frozen by admin.
+//! - topic[2]: caller Address
+//! - payload:  ()
+//!
+//! ## cfg_unfrz (`cfg_unfrz`)
+//! Emitted when the configuration is unfrozen by admin.
+//! - topic[2]: caller Address
+//! - payload:  ()
+//!
 //! # Schema Versioning
 //!
 //! Breaking changes (field removal, type changes, reordering) MUST increment
@@ -122,6 +132,8 @@ pub const EVENT_ADMIN_REN: Symbol = symbol_short!("adm_ren");
 pub const EVENT_OP_PROP: Symbol = symbol_short!("op_prop");
 pub const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 pub const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
+pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
+pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 
 /// Returns the canonical event version string for consumer documentation.
 pub fn current_event_version() -> Symbol {
@@ -156,6 +168,8 @@ mod tests {
             EVENT_OP_PROP,
             EVENT_OP_ACC,
             EVENT_OP_CAN,
+            EVENT_CONFIG_FREEZE,
+            EVENT_CONFIG_UNFREEZE,
         ];
 
         for i in 0..names.len() {
