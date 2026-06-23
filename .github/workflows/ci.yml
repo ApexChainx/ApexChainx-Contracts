@@ -31,6 +31,18 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
+      # Issue #12: WASM no-std compliance check.
+      # Compiles only the library crate for wasm32-unknown-unknown so that any
+      # accidental `std` import surfaces here (before deployment) as a compile
+      # error. Invokes the wasm32 compiler from the host runner via `cargo check`,
+      # which is cheaper than the `Build WASM` step below (metadata only, no codegen).
+      - name: WASM no-std compliance check
+        working-directory: apexchainx_calculator
+        run: |
+          cargo check --target wasm32-unknown-unknown --lib 2>&1 | tee no_std_check.log \
+            || (echo "=== no_std compliance check failed: std imports are not allowed in WASM ===" \
+                && cat no_std_check.log && exit 1)
+
       - name: Debug environment
         run: |
           echo "=== Rust toolchain ==="
