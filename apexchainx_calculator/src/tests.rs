@@ -493,13 +493,7 @@ fn test_operator_cannot_unfreeze() {
 fn test_set_config_blocked_when_frozen() {
     let (_env, client, actors) = setup();
     client.freeze_config(&actors.admin);
-    client.set_config(
-        &actors.admin,
-        &symbol_short!("critical"),
-        &15,
-        &100,
-        &750,
-    );
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
 }
 
 #[test]
@@ -508,13 +502,7 @@ fn test_set_config_works_after_unfreeze() {
     client.freeze_config(&actors.admin);
     client.unfreeze_config(&actors.admin);
     // Should not panic after unfreeze
-    client.set_config(
-        &actors.admin,
-        &symbol_short!("critical"),
-        &15,
-        &100,
-        &750,
-    );
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
 }
 
 #[test]
