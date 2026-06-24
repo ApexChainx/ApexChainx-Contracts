@@ -12,6 +12,9 @@ pub struct SLACalculatorContract;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod fuzz_tests;
+
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
@@ -1325,7 +1328,10 @@ impl SLACalculatorContract {
         if mttr_minutes > threshold {
             let overtime = (mttr_minutes - threshold) as i128;
             let penalty = overtime.saturating_mul(cfg.penalty_per_minute);
-            let amount = -penalty;
+            let amount = match penalty.checked_neg() {
+                Some(val) => val,
+                None => return Err(SLAError::InvalidPenaltyAmount),
+            };
             if amount >= 0 {
                 return Err(SLAError::InvalidPenaltyAmount);
             }
@@ -1343,7 +1349,7 @@ impl SLACalculatorContract {
             })
         } else {
             // Case 2: SLA met → reward
-            let performance_ratio = (mttr_minutes * 100).checked_div(threshold).unwrap_or(0);
+            let performance_ratio = (mttr_minutes as u64 * 100).checked_div(threshold as u64).unwrap_or(0);
 
             let (multiplier, rating) = if performance_ratio < 50 {
                 (200u32, symbol_short!("top"))
