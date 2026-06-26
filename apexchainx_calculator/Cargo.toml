@@ -1,10 +1,10 @@
 [package]
 name = "apexchainx_calculator"
 version = "0.1.0"
-edition = "2021"
+edition.workspace = true
 description = "Soroban SLA calculator contract for the ApexChainx system"
-license = "MIT"
-repository = "https://github.com/ApexChainx/ApexChainx-Contracts"
+license.workspace = true
+repository.workspace = true
 publish = false
 
 [lib]
@@ -14,7 +14,7 @@ crate-type = ["cdylib"]
 default = []
 
 [dependencies]
-soroban-sdk = { version = "21.1.0", features = ["alloc"] }
+soroban-sdk = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
-soroban-sdk = { version = "21.1.0", features = ["testutils", "alloc"] }
+soroban-sdk = { workspace = true, features = ["testutils", "alloc"] }
