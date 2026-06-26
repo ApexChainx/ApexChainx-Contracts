@@ -1,3 +1,11 @@
 [workspace]
 members = ["apexchainx_calculator"]
 resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/ApexChainx/ApexChainx-Contracts"
+
+[workspace.dependencies]
+soroban-sdk = "21.1.0"
