@@ -1,16 +1,20 @@
 # =============================================================================
-# ApexChainx Contracts — Security Audit (weekly schedule only)
+# ApexChainx Contracts — Security Audit
 # =============================================================================
 #
-# Runs cargo-audit against the RustSec Advisory Database every Monday.
-# Dependency scanning is important but doesn't need to block every PR;
-# weekly cadence catches newly published advisories in a timely manner.
+# Runs cargo-audit against the RustSec Advisory Database.
+# Evaluated on a three-tier schedule:
+# - PR-time (catches vulnerabilities before merge)
+# - Nightly at 02:00 UTC (fresh advisory sentinel)
+# - Weekly Monday 08:00 UTC (baseline catch-all)
 # =============================================================================
 
 name: Security Audit
 
 on:
+  pull_request:
   schedule:
+    - cron: '0 2 * * *'  # Nightly at 02:00 UTC
     - cron: '0 8 * * 1'  # Every Monday 08:00 UTC
 
 jobs:
