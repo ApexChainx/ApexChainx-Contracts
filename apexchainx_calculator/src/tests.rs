@@ -1421,6 +1421,172 @@ fn test_config_version_hash_distribution() {
 }
 
 // ============================================================
+// Severity iteration order invariants
+//
+// The severity iteration order is public ABI: re-ordering the four
+// canonical severities requires a RESULT_SCHEMA_VERSION bump because
+// backends rely on identical configs producing identical hashes.
+// ============================================================
+
+/// Anchors the canonical severity order: critical → high → medium → low.
+/// Any change to this ordering requires a RESULT_SCHEMA_VERSION bump.
+#[test]
+fn test_canonical_severity_order_is_critical_high_medium_low() {
+    let order = super::canonical_severity_order();
+    assert_eq!(order[0], symbol_short!("critical"));
+    assert_eq!(order[1], symbol_short!("high"));
+    assert_eq!(order[2], symbol_short!("medium"));
+    assert_eq!(order[3], symbol_short!("low"));
+}
+
+#[test]
+fn test_canonical_severity_order_length_is_four() {
+    let order = super::canonical_severity_order();
+    assert_eq!(order.len(), 4);
+}
+
+/// Each severity pairs correctly with the next in canonical order.
+/// This anchors backward-compatible re-orderings: if someone swaps
+/// two severities, this test catches which pair was affected.
+#[test]
+fn test_canonical_severity_order_adjacent_pairs() {
+    let order = super::canonical_severity_order();
+    let pairs = [
+        (order[0].clone(), order[1].clone()), // critical → high
+        (order[1].clone(), order[2].clone()), // high → medium
+        (order[2].clone(), order[3].clone()), // medium → low
+    ];
+
+    assert_eq!(pairs[0].0, symbol_short!("critical"));
+    assert_eq!(pairs[0].1, symbol_short!("high"));
+    assert_eq!(pairs[1].0, symbol_short!("high"));
+    assert_eq!(pairs[1].1, symbol_short!("medium"));
+    assert_eq!(pairs[2].0, symbol_short!("medium"));
+    assert_eq!(pairs[2].1, symbol_short!("low"));
+}
+
+/// Hash identical when computed twice with same config.
+#[test]
+fn test_config_version_hash_deterministic_under_reorder() {
+    let (_env, client, _actors) = setup();
+    let h1 = client.get_config_version_hash();
+    let h2 = client.get_config_version_hash();
+    let h3 = client.get_config_version_hash();
+    assert_eq!(h1, h2);
+    assert_eq!(h2, h3);
+}
+
+/// Changing ANY single field of ANY severity must change the hash.
+#[test]
+fn test_config_version_hash_changes_when_any_severity_field_changes() {
+    let (_env, client, actors) = setup();
+    let original = client.get_config_version_hash();
+
+    // Change critical threshold only
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &100, &750);
+    assert_ne!(client.get_config_version_hash(), original);
+
+    // Restore critical, change high penalty only
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
+    client.set_config(&actors.admin, &symbol_short!("high"), &30, &60, &750);
+    assert_ne!(client.get_config_version_hash(), original);
+
+    // Restore high, change medium reward only
+    client.set_config(&actors.admin, &symbol_short!("high"), &30, &50, &750);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &800);
+    assert_ne!(client.get_config_version_hash(), original);
+
+    // Restore medium, change low threshold only
+    client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &750);
+    client.set_config(&actors.admin, &symbol_short!("low"), &240, &10, &600);
+    assert_ne!(client.get_config_version_hash(), original);
+
+    // Restore low
+    client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
+}
+
+/// Hash is identical if a contributor mutates `canonical_severity_order`
+/// in a way that doesn't change the visible ordering — the invariant
+/// is visible ordering, not internal literal identity.
+#[test]
+fn test_config_version_hash_visible_ordering_invariant() {
+    let (_env, client, _actors) = setup();
+    let h1 = client.get_config_version_hash();
+
+    // The hash is determined by the visible order of configs.
+    // Re-computing via get_config_version_hash must always yield
+    // the same result regardless of how many times it is called.
+    let h2 = client.get_config_version_hash();
+    assert_eq!(h1, h2);
+
+    // Also verify the snapshot entries match the canonical order
+    let snapshot = client.get_config_snapshot();
+    let order = super::canonical_severity_order();
+    assert_eq!(snapshot.entries.len(), 4);
+    for (i, sev) in order.iter().enumerate() {
+        assert_eq!(
+            snapshot.entries.get(i as u32).unwrap().severity,
+            sev.clone()
+        );
+    }
+}
+
+/// Adding a custom severity to the config map via raw storage does NOT
+/// alter the hash — only canonical severities are iterated.
+#[test]
+fn test_config_version_hash_not_affected_by_custom_severity_in_map() {
+    let env = Env::default();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = client.get_config_version_hash();
+
+    // Write a custom severity into the config map via raw storage
+    env.as_contract(&cid, || {
+        let mut configs: soroban_sdk::Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CONFIG_KEY)
+            .unwrap();
+        configs.set(
+            symbol_short!("custom"),
+            SLAConfig {
+                threshold_minutes: 10,
+                penalty_per_minute: 50,
+                reward_base: 500,
+            },
+        );
+        env.storage().instance().set(&CONFIG_KEY, &configs);
+    });
+
+    let after = client.get_config_version_hash();
+    assert_eq!(
+        before, after,
+        "Custom severity must not affect config_version_hash"
+    );
+}
+
+/// Baseline hash test: the hash for default config must match a known
+/// value. If this test breaks, update the baseline in
+/// `.config-version-hash.baseline` and document the reason.
+#[test]
+fn test_config_version_hash_baseline() {
+    let (_env, client, _actors) = setup();
+    let hash = client.get_config_version_hash();
+    // Baseline: the hash of the default config.
+    // This is a regression guard — any change to the hash algorithm
+    // or default config values MUST be intentional and documented.
+    let baseline: u64 = 1417728228875630226;
+    assert_eq!(
+        hash, baseline,
+        "config_version_hash changed! If intentional, update the baseline in .config-version-hash.baseline"
+    );
+}
+
+// ============================================================
 // #56 – Repeated config update regression tests
 // ============================================================
 

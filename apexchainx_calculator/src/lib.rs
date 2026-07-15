@@ -485,6 +485,29 @@ pub struct VersionInfo {
 }
 
 // -----------------------------------------------------------------------
+// Canonical severity order (public ABI)
+// -----------------------------------------------------------------------
+
+/// Returns the authoritative canonical severity ordering.
+///
+/// **This ordering is public ABI.** Re-ordering these four symbols
+/// requires a `RESULT_SCHEMA_VERSION` bump because backends rely on
+/// identical configs producing identical `config_version_hash` values.
+///
+/// The iteration order is load-bearing: `compute_config_version_hash`
+/// feeds each severity's config fields into a rolling hash in exactly
+/// this sequence. A silent re-ordering would produce different hashes
+/// for identical configs, breaking backend parity.
+pub fn canonical_severity_order() -> [Symbol; 4] {
+    [
+        symbol_short!("critical"),
+        symbol_short!("high"),
+        symbol_short!("medium"),
+        symbol_short!("low"),
+    ]
+}
+
+// -----------------------------------------------------------------------
 // Contract implementation
 // -----------------------------------------------------------------------
 #[contractimpl]
@@ -1505,10 +1528,9 @@ impl SLACalculatorContract {
 
     fn canonical_severities(env: &Env) -> Vec<Symbol> {
         let mut severities = Vec::new(env);
-        severities.push_back(symbol_short!("critical"));
-        severities.push_back(symbol_short!("high"));
-        severities.push_back(symbol_short!("medium"));
-        severities.push_back(symbol_short!("low"));
+        for sev in canonical_severity_order() {
+            severities.push_back(sev);
+        }
         severities
     }
 
@@ -1532,12 +1554,7 @@ impl SLACalculatorContract {
 
     /// Shared config lookup that borrows env (avoids consuming it).
     fn compute_config_version_hash(env: &Env) -> Result<u64, SLAError> {
-        let severities = [
-            symbol_short!("critical"),
-            symbol_short!("high"),
-            symbol_short!("medium"),
-            symbol_short!("low"),
-        ];
+        let severities = canonical_severity_order();
 
         const BASE: u64 = 91138233;
         const MODULUS: u64 = (1u64 << 63) - 25;
