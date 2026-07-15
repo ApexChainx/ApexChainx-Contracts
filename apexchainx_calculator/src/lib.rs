@@ -691,6 +691,15 @@ impl SLACalculatorContract {
             return Err(SLAError::VersionMismatch);
         }
 
+        env.events().publish(
+            (
+                soroban_sdk::Symbol::new(&env, event_schema::EVENT_MIGRATE_DONE),
+                event_schema::EVENT_VERSION,
+                caller,
+            ),
+            (stored, current),
+        );
+
         Ok(())
     }
 
