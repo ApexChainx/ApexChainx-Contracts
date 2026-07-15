@@ -5027,7 +5027,7 @@ fn test_error_already_initialized_is_terminal() {
     // Calling initialize twice always fails – no state change can make it succeed.
     let (_env, client, actors) = setup();
     let result = client.try_initialize(&actors.admin, &actors.operator);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::AlreadyInitialized);
+    assert!(error_responses::is_already_initialized(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5041,14 +5041,14 @@ fn test_error_unauthorized_is_terminal_for_stranger() {
         &100,
         &750,
     );
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::Unauthorized);
+    assert!(error_responses::is_unauthorized(&result.unwrap_err().unwrap()));
 }
 
 #[test]
 fn test_error_unauthorized_operator_calling_admin_fn_is_terminal() {
     let (_env, client, actors) = setup();
     let result = client.try_pause(&actors.operator, &soroban_sdk::String::from_str(&_env, "x"));
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::Unauthorized);
+    assert!(error_responses::is_unauthorized(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5056,7 +5056,7 @@ fn test_error_invalid_threshold_is_terminal() {
     let (_env, client, actors) = setup();
     // threshold=0 is always invalid for any severity
     let result = client.try_set_config(&actors.admin, &symbol_short!("low"), &0, &10, &600);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidThreshold);
+    assert!(error_responses::is_invalid_threshold(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5064,7 +5064,7 @@ fn test_error_invalid_penalty_is_terminal() {
     let (_env, client, actors) = setup();
     // penalty=0 is always invalid
     let result = client.try_set_config(&actors.admin, &symbol_short!("low"), &120, &0, &600);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidPenalty);
+    assert!(error_responses::is_invalid_penalty(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5072,14 +5072,14 @@ fn test_error_invalid_reward_is_terminal() {
     let (_env, client, actors) = setup();
     // reward=0 is always invalid
     let result = client.try_set_config(&actors.admin, &symbol_short!("low"), &120, &10, &0);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidReward);
+    assert!(error_responses::is_invalid_reward(&result.unwrap_err().unwrap()));
 }
 
 #[test]
 fn test_error_invalid_severity_is_terminal() {
     let (_env, client, actors) = setup();
     let result = client.try_set_config(&actors.admin, &symbol_short!("bogus"), &30, &50, &500);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidSeverity);
+    assert!(error_responses::is_invalid_severity(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5087,7 +5087,7 @@ fn test_error_no_pending_transfer_is_terminal_without_proposal() {
     let (_env, client, actors) = setup();
     // No proposal exists – cancel must fail
     let result = client.try_cancel_admin_proposal(&actors.admin);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::NoPendingTransfer);
+    assert!(error_responses::is_no_pending_transfer(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5104,10 +5104,7 @@ fn test_error_contract_paused_is_retryable_after_unpause() {
         &symbol_short!("high"),
         &10,
     );
-    assert_eq!(
-        paused_result.unwrap_err().unwrap(),
-        SLAError::ContractPaused
-    );
+    assert!(error_responses::is_contract_paused(&paused_result.unwrap_err().unwrap()));
 
     client.unpause(&actors.admin);
     let ok = client.calculate_sla(
@@ -5137,17 +5134,14 @@ fn test_error_config_not_found_is_retryable_after_set_config() {
     // We can't easily inject an unknown severity without bypassing validation,
     // so we verify ConfigNotFound is the error returned by get_config directly.
     let result = client.try_get_config(&symbol_short!("none"));
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::ConfigNotFound);
+    assert!(error_responses::is_config_not_found(&result.unwrap_err().unwrap()));
 }
 
 #[test]
 fn test_error_retention_limit_out_of_range_is_terminal_for_zero() {
     let (_env, client, actors) = setup();
     let result = client.try_set_retention_limit(&actors.admin, &0);
-    assert_eq!(
-        result.unwrap_err().unwrap(),
-        SLAError::RetentionLimitOutOfRange
-    );
+    assert!(error_responses::is_retention_limit_out_of_range(&result.unwrap_err().unwrap()));
 }
 
 // ============================================================

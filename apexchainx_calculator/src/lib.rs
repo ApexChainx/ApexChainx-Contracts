@@ -24,6 +24,7 @@ pub mod event_correlation;
 mod event_schema;
 pub mod history_snapshot;
 pub mod version_negotiation;
+pub mod error_responses;
 
 use crate::config_bundle::ConfigBundle;
 
