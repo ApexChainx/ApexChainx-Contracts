@@ -1325,16 +1325,20 @@ impl SLACalculatorContract {
         let threshold = cfg.threshold_minutes;
 
         // Case 1: SLA violated → penalty
-        if mttr_minutes > threshold {
-            let overtime = (mttr_minutes - threshold) as i128;
-            let penalty = overtime.saturating_mul(cfg.penalty_per_minute);
-            let amount = match penalty.checked_neg() {
-                Some(val) => val,
-                None => return Err(SLAError::InvalidPenaltyAmount),
-            };
-            if amount >= 0 {
-                return Err(SLAError::InvalidPenaltyAmount);
-            }
+            if mttr_minutes > threshold {
+                let overtime = (mttr_minutes - threshold) as i128;
+                let penalty = overtime
+                    .checked_mul(cfg.penalty_per_minute)
+                    .ok_or(SLAError::InvalidPenaltyAmount)?;
+                // Penalty is stored as a negative amount in SLAResult.
+                // Reject invalid results that would indicate overflow/corruption.
+                let amount = penalty
+                    .checked_neg()
+                    .ok_or(SLAError::InvalidPenaltyAmount)?;
+                if amount >= 0 {
+                    return Err(SLAError::InvalidPenaltyAmount);
+                }
+
 
             Ok(SLAResult {
                 outage_id,
@@ -1361,7 +1365,8 @@ impl SLACalculatorContract {
 
             let reward = cfg
                 .reward_base
-                .saturating_mul(multiplier as i128)
+                .checked_mul(multiplier as i128)
+                .ok_or(SLAError::InvalidRewardAmount)?
                 .div_euclid(100);
             if reward <= 0 {
                 return Err(SLAError::InvalidRewardAmount);
