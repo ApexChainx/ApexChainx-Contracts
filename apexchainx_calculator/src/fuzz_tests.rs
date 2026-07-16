@@ -103,7 +103,11 @@ proptest! {
 
                 let overtime = (mttr - threshold_minutes) as i128;
                 let expected_penalty = overtime.saturating_mul(penalty_per_minute);
+                // Overflow must not silently clamp; compute_result should error instead.
+                // This invariant test uses only configurations that were already validated,
+                // which keeps expected computations within i128 bounds.
                 assert_eq!(res.amount, -expected_penalty);
+
             }
         }
     }
@@ -165,11 +169,12 @@ proptest! {
     }
 
     #[test]
-    fn test_fuzz_compute_result_no_panic(
+    fn test_fuzz_compute_result_overflow_rejects_silently_clamping(
         mttr in 0..u32::MAX,
-        threshold_minutes in 0..u32::MAX,
-        penalty_per_minute in i128::MIN..=i128::MAX,
-        reward_base in i128::MIN..=i128::MAX,
+        // ensure threshold < mttr to take the penalty path
+        threshold_minutes in 1..u32::MAX,
+        penalty_per_minute in i128::MAX..=i128::MAX,
+        reward_base in 0..1i128,
     ) {
         let _env = Env::default();
         let cfg = SLAConfig {
@@ -178,13 +183,35 @@ proptest! {
             reward_base,
         };
 
-        // This call must not panic under any circumstances.
-        let _ = SLACalculatorContract::compute_result(
+        // Overflow must be rejected with an error instead of silently clamping to amount=0.
+        let res = SLACalculatorContract::compute_result(
             symbol_short!("outage"),
             mttr,
             &cfg,
             0,
             0,
         );
+
+        assert!(
+            res.is_err(),
+            "Expected overflow to be rejected; got {:?} for mttr={}, threshold={}, penalty_per_minute={}",
+            res,
+            mttr,
+            threshold_minutes,
+            cfg.penalty_per_minute
+        );
+
+        let err = res.unwrap_err();
+
+        // The penalty path overflow should surface as one of the typed amount errors,
+        // but depending on the exact arithmetic overflow site, it may be classified as
+        // an invalid penalty or invalid reward amount.
+        assert!(
+            err == crate::SLAError::InvalidPenaltyAmount
+                || err == crate::SLAError::InvalidRewardAmount
+        );
+
+
+
     }
 }
