@@ -15,6 +15,7 @@ mod tests;
 #[cfg(test)]
 mod fuzz_tests;
 
+pub mod audit_state;
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
@@ -25,6 +26,7 @@ mod event_schema;
 pub mod history_snapshot;
 pub mod version_negotiation;
 
+use crate::audit_state::AuditState;
 use crate::config_bundle::ConfigBundle;
 
 // -----------------------------------------------------------------------
@@ -1149,6 +1151,40 @@ impl SLACalculatorContract {
         let snapshot = Self::get_config_snapshot(env.clone())?;
         let schema = Self::get_result_schema(env)?;
         Ok(Some(ConfigBundle { snapshot, schema }))
+    }
+
+    pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
+        Self::check_version(&env)?;
+
+        let admin = Self::get_admin(env.clone())?;
+        let operator = Self::get_operator(env.clone())?;
+        let pending_admin = Self::get_pending_admin(env.clone())?;
+        let pending_operator = Self::get_pending_operator(env.clone())?;
+        let paused = Self::is_paused(env.clone())?;
+        let pause_info = Self::get_pause_info(env.clone())?;
+        let config_snapshot = Self::get_config_snapshot(env.clone())?;
+        let stats = Self::get_stats(env.clone())?;
+        let result_schema = Self::get_result_schema(env.clone())?;
+
+        let history: Vec<SLAResult> = env
+            .storage()
+            .instance()
+            .get(&HISTORY_KEY)
+            .unwrap_or_else(|| Vec::new(&env));
+        let history_len = history.len();
+
+        Ok(AuditState {
+            admin,
+            operator,
+            pending_admin,
+            pending_operator,
+            paused,
+            pause_info,
+            config_snapshot,
+            stats,
+            history_len,
+            result_schema,
+        })
     }
 
     /// #60 – Returns static contract capabilities for backend introspection.
