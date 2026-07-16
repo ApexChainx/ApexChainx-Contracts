@@ -880,6 +880,385 @@ fn test_set_config_budget_is_reasonable() {
         "set_config too expensive: {} instructions",
         after - before
     );
+   
+}
+
+#[test]
+fn test_pause_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let reason = soroban_sdk::String::from_str(&env, "budget test");
+    let before = env.budget().cpu_instruction_cost();
+    client.pause(&admin, &reason);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "pause too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_unpause_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    client.pause(&admin, &soroban_sdk::String::from_str(&env, "setup"));
+
+    let before = env.budget().cpu_instruction_cost();
+    client.unpause(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "unpause too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_freeze_config_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.freeze_config(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "freeze_config too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_unfreeze_config_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    client.freeze_config(&admin);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.unfreeze_config(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "unfreeze_config too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_propose_admin_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.propose_admin(&admin, &new_admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 120_000,
+        "propose_admin too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_accept_admin_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_admin = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&admin, &new_admin);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.accept_admin(&new_admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 120_000,
+        "accept_admin too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_cancel_admin_proposal_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_admin = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&admin, &new_admin);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.cancel_admin_proposal(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "cancel_admin_proposal too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_propose_operator_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.propose_operator(&admin, &new_op);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 120_000,
+        "propose_operator too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_accept_operator_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_op = soroban_sdk::Address::generate(&env);
+    client.propose_operator(&admin, &new_op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.accept_operator(&new_op);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 120_000,
+        "accept_operator too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_cancel_operator_proposal_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_op = soroban_sdk::Address::generate(&env);
+    client.propose_operator(&admin, &new_op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.cancel_operator_proposal(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "cancel_operator_proposal too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_renounce_admin_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.renounce_admin(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "renounce_admin too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_set_operator_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.set_operator(&admin, &new_op);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "set_operator too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_set_retention_limit_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.set_retention_limit(&admin, &50);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "set_retention_limit too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_prune_history_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    for i in 0..20u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PB_{}", i));
+        client.calculate_sla(&op, &oid, &symbol_short!("low"), &10);
+    }
+
+    let before = env.budget().cpu_instruction_cost();
+    client.prune_history(&admin, &5);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 250_000,
+        "prune_history too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_prune_history_by_age_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    for i in 0..20u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PA_{}", i));
+        client.calculate_sla(&op, &oid, &symbol_short!("low"), &10);
+    }
+    env.ledger().set_timestamp(2000);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.prune_history_by_age(&admin, &500);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 250_000,
+        "prune_history_by_age too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_migrate_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.migrate(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "migrate too expensive: {} instructions",
+        after - before
+    );
 }
 
 // ============================================================
