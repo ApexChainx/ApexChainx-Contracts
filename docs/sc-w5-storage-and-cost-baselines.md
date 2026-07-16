@@ -10,6 +10,7 @@
 - [Pruning-by-Age Chronology](#pruning-by-age-chronology)
 - [Storage Footprint Telemetry](#storage-footprint-telemetry)
 - [Critical Path Cost Baseline](#critical-path-cost-baseline)
+- [Mutating Function CPU Budgets](#mutating-function-cpu-budgets)
 - [Regression Detection](#regression-detection)
 
 ---
@@ -116,9 +117,57 @@ fn test_no_storage_key_collisions() {
 
 ---
 
-## Regression Detection
+## Mutating Function CPU Budgets
 
-### Automated Checks
+Every state-mutating entrypoint has a CPU instruction budget test (see
+`apexchainx_calculator/src/tests.rs`, `#91`). Each test measures a single call
+in isolation using `env.budget().reset_unlimited()` before invocation and
+`env.budget().cpu_instruction_cost()` snapshots immediately before/after the
+call, then asserts the delta stays under the ceiling below.
+
+| Function | CPU Instruction Ceiling | Notes |
+|----------|------------------------|-------|
+| `calculate_sla` | 200,000 | Existing baseline |
+| `set_config` | 150,000 | Existing baseline |
+| `pause` | 100,000 | Single flag + metadata write |
+| `unpause` | 100,000 | Single flag + metadata clear |
+| `freeze_config` | 100,000 | Single flag write |
+| `unfreeze_config` | 100,000 | Single flag write |
+| `propose_admin` | 120,000 | Two-step governance write |
+| `accept_admin` | 120,000 | Two-step governance write |
+| `cancel_admin_proposal` | 100,000 | Clears pending state |
+| `propose_operator` | 120,000 | Two-step governance write |
+| `accept_operator` | 120,000 | Two-step governance write |
+| `cancel_operator_proposal` | 100,000 | Clears pending state |
+| `renounce_admin` | 100,000 | Irreversible single write |
+| `set_operator` | 100,000 | Single-step role write |
+| `set_retention_limit` | 100,000 | Single config write |
+| `prune_history` | 250,000 | Scales with history size pruned |
+| `prune_history_by_age` | 250,000 | Scales with history size pruned |
+| `migrate` | 100,000 | No-op path when already current |
+
+### Ceiling Rationale
+
+- **Simple state flips** (pause/unpause/freeze/unfreeze/renounce/set_operator/set_retention_limit)
+  touch one or two storage slots, so 100,000 instructions gives comfortable
+  headroom without masking a real regression.
+- **Two-step governance functions** (propose/accept/cancel for admin and
+  operator) do slightly more work validating caller identity against pending
+  state, so they get a modestly higher ceiling (120,000).
+- **History-pruning functions** iterate over stored records, so their ceiling
+  (250,000) is sized for the test's fixture volume (~20 entries) rather than
+  a fixed small state write. If typical production history sizes grow
+  significantly, this ceiling should be revisited.
+
+### Updating Ceilings
+
+If a CI run reports an assertion failure with the actual instruction count,
+update the corresponding row above and the matching `assert!` threshold in
+`tests.rs` together, so this table never drifts from the enforced values.
+
+---
+
+## Regression Detection
 
 | Check | Trigger | Action |
 |-------|---------|--------|
