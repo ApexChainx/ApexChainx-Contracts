@@ -102,6 +102,17 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## stats_sat (`stats_sat`)
+//! Emitted when a running-stats counter saturates during increment_stats
+//! (e.g. total_calculations reaching u64::MAX, or an i128 total capping).
+//! Signals backend indexers that the on-chain total has capped and now
+//! under-reports true economic exposure. The counter is still capped at its
+//! bound on-chain; this event carries the pre-cap state so consumers can
+//! reconcile. (SC-W5-047)
+//! - topic[2]: counter_name Symbol (which counter saturated: `totcalc`,
+//!   `totviol`, `totrew`, `totpen`)
+//! - payload:  (field: Symbol, previous_value: i128, attempted_increment: i128)
+//!
 //! # Schema Versioning
 //!
 //! Breaking changes (field removal, type changes, reordering) MUST increment
@@ -134,6 +145,8 @@ pub const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 pub const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
 pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
+/// Emitted when a running-stats counter saturates. (SC-W5-047)
+pub const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
 
 /// Returns the canonical event version string for consumer documentation.
 pub fn current_event_version() -> Symbol {
@@ -170,6 +183,7 @@ mod tests {
             EVENT_OP_CAN,
             EVENT_CONFIG_FREEZE,
             EVENT_CONFIG_UNFREEZE,
+            EVENT_STATS_SAT,
         ];
 
         for i in 0..names.len() {
