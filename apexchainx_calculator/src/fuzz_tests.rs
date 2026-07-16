@@ -1,4 +1,4 @@
-#![cfg(test)]
+
 
 use crate::{SLACalculatorContract, SLAConfig};
 use soroban_sdk::{symbol_short, Env, Symbol};
