@@ -1358,7 +1358,9 @@ impl SLACalculatorContract {
             })
         } else {
             // Case 2: SLA met → reward
-            let performance_ratio = (mttr_minutes as u64 * 100).checked_div(threshold as u64).unwrap_or(0);
+            let performance_ratio = (mttr_minutes as u64 * 100)
+                .checked_div(threshold as u64)
+                .unwrap_or(0);
 
             let (multiplier, rating) = if performance_ratio < 50 {
                 (200u32, symbol_short!("top"))

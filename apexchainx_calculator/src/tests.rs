@@ -1716,13 +1716,10 @@ fn test_get_contract_metadata_is_deterministic() {
 // ============================================================
 
 #[test]
-
-#[test]
 fn test_migrate_done_symbol() {
     let env = Env::default();
     let _sym = soroban_sdk::Symbol::new(&env, "migrate_done");
 }
-
 
 #[test]
 fn test_migrate_emits_migrate_done_event() {
@@ -1747,10 +1744,12 @@ fn test_migrate_emits_migrate_done_event() {
         let topic0: soroban_sdk::Symbol = topic_tuple.get(0).unwrap().try_into_val(&env).unwrap();
         if topic0 == soroban_sdk::Symbol::new(&env, "migrate_done") {
             found = true;
-            let topic1: soroban_sdk::Symbol = topic_tuple.get(1).unwrap().try_into_val(&env).unwrap();
+            let topic1: soroban_sdk::Symbol =
+                topic_tuple.get(1).unwrap().try_into_val(&env).unwrap();
             assert_eq!(topic1, soroban_sdk::symbol_short!("v1"));
 
-            let topic2: soroban_sdk::Address = topic_tuple.get(2).unwrap().try_into_val(&env).unwrap();
+            let topic2: soroban_sdk::Address =
+                topic_tuple.get(2).unwrap().try_into_val(&env).unwrap();
             assert_eq!(topic2, actors.admin);
 
             let payload_tuple: (u32, u32) = payload.try_into_val(&env).unwrap();
@@ -1760,6 +1759,7 @@ fn test_migrate_emits_migrate_done_event() {
     assert!(found, "migrate_done event not found");
 }
 
+#[test]
 fn test_migrate_is_idempotent_when_already_current() {
     let (_env, client, actors) = setup();
     // Already at v1 – migrate should succeed without error
