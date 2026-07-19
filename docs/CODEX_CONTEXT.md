@@ -316,30 +316,18 @@ Current symbol mappings:
 - rating good -> `good`
 - rating poor -> `poor`
 
-Compatibility rule:\n\n- additive read-only contract helpers are preferred over changing the shape of\n  `SLAResult`\n- **Versioning**: Breaking ABI/symbol changes → MAJOR bump (v2.0.0), update `schema_version` in `get_result_schema()`.\n- Backend: Pin contract ID/version, regenerate parity tests from snapshots post-release.\n\n**Backend Dependency Expectations**:\n- Match `calculate_sla_view()` exactly with local logic.\n- Consume `test_snapshots/tests/*.json` for golden vectors.\n- Monitor git tags `vX.Y.Z` for releases.\n\n## Event Convention
+Compatibility rule:\n\n- additive read-only contract helpers are preferred over changing the shape of\n  `SLAResult`\n- **Versioning**: Breaking ABI/symbol changes → MAJOR bump (v2.0.0), update `schema_version` in `get_result_schema()`.\n- Backend: Pin contract ID/version, regenerate parity tests from snapshots post-release.\n\n**Backend Dependency Expectations**:\n- Match `calculate_sla_view()` exactly with local logic.\n- Consume `test_snapshots/tests/*.json` for golden vectors.\n- Monitor git tags `vX.Y.Z` for releases.\n\n## Event Conventions
 
-Lifecycle events are versioned so backend consumers can reason about event shape
-without inferring it from position alone.
+For the canonical reference on Soroban event commit timing, event semantics, and
+full event catalog details, see [docs/AUDIT_TRAIL.md](AUDIT_TRAIL.md). This
+context document keeps only the repository-specific conventions and points
+readers to that authoritative explanation instead of restating the full catalog.
 
-Current event topic convention:
+The local event topic convention remains:
 
 - topic 0 -> event name
 - topic 1 -> event version
 - topic 2 -> event-specific context such as severity or caller
-
-Current event version:
-
-- `v1`
-
-Current SLA calculation event payload:
-
-- outage id
-- result status
-- payment type
-- rating
-- MTTR minutes
-- threshold minutes
-- amount
 
 ---
 
