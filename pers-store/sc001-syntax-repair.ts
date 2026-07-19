@@ -20,7 +20,10 @@ function countDelimiters(src: string): { open: number; close: number } {
   };
 }
 
-function removeTrailingStrayDelimiters(src: string): { src: string; removed: number } {
+function removeTrailingStrayDelimiters(src: string): {
+  src: string;
+  removed: number;
+} {
   const lines = src.split("\n");
   let removed = 0;
   const { open, close } = countDelimiters(src);
@@ -50,7 +53,9 @@ function main(): void {
     process.exit(1);
   }
   const result = repairFile(target);
-  console.log(`[SC-001] ${result.file}: removed ${result.removed} stray delimiter(s). ok=${result.ok}`);
+  console.log(
+    `[SC-001] ${result.file}: removed ${result.removed} stray delimiter(s). ok=${result.ok}`,
+  );
 }
 
 main();
