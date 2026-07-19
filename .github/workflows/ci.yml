@@ -68,6 +68,14 @@ jobs:
         working-directory: apexchainx_calculator
         run: cargo clippy --all-targets -- -D warnings
 
+      - name: Unused dependency gate
+        working-directory: apexchainx_calculator
+        run: |
+          cargo install cargo-machete --locked
+          cargo install cargo-udeps --locked
+          cargo machete
+          cargo udeps --all-targets
+
       - name: Build native
         working-directory: apexchainx_calculator
         run: cargo build
