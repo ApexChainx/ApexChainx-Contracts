@@ -124,7 +124,7 @@ jobs:
 
       - name: Run property-based fuzz tests
         working-directory: apexchainx_calculator
-        run: cargo test --lib fuzz_tests::
+        run: "cargo test --lib fuzz_tests::"
 
 
   provenance-hashes:
