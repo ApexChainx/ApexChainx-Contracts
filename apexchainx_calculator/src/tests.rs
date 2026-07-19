@@ -189,6 +189,45 @@ fn test_set_config_emits_versioned_config_event() {
     assert_eq!(event_data, (20u32, 200i128, 1000i128));
 }
 
+#[test]
+fn test_severity_telemetry_tracks_per_severity_violation_rates() {
+    let (_env, client, actors) = setup();
+
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT001"),
+        &symbol_short!("critical"),
+        &5,
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT002"),
+        &symbol_short!("critical"),
+        &20,
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT003"),
+        &symbol_short!("high"),
+        &10,
+    );
+
+    let telemetry = client.get_severity_telemetry();
+    assert_eq!(telemetry.len(), 4);
+
+    let critical = telemetry.get(0).unwrap();
+    assert_eq!(critical.severity, symbol_short!("critical"));
+    assert_eq!(critical.calculations, 2u32);
+    assert_eq!(critical.violations, 1u32);
+    assert_eq!(critical.violation_rate, 50u32);
+
+    let high = telemetry.get(1).unwrap();
+    assert_eq!(high.severity, symbol_short!("high"));
+    assert_eq!(high.calculations, 1u32);
+    assert_eq!(high.violations, 0u32);
+    assert_eq!(high.violation_rate, 0u32);
+}
+
 // ============================================================
 // #28 – Operator management
 // ============================================================
