@@ -157,6 +157,9 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // set_int   → (outage_id: Symbol, status: Symbol, payment_type: Symbol,
 //              amount: i128, config_version_hash: u64, recorded_at: u64)
 //   context: severity Symbol
+//
+// stats_sat → (field: Symbol, previous_value: i128, attempted_increment: i128)
+//   context: counter_name Symbol
 // -----------------------------------------------------------------------
 
 /// Emitted on successful SLA calculation. Primary event for backend consumers.
@@ -209,6 +212,11 @@ const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 
 /// Emitted when the configuration is unfrozen by admin.
 const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
+
+/// Emitted when a running-stats counter saturates during increment_stats.
+/// Signals backend indexers that the on-chain total capped and now
+/// under-reports true economic exposure. (SC-W5-047)
+const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
 
 /// Canonical event version symbol used by all events.
 const EVENT_VERSION: Symbol = symbol_short!("v1");
@@ -1327,7 +1335,12 @@ impl SLACalculatorContract {
         // Case 1: SLA violated → penalty
         if mttr_minutes > threshold {
             let overtime = (mttr_minutes - threshold) as i128;
-            let penalty = overtime.saturating_mul(cfg.penalty_per_minute);
+            // Use checked_mul so an overflowing penalty surfaces a deterministic
+            // error instead of silently saturating (which would under-penalise).
+            let penalty = match overtime.checked_mul(cfg.penalty_per_minute) {
+                Some(val) => val,
+                None => return Err(SLAError::InvalidPenaltyAmount),
+            };
             let amount = match penalty.checked_neg() {
                 Some(val) => val,
                 None => return Err(SLAError::InvalidPenaltyAmount),
@@ -1349,7 +1362,9 @@ impl SLACalculatorContract {
             })
         } else {
             // Case 2: SLA met → reward
-            let performance_ratio = (mttr_minutes as u64 * 100).checked_div(threshold as u64).unwrap_or(0);
+            let performance_ratio = (mttr_minutes as u64 * 100)
+                .checked_div(threshold as u64)
+                .unwrap_or(0);
 
             let (multiplier, rating) = if performance_ratio < 50 {
                 (200u32, symbol_short!("top"))
@@ -1359,10 +1374,12 @@ impl SLACalculatorContract {
                 (100u32, symbol_short!("good"))
             };
 
-            let reward = cfg
-                .reward_base
-                .saturating_mul(multiplier as i128)
-                .div_euclid(100);
+            // Use checked_mul so an overflowing reward surfaces a deterministic
+            // error instead of silently saturating.
+            let reward = match cfg.reward_base.checked_mul(multiplier as i128) {
+                Some(val) => val.div_euclid(100),
+                None => return Err(SLAError::InvalidRewardAmount),
+            };
             if reward <= 0 {
                 return Err(SLAError::InvalidRewardAmount);
             }
@@ -1607,16 +1624,79 @@ impl SLACalculatorContract {
                 total_penalties: 0,
             });
 
-        stats.total_calculations = stats.total_calculations.saturating_add(1);
+        // Each counter uses checked_* so a saturating increment can be detected
+        // and surfaced as a stats_sat event. On overflow the counter is capped
+        // at its bound (preserving the previous fire-and-forget contract) but the
+        // pre-cap state is emitted so backends know the total now under-reports.
+        match stats.total_calculations.checked_add(1) {
+            Some(v) => stats.total_calculations = v,
+            None => {
+                Self::emit_stats_saturated(
+                    env,
+                    symbol_short!("totcalc"),
+                    stats.total_calculations as i128,
+                    1,
+                );
+                stats.total_calculations = u64::MAX;
+            }
+        }
 
         if met {
-            stats.total_rewards = stats.total_rewards.saturating_add(reward);
+            match stats.total_rewards.checked_add(reward) {
+                Some(v) => stats.total_rewards = v,
+                None => {
+                    Self::emit_stats_saturated(
+                        env,
+                        symbol_short!("totrew"),
+                        stats.total_rewards,
+                        reward,
+                    );
+                    stats.total_rewards = if reward > 0 { i128::MAX } else { i128::MIN };
+                }
+            }
         } else {
-            stats.total_violations = stats.total_violations.saturating_add(1);
-            stats.total_penalties = stats.total_penalties.saturating_add(penalty);
+            match stats.total_violations.checked_add(1) {
+                Some(v) => stats.total_violations = v,
+                None => {
+                    Self::emit_stats_saturated(
+                        env,
+                        symbol_short!("totviol"),
+                        stats.total_violations as i128,
+                        1,
+                    );
+                    stats.total_violations = u64::MAX;
+                }
+            }
+            match stats.total_penalties.checked_add(penalty) {
+                Some(v) => stats.total_penalties = v,
+                None => {
+                    Self::emit_stats_saturated(
+                        env,
+                        symbol_short!("totpen"),
+                        stats.total_penalties,
+                        penalty,
+                    );
+                    stats.total_penalties = if penalty > 0 { i128::MAX } else { i128::MIN };
+                }
+            }
         }
 
         env.storage().instance().set(&STATS_KEY, &stats);
+    }
+
+    /// Emits a `stats_sat` event when a running-stats counter saturates.
+    /// topic[0]=stats_sat, topic[1]=version, topic[2]=counter_name;
+    /// payload=(field, previous_value, attempted_increment). See event_schema.rs.
+    fn emit_stats_saturated(
+        env: &Env,
+        counter: Symbol,
+        previous_value: i128,
+        attempted_increment: i128,
+    ) {
+        env.events().publish(
+            (EVENT_STATS_SAT, EVENT_VERSION, counter.clone()),
+            (counter, previous_value, attempted_increment),
+        );
     }
 
     fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
