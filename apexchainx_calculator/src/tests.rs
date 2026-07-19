@@ -273,6 +273,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         PENDING_ADMIN_KEY,
         PENDING_OP_KEY,
         CONFIG_KEY,
+        CUSTOM_CONFIG_KEY,
         PAUSED_KEY,
         PAUSE_INFO_KEY,
         STATS_KEY,
@@ -6349,5 +6350,266 @@ fn test_issue4_repeated_set_config_produces_increasing_sequences() {
         "Repeated updates must produce an increasing sequence: second={} first={}",
         second.sequence,
         first.sequence
+    );
+}
+
+// ============================================================
+// #93 – Custom severity-level support
+// ============================================================
+
+#[test]
+fn test_admin_can_set_and_get_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let cfg = client.get_custom_severity(&symbol_short!("warning"));
+    assert_eq!(cfg.threshold_minutes, 90);
+    assert_eq!(cfg.penalty_per_minute, 5);
+    assert_eq!(cfg.reward_base, 200);
+}
+
+#[test]
+#[should_panic]
+fn test_operator_cannot_set_custom_severity() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.operator, &symbol_short!("warning"), &90, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_stranger_cannot_set_custom_severity() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.stranger, &symbol_short!("warning"), &90, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_canonical_name() {
+    let (_env, client, actors) = setup();
+    // "critical" is a canonical severity — must not be settable as custom
+    client.set_custom_severity(&actors.admin, &symbol_short!("critical"), &90, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_zero_threshold() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &0, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_threshold_over_1440() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &1441, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_zero_penalty() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &0, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_zero_reward() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &0);
+}
+
+#[test]
+#[should_panic]
+fn test_get_custom_severity_not_registered() {
+    let (_env, client, _actors) = setup();
+    client.get_custom_severity(&symbol_short!("warning"));
+}
+
+#[test]
+fn test_admin_can_remove_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let before = client.get_custom_config_snapshot();
+    assert_eq!(before.entries.len(), 1);
+
+    client.remove_custom_severity(&actors.admin, &symbol_short!("warning"));
+
+    let after = client.get_custom_config_snapshot();
+    assert_eq!(
+        after.entries.len(),
+        0,
+        "custom severity must no longer appear in the snapshot after removal"
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_get_custom_severity_after_removal() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    client.remove_custom_severity(&actors.admin, &symbol_short!("warning"));
+    // Must be gone now — SeverityNotInSet
+    client.get_custom_severity(&symbol_short!("warning"));
+}
+
+#[test]
+#[should_panic]
+fn test_remove_custom_severity_not_registered() {
+    let (_env, client, actors) = setup();
+    // never registered — must panic with SeverityNotInSet
+    client.remove_custom_severity(&actors.admin, &symbol_short!("warning"));
+}
+
+#[test]
+#[should_panic]
+fn test_operator_cannot_remove_custom_severity() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    client.remove_custom_severity(&actors.operator, &symbol_short!("warning"));
+}
+
+#[test]
+fn test_get_custom_config_snapshot_returns_registered_entries() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    client.set_custom_severity(&actors.admin, &symbol_short!("info"), &180, &1, &50);
+
+    let snapshot = client.get_custom_config_snapshot();
+    assert_eq!(snapshot.entries.len(), 2);
+}
+
+#[test]
+fn test_get_custom_config_snapshot_empty_when_none_registered() {
+    let (_env, client, _actors) = setup();
+
+    let snapshot = client.get_custom_config_snapshot();
+    assert_eq!(snapshot.entries.len(), 0);
+}
+
+// ------------------------------------------------------------
+// Invariant tests: custom severities must never leak into or
+// affect the canonical config surface (#93 constraints 1 and 2)
+// ------------------------------------------------------------
+
+#[test]
+fn test_canonical_snapshot_unaffected_by_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    let before = client.get_config_snapshot();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    let after = client.get_config_snapshot();
+
+    assert_eq!(
+        before, after,
+        "Canonical config snapshot must not change when a custom severity is added"
+    );
+    assert_eq!(
+        after.entries.len(),
+        4,
+        "Canonical snapshot must always contain exactly the 4 canonical entries"
+    );
+}
+
+#[test]
+fn test_config_version_hash_unaffected_by_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    let before = client.get_config_version_hash();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    let after = client.get_config_version_hash();
+
+    assert_eq!(
+        before, after,
+        "Config version hash must be derived only from canonical severities"
+    );
+}
+
+#[test]
+fn test_result_schema_version_unaffected_by_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    let before = client.get_result_schema().schema_version;
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    let after = client.get_result_schema().schema_version;
+
+    assert_eq!(
+        before, after,
+        "RESULT_SCHEMA_VERSION must not bump for a custom-severity addition"
+    );
+    assert_eq!(before, RESULT_SCHEMA_VERSION);
+}
+
+#[test]
+fn test_canonical_validators_unaffected_by_custom_severity_bounds() {
+    let (_env, client, actors) = setup();
+
+    // A custom severity with values that would violate critical's stricter
+    // per-severity bounds (threshold > 60, penalty < 50) must still succeed,
+    // proving custom severities bypass the canonical per-severity branches
+    // in validate_config and only go through the general bounds.
+    let sev = symbol(&_env, "service_degraded");
+    client.set_custom_severity(&actors.admin, &sev, &500, &1, &100);
+
+    let cfg = client.get_custom_severity(&sev);
+    assert_eq!(cfg.threshold_minutes, 500);
+    assert_eq!(cfg.penalty_per_minute, 1);
+}
+
+#[test]
+fn test_custom_severity_does_not_appear_in_canonical_snapshot_entries() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let snapshot = client.get_config_snapshot();
+    for entry in snapshot.entries.iter() {
+        assert_ne!(entry.severity, symbol_short!("warning"));
+    }
+}
+
+#[test]
+fn test_calculate_sla_with_dynamically_added_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    // "Test: add 'warning' severity dynamically, run calculate, get result." (#93)
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let result = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("WARN001"),
+        &symbol_short!("warning"),
+        &45, // under the 90-min threshold → met
+    );
+
+    assert_eq!(result.status, symbol_short!("met"));
+    assert_eq!(result.threshold_minutes, 90);
+}
+
+#[test]
+fn test_calculate_sla_view_with_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("info"), &180, &1, &50);
+
+    let result = client.calculate_sla_view(&symbol_short!("INFO001"), &symbol_short!("info"), &200);
+
+    // 200 > 180 threshold → violated
+    assert_eq!(result.status, symbol_short!("viol"));
+}
+
+#[test]
+#[should_panic]
+fn test_calculate_sla_rejects_unregistered_custom_severity() {
+    let (_env, client, actors) = setup();
+    // "warning" was never registered via set_custom_severity — must still fail
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("WARN002"),
+        &symbol_short!("warning"),
+        &45,
     );
 }

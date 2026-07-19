@@ -47,12 +47,15 @@ const OPERATOR_KEY: Symbol = symbol_short!("OPERATOR");
 
 /// Pending admin for two-step transfer. (#63)
 const PENDING_ADMIN_KEY: Symbol = symbol_short!("PADMIN");
-
 /// Pending operator for two-step handoff. (#64)
 const PENDING_OP_KEY: Symbol = symbol_short!("POP");
 
 /// Map of severity -> SLAConfig for all configured severity levels.
 const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
+
+/// Map of severity -> SLAConfig for admin-defined custom severity levels,
+/// distinct from the four canonical entries (critical/high/medium/low). (#93)
+const CUSTOM_CONFIG_KEY: Symbol = symbol_short!("CUSTCFG");
 
 /// Boolean flag: true when contract is paused. (#27)
 const PAUSED_KEY: Symbol = symbol_short!("PAUSED");
@@ -265,6 +268,8 @@ pub enum SLAError {
     ConfigFrozen = 16,
     /// Input parameter violates documented constraints (e.g., reason too long). (#68)
     InvalidInput = 17,
+    /// Custom severity referenced but not registered. (#93)
+    SeverityNotInSet = 18,
 }
 
 // -----------------------------------------------------------------------
@@ -620,6 +625,10 @@ impl SLACalculatorContract {
                 },
             );
             inst.set(&CONFIG_KEY, &configs);
+        }
+
+        if !inst.has(&CUSTOM_CONFIG_KEY) {
+            inst.set(&CUSTOM_CONFIG_KEY, &Map::<Symbol, SLAConfig>::new(env));
         }
     }
 
@@ -1004,6 +1013,125 @@ impl SLACalculatorContract {
         Self::load_config(&env, &severity)
     }
 
+    // -------------------------------------------------------------------
+    // #93 – Custom severity-level support (admin only)
+    // -------------------------------------------------------------------
+
+    /// Registers or updates a custom (non-canonical) severity level with its
+    /// own SLAConfig. Stored in a separate map from the four canonical
+    /// entries (critical/high/medium/low) so `get_config_snapshot()` and
+    /// `compute_config_version_hash()` remain untouched. Admin only.
+    pub fn set_custom_severity(
+        env: Env,
+        caller: Address,
+        severity: Symbol,
+        threshold_minutes: u32,
+        penalty_per_minute: i128,
+        reward_base: i128,
+    ) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+        Self::require_not_frozen(&env)?;
+
+        // Custom severities must never shadow a canonical one.
+        if Self::is_canonical_severity(&severity) {
+            return Err(SLAError::InvalidSeverity);
+        }
+
+        // Only the general bounds apply to custom severities — the
+        // per-severity branches in validate_config are canonical-only.
+        Self::validate_general_bounds(threshold_minutes, penalty_per_minute, reward_base)?;
+
+        let mut custom: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CUSTOM_CONFIG_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+
+        custom.set(
+            severity.clone(),
+            SLAConfig {
+                threshold_minutes,
+                penalty_per_minute,
+                reward_base,
+            },
+        );
+        env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
+
+        env.events().publish(
+            (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
+            (threshold_minutes, penalty_per_minute, reward_base),
+        );
+        Ok(())
+    }
+
+    /// Removes a previously registered custom severity level. Admin only.
+    /// Returns `SeverityNotInSet` if the severity was never registered.
+    pub fn remove_custom_severity(
+        env: Env,
+        caller: Address,
+        severity: Symbol,
+    ) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+        Self::require_not_frozen(&env)?;
+
+        let mut custom: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CUSTOM_CONFIG_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+
+        if !custom.contains_key(severity.clone()) {
+            return Err(SLAError::SeverityNotInSet);
+        }
+
+        custom.remove(severity.clone());
+        env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
+
+        env.events().publish(
+            (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
+            (0u32, 0i128, 0i128),
+        );
+        Ok(())
+    }
+
+    /// Returns the SLAConfig for a registered custom severity.
+    /// Returns `SeverityNotInSet` if the severity was never registered.
+    pub fn get_custom_severity(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
+        Self::check_version(&env)?;
+        let custom: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CUSTOM_CONFIG_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+        custom.get(severity).ok_or(SLAError::SeverityNotInSet)
+    }
+
+    /// Returns a deterministic snapshot of all registered custom severity
+    /// configurations, in insertion order. Mirrors the shape of
+    /// `get_config_snapshot()` but is a distinct endpoint — the canonical
+    /// snapshot is never mixed with custom entries. (#93)
+    pub fn get_custom_config_snapshot(env: Env) -> Result<SLAConfigSnapshot, SLAError> {
+        Self::check_version(&env)?;
+
+        let custom: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CUSTOM_CONFIG_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+
+        let mut entries = Vec::new(&env);
+        for (severity, config) in custom.iter() {
+            entries.push_back(SLAConfigEntry { severity, config });
+        }
+
+        Ok(SLAConfigSnapshot {
+            version: symbol_short!("v1"),
+            entries,
+        })
+    }
+
     pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
         Self::check_version(&env)?;
         env.storage()
@@ -1077,7 +1205,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 17] = [
+        let entries: [(u32, &str, &str); 18] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1099,6 +1227,7 @@ impl SLACalculatorContract {
             (15, "InvalidRewardAmount", "Invalid reward amount"),
             (16, "ConfigFrozen", "Configuration is frozen"),
             (17, "InvalidInput", "Invalid input parameter"),
+            (18, "SeverityNotInSet", "Custom severity not registered"),
         ];
 
         for (code, label, description) in entries {
@@ -1349,7 +1478,9 @@ impl SLACalculatorContract {
             })
         } else {
             // Case 2: SLA met → reward
-            let performance_ratio = (mttr_minutes as u64 * 100).checked_div(threshold as u64).unwrap_or(0);
+            let performance_ratio = (mttr_minutes as u64 * 100)
+                .checked_div(threshold as u64)
+                .unwrap_or(0);
 
             let (multiplier, rating) = if performance_ratio < 50 {
                 (200u32, symbol_short!("top"))
@@ -1435,6 +1566,26 @@ impl SLACalculatorContract {
     fn require_not_frozen(env: &Env) -> Result<(), SLAError> {
         if config_freeze::is_config_frozen(env) {
             return Err(SLAError::ConfigFrozen);
+        }
+        Ok(())
+    }
+
+    /// #93 – General bounds shared by canonical and custom severities.
+    /// Extracted from validate_config so custom severities get the same
+    /// baseline safety checks without the canonical-only per-severity branches.
+    fn validate_general_bounds(
+        threshold_minutes: u32,
+        penalty_per_minute: i128,
+        reward_base: i128,
+    ) -> Result<(), SLAError> {
+        if threshold_minutes == 0 || threshold_minutes > 1440 {
+            return Err(SLAError::InvalidThreshold);
+        }
+        if penalty_per_minute <= 0 || penalty_per_minute > 10000 {
+            return Err(SLAError::InvalidPenalty);
+        }
+        if reward_base <= 0 || reward_base > 100000 {
+            return Err(SLAError::InvalidReward);
         }
         Ok(())
     }
@@ -1573,22 +1724,29 @@ impl SLACalculatorContract {
         Ok(hash.wrapping_mul(BASE).wrapping_add(0x9e3779b97f4a7c15u64) % MODULUS)
     }
 
-    /// Optimised config lookup with severity index pre-check for early rejection.
-    /// Skips the storage read when the severity is not one of the four canonical
-    /// values, avoiding an unnecessary Map deserialisation for invalid inputs.
+    /// Config lookup used by calculate_sla / calculate_sla_view / get_config.
+    /// Canonical severities are checked first (fast path, unchanged behaviour).
+    /// Non-canonical severities fall back to the custom severity map (#93),
+    /// so calculate_sla can evaluate outages against admin-registered custom
+    /// severities the same way it does canonical ones.
     fn load_config(env: &Env, severity: &Symbol) -> Result<SLAConfig, SLAError> {
-        // Early rejection for non-canonical severities — avoids storage read.
-        if !Self::is_canonical_severity(severity) {
-            return Err(SLAError::ConfigNotFound);
+        if Self::is_canonical_severity(severity) {
+            let configs: Map<Symbol, SLAConfig> = env
+                .storage()
+                .instance()
+                .get(&CONFIG_KEY)
+                .ok_or(SLAError::NotInitialized)?;
+            return configs
+                .get(severity.clone())
+                .ok_or(SLAError::ConfigNotFound);
         }
-        let configs: Map<Symbol, SLAConfig> = env
+
+        let custom: Map<Symbol, SLAConfig> = env
             .storage()
             .instance()
-            .get(&CONFIG_KEY)
-            .ok_or(SLAError::NotInitialized)?;
-        configs
-            .get(severity.clone())
-            .ok_or(SLAError::ConfigNotFound)
+            .get(&CUSTOM_CONFIG_KEY)
+            .unwrap_or_else(|| Map::new(env));
+        custom.get(severity.clone()).ok_or(SLAError::ConfigNotFound)
     }
 
     /// #29 – Read-modify-write the stats entry.
