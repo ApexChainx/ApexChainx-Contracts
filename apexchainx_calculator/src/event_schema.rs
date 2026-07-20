@@ -102,6 +102,11 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## migrate_done (`migrate_done`)
+//! Emitted when a storage migration completes successfully.
+//! - topic[2]: caller Address
+//! - payload:  (old_version: u32, new_version: u32)
+//!
 //! # Schema Versioning
 //!
 //! Breaking changes (field removal, type changes, reordering) MUST increment
@@ -134,6 +139,7 @@ pub const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 pub const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
 pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
+pub const EVENT_MIGRATE_DONE: &str = "migrate_done";
 
 /// Returns the canonical event version string for consumer documentation.
 pub fn current_event_version() -> Symbol {
