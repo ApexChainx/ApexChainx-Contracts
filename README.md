@@ -340,6 +340,40 @@ The `release-hash` workflow (`.github/workflows/release-hash.yml`) runs
 automatically on every push to `main`, every PR, and every `v*` tag. On tag
 pushes the manifest and WASM are attached to the GitHub Release.
 
+## Build Size Trend
+
+The contract WASM is enforced against a hard budget of **100 KB** (SC-042).
+Every release WASM build also appends a row to a persistent history file so
+maintainers can spot regressions before they land.
+
+| File | Purpose |
+| --- | --- |
+| `apexchainx_calculator/.wasm-size.baseline.txt` | Single-line current size; updated by the CI job after every successful release build. |
+| `apexchainx_calculator/.wasm-size.history.txt` | TSV log. Columns: `sha`, `ts`, `size_bytes`, `source`, `event`, `iso_date`. Header comment describes the columns. |
+
+The `wasm-size-history` CI job (`.github/workflows/ci.yml`) runs on every
+push and PR:
+
+1. Builds the release WASM (`cargo build --target wasm32-unknown-unknown --release`).
+2. Calls `npx tsx tools/wasm-size.ts` — enforces the 100 KB budget, updates
+   the baseline, and appends a row to the history file.
+3. Emits a markdown summary via `npx tsx tools/wasm-size.ts summary` and:
+   - uploads it as the `wasm-size-history` artifact, and
+   - posts it as a sticky comment on the originating PR.
+
+Inspect the history locally:
+
+```bash
+# Show last 5 release builds
+tail -n 8 apexchainx_calculator/.wasm-size.history.txt
+
+# Print a markdown summary to stdout
+npx tsx tools/wasm-size.ts summary
+```
+
+The script honours `GITHUB_SHA`, `GITHUB_REF_NAME`, and `GITHUB_EVENT_NAME`
+when invoked from CI so history rows are tagged accurately.
+
 ## Build Verification
 
 ### Current Status

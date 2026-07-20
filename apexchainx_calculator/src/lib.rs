@@ -15,6 +15,13 @@ mod tests;
 #[cfg(test)]
 mod fuzz_tests;
 
+#[cfg(test)]
+#[cfg(feature = "debug-trace")]
+mod trace_tests;
+
+#[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+pub mod trace;
+
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
@@ -555,6 +562,12 @@ impl SLACalculatorContract {
 
         env.storage().instance().set(&CONFIG_KEY, &configs);
         Self::write_version(&env);
+
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        {
+            trace::record_initialize("admin", "operator");
+        }
+
         Ok(())
     }
 
@@ -732,6 +745,11 @@ impl SLACalculatorContract {
             (new_operator.clone(),),
         );
 
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        {
+            trace::record_set_operator();
+        }
+
         Ok(())
     }
 
@@ -886,6 +904,22 @@ impl SLACalculatorContract {
         );
         env.events()
             .publish((EVENT_PAUSED, EVENT_VERSION, caller), (true,));
+
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        {
+            // Copy into an owned String for the trace (Soroban String is
+            // bounded; using a separate local keeps the contract API
+            // unchanged and avoids referencing the consumed Soroban String).
+            let reason_owned: String = {
+                let mut buf = alloc::string::String::new();
+                for c in reason.iter() {
+                    buf.push(c);
+                }
+                buf
+            };
+            trace::record_pause(&reason_owned);
+        }
+
         Ok(())
     }
 
@@ -899,6 +933,12 @@ impl SLACalculatorContract {
         env.storage().instance().remove(&PAUSE_INFO_KEY);
         env.events()
             .publish((EVENT_UNPAUSED, EVENT_VERSION, caller), (false,));
+
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        {
+            trace::record_unpause();
+        }
+
         Ok(())
     }
 
@@ -926,6 +966,12 @@ impl SLACalculatorContract {
         config_freeze::freeze_config(&env);
         env.events()
             .publish((EVENT_CONFIG_FREEZE, EVENT_VERSION, caller), ());
+
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        {
+            trace::record_freeze_config();
+        }
+
         Ok(())
     }
 
@@ -937,6 +983,12 @@ impl SLACalculatorContract {
         config_freeze::unfreeze_config(&env);
         env.events()
             .publish((EVENT_CONFIG_UNFREEZE, EVENT_VERSION, caller), ());
+
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        {
+            trace::record_unfreeze_config();
+        }
+
         Ok(())
     }
 
@@ -996,6 +1048,17 @@ impl SLACalculatorContract {
             (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
             (threshold_minutes, penalty_per_minute, reward_base),
         );
+
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        {
+            trace::record_set_config(
+                &severity.to_string(),
+                threshold_minutes,
+                penalty_per_minute,
+                reward_base,
+            );
+        }
+
         Ok(())
     }
 
@@ -1301,8 +1364,24 @@ impl SLACalculatorContract {
             Self::increment_stats(&env, true, result.amount, 0);
         }
 
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        let severity_str = severity.to_string();
+
         Self::publish_sla_event(&env, severity.clone(), &result);
         Self::publish_settlement_intent_event(&env, severity, &result);
+
+        #[cfg(all(feature = "debug-trace", not(target_family = "wasm")))]
+        {
+            trace::record_calculate_sla(
+                &severity_str,
+                &result.status.to_string(),
+                &result.payment_type.to_string(),
+                &result.rating.to_string(),
+                result.amount,
+                result.mttr_minutes,
+                result.threshold_minutes,
+            );
+        }
 
         Ok(result)
     }
