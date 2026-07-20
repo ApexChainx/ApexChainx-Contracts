@@ -66,10 +66,7 @@ jobs:
       # Print a human-readable summary to the job log for quick inspection.
       - name: Print coverage summary
         working-directory: apexchainx_calculator
-        run: |
-          cargo llvm-cov report \
-            --all-features \
-            --summary-only
+        run: cargo llvm-cov report --summary-only
 
       # Upload lcov.info to Codecov.
       # CODECOV_TOKEN must be added as a repository secret in GitHub Settings
