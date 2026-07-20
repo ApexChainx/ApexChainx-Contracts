@@ -1,0 +1,91 @@
+# =============================================================================
+# ApexChainx Contracts — Code Coverage
+# =============================================================================
+# Issue #78: Generate line coverage via cargo-llvm-cov, upload to Codecov,
+# and fail the job if line coverage drops by more than 1 percentage point
+# compared to the baseline stored in codecov.io.
+# =============================================================================
+
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Pin to the same toolchain used in ci.yml so coverage numbers are
+      # comparable across runs.
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/target
+          key: coverage-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            coverage-${{ runner.os }}-cargo-
+
+      # cargo-llvm-cov instruments the binary via LLVM coverage and produces
+      # an lcov.info compatible with Codecov's diff-aware uploader.
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      # Run the full test suite with coverage instrumentation.
+      # --all-features ensures dev-dependency code paths (testutils) are covered.
+      # --lcov writes the report in lcov format expected by Codecov.
+      - name: Generate coverage report
+        working-directory: apexchainx_calculator
+        run: |
+          cargo llvm-cov \
+            --all-features \
+            --lcov \
+            --output-path ../lcov.info
+
+      # Print a human-readable summary to the job log for quick inspection.
+      - name: Print coverage summary
+        working-directory: apexchainx_calculator
+        run: cargo llvm-cov report --summary-only
+
+      # Upload lcov.info to Codecov.
+      # CODECOV_TOKEN must be added as a repository secret in GitHub Settings
+      # → Secrets and variables → Actions → New repository secret.
+      # fail_ci_if_error is false so a missing token on fork PRs produces a
+      # warning rather than a hard build failure. The coverage gate (threshold
+      # checks) is enforced by codecov.yml once uploads are flowing.
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: lcov.info
+          flags: unit
+          name: apexchainx-calculator
+          fail_ci_if_error: false
+
+      - name: Upload lcov artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lcov-report
+          path: lcov.info
+          retention-days: 30
