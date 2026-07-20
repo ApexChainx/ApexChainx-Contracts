@@ -1,8 +1,8 @@
 #![cfg(test)]
 
 use crate::{SLACalculatorContract, SLAConfig};
-use soroban_sdk::{symbol_short, Env, Symbol};
 use proptest::prelude::*;
+use soroban_sdk::{symbol_short, Env, Symbol};
 
 // Helper to check if a config is valid for a given severity.
 fn is_config_valid(

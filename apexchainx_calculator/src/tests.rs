@@ -1546,11 +1546,8 @@ fn test_config_version_hash_not_affected_by_custom_severity_in_map() {
 
     // Write a custom severity into the config map via raw storage
     env.as_contract(&cid, || {
-        let mut configs: soroban_sdk::Map<Symbol, SLAConfig> = env
-            .storage()
-            .instance()
-            .get(&CONFIG_KEY)
-            .unwrap();
+        let mut configs: soroban_sdk::Map<Symbol, SLAConfig> =
+            env.storage().instance().get(&CONFIG_KEY).unwrap();
         configs.set(
             symbol_short!("custom"),
             SLAConfig {
