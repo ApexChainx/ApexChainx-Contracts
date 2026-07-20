@@ -12,6 +12,11 @@ crate-type = ["cdylib"]
 
 [features]
 default = []
+# Issue #98: opt-in structured tracing for the test harness. Builds the
+# `trace` module (stdlib-backed, host-only) and wires `trace::record_*`
+# calls into the contract public methods. Enable with
+# `cargo test --features debug-trace` to exercise the trace API.
+debug-trace = []
 
 [dependencies]
 soroban-sdk = { version = "21.1.0", features = ["alloc"] }

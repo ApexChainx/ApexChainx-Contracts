@@ -99,18 +99,32 @@ jobs:
         working-directory: apexchainx_calculator
         run: cargo test --lib
 
-      # Issue #81: Normalize snapshot artifacts before upload so that volatile
-      # fields (timestamp, elapsed_ms, generated_at) are stripped and keys are
-      # sorted. This prevents noisy PR diffs caused by non-semantic changes.
-      - name: Normalize snapshot artifacts
-        run: npx --yes tsx tools/normalize-snapshots.ts
+  # Issue #90 — compile and run tests under the `--release` profile.
+  # Catches bugs that only appear under release inlining/DCE (e.g., UB
+  # detection, expression reordering, dead-store elimination). Runs in
+  # parallel to `e2e-tests` so the added wall-clock cost is bounded.
+  e2e-tests-release:
+    name: E2E Tests (Release Profile)
+    runs-on: ubuntu-latest
 
-      - name: Upload snapshot artifacts
-        uses: actions/upload-artifact@v4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo target (release profile)
+        uses: actions/cache@v4
         with:
-          name: sla-test-snapshots
-          path: apexchainx_calculator/test_snapshots/tests/
-          retention-days: 30
+          path: apexchainx_calculator/target
+          key: e2e-release-${{ runner.os }}-${{ hashFiles('apexchainx_calculator/Cargo.lock', 'apexchainx_calculator/Cargo.toml') }}
+          restore-keys: |
+            e2e-release-${{ runner.os }}-
+
+      - name: Run tests in release mode
+        working-directory: apexchainx_calculator
+        run: cargo test --release --lib
 
   fuzz-tests:
     name: Fuzz Tests (proptest)
@@ -139,6 +153,71 @@ jobs:
         working-directory: apexchainx_calculator
         run: cargo test --lib fuzz_tests::
 
+
+  # Issue #82 — Track WASM size history across every CI run.
+  # Builds the release WASM, runs `tools/wasm-size.ts` to enforce the
+  # 100 KB budget (SC-042) and to append a TSV row to
+  # `apexchainx_calculator/.wasm-size.history.txt`, then renders a
+  # markdown summary that is uploaded as an artifact and posted as a
+  # sticky PR comment (only on pull_request runs).
+  wasm-size-history:
+    name: WASM Size History
+    runs-on: ubuntu-latest
+
+    # `pull-requests: write` is required by `marocchino/sticky-pull-request-comment`
+    # to (re)post the wasm-size-history header on the originating PR.
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust + wasm32 target
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Build WASM release
+        working-directory: apexchainx_calculator
+        run: cargo build --target wasm32-unknown-unknown --release
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Enforce budget + persist history
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: npx --yes tsx tools/wasm-size.ts
+
+      - name: Render markdown summary
+        run: npx --yes tsx tools/wasm-size.ts summary > wasm-size-summary.md
+        shell: bash
+
+      - name: Show summary
+        run: cat wasm-size-summary.md
+
+      - name: Upload trend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-size-history
+          path: |
+            wasm-size-summary.md
+            apexchainx_calculator/.wasm-size.baseline.txt
+            apexchainx_calculator/.wasm-size.history.txt
+          retention-days: 365
+
+      - name: Post summary as PR comment
+        if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: wasm-size-history
+          path: wasm-size-summary.md
 
   provenance-hashes:
     name: Provenance & Hashes
