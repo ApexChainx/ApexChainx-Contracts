@@ -2,8 +2,7 @@
 extern crate alloc;
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, String,
-    Symbol, Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, String, Symbol, Vec,
 };
 
 #[contract]
@@ -21,11 +20,11 @@ pub mod config_freeze;
 pub mod config_metadata;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
+pub mod error_responses;
 pub mod event_correlation;
 mod event_schema;
 pub mod history_snapshot;
 pub mod version_negotiation;
-pub mod error_responses;
 
 use crate::audit_state::AuditState;
 use crate::config_bundle::ConfigBundle;
@@ -553,18 +552,10 @@ impl SLACalculatorContract {
                 total_penalties: 0,
             },
         );
-        env.storage()
-            .instance()
-            .set(&SEVERITY_CALC_COUNTS_KEY, &0u128);
-        env.storage()
-            .instance()
-            .set(&SEVERITY_VIOL_COUNTS_KEY, &0u128);
-        env.storage()
-            .instance()
-            .set(&LAST_CALCULATION_LEDGER_KEY, &0u128);
-        env.storage()
-            .instance()
-            .set(&LAST_VIOLATION_LEDGER_KEY, &0u128);
+        env.storage().instance().set(&SEVERITY_CALC_COUNTS_KEY, &0u128);
+        env.storage().instance().set(&SEVERITY_VIOL_COUNTS_KEY, &0u128);
+        env.storage().instance().set(&LAST_CALCULATION_LEDGER_KEY, &0u128);
+        env.storage().instance().set(&LAST_VIOLATION_LEDGER_KEY, &0u128);
         env.storage()
             .instance()
             .set(&HISTORY_KEY, &Vec::<SLAResult>::new(&env));
@@ -716,11 +707,7 @@ impl SLACalculatorContract {
             return Err(SLAError::Unauthorized);
         }
 
-        let stored: u32 = env
-            .storage()
-            .instance()
-            .get(&STORAGE_VERSION_KEY)
-            .unwrap_or(0);
+        let stored: u32 = env.storage().instance().get(&STORAGE_VERSION_KEY).unwrap_or(0);
 
         // Already current – idempotent no-op
         if stored == STORAGE_VERSION {
@@ -806,10 +793,8 @@ impl SLACalculatorContract {
 
         env.storage().instance().set(&OPERATOR_KEY, &new_operator);
 
-        env.events().publish(
-            (EVENT_OP_SET, EVENT_VERSION, caller),
-            (new_operator.clone(),),
-        );
+        env.events()
+            .publish((EVENT_OP_SET, EVENT_VERSION, caller), (new_operator.clone(),));
 
         Ok(())
     }
@@ -842,8 +827,7 @@ impl SLACalculatorContract {
         }
         env.storage().instance().set(&ADMIN_KEY, &caller);
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
-        env.events()
-            .publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller), ());
+        env.events().publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller), ());
         Ok(())
     }
 
@@ -857,8 +841,7 @@ impl SLACalculatorContract {
             return Err(SLAError::NoPendingTransfer);
         }
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
-        env.events()
-            .publish((EVENT_ADMIN_CAN, EVENT_VERSION, caller), ());
+        env.events().publish((EVENT_ADMIN_CAN, EVENT_VERSION, caller), ());
         Ok(())
     }
 
@@ -873,11 +856,7 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Propose a new operator. The current admin initiates; the new operator must call `accept_operator`.
-    pub fn propose_operator(
-        env: Env,
-        caller: Address,
-        new_operator: Address,
-    ) -> Result<(), SLAError> {
+    pub fn propose_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         env.storage().instance().set(&PENDING_OP_KEY, &new_operator);
@@ -899,8 +878,7 @@ impl SLACalculatorContract {
         }
         env.storage().instance().set(&OPERATOR_KEY, &caller);
         env.storage().instance().remove(&PENDING_OP_KEY);
-        env.events()
-            .publish((EVENT_OP_ACC, EVENT_VERSION, caller), ());
+        env.events().publish((EVENT_OP_ACC, EVENT_VERSION, caller), ());
         Ok(())
     }
 
@@ -914,8 +892,7 @@ impl SLACalculatorContract {
             return Err(SLAError::NoPendingTransfer);
         }
         env.storage().instance().remove(&PENDING_OP_KEY);
-        env.events()
-            .publish((EVENT_OP_CAN, EVENT_VERSION, caller), ());
+        env.events().publish((EVENT_OP_CAN, EVENT_VERSION, caller), ());
         Ok(())
     }
 
@@ -937,8 +914,7 @@ impl SLACalculatorContract {
         Self::require_admin(&env, &caller)?;
         env.storage().instance().remove(&ADMIN_KEY);
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
-        env.events()
-            .publish((EVENT_ADMIN_REN, EVENT_VERSION, caller), ());
+        env.events().publish((EVENT_ADMIN_REN, EVENT_VERSION, caller), ());
         Ok(())
     }
 
@@ -1042,12 +1018,7 @@ impl SLACalculatorContract {
         Self::require_not_frozen(&env)?;
 
         // #70 – Validate configuration parameters
-        Self::validate_config(
-            &severity,
-            threshold_minutes,
-            penalty_per_minute,
-            reward_base,
-        )?;
+        Self::validate_config(&severity, threshold_minutes, penalty_per_minute, reward_base)?;
 
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
@@ -1137,11 +1108,7 @@ impl SLACalculatorContract {
 
     /// Removes a previously registered custom severity level. Admin only.
     /// Returns `SeverityNotInSet` if the severity was never registered.
-    pub fn remove_custom_severity(
-        env: Env,
-        caller: Address,
-        severity: Symbol,
-    ) -> Result<(), SLAError> {
+    pub fn remove_custom_severity(env: Env, caller: Address, severity: Symbol) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         Self::require_not_frozen(&env)?;
@@ -1159,10 +1126,8 @@ impl SLACalculatorContract {
         custom.remove(severity.clone());
         env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
-        env.events().publish(
-            (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
-            (0u32, 0i128, 0i128),
-        );
+        env.events()
+            .publish((EVENT_CONFIG_UPD, EVENT_VERSION, severity), (0u32, 0i128, 0i128));
         Ok(())
     }
 
@@ -1225,8 +1190,7 @@ impl SLACalculatorContract {
     /// Soroban contract client boundary.
     pub fn get_last_config_update(env: Env) -> Result<Option<ConfigUpdateInfo>, SLAError> {
         Self::check_version(&env)?;
-        Ok(config_metadata::get_last_config_update(&env)
-            .map(|seq| ConfigUpdateInfo { sequence: seq }))
+        Ok(config_metadata::get_last_config_update(&env).map(|seq| ConfigUpdateInfo { sequence: seq }))
     }
 
     /// Returns a deterministic backend-friendly snapshot of all config values.
@@ -1287,11 +1251,7 @@ impl SLACalculatorContract {
             (9, "InvalidPenalty", "Penalty out of range"),
             (10, "InvalidReward", "Reward out of range"),
             (11, "InvalidSeverity", "Severity not supported"),
-            (
-                12,
-                "RetentionLimitOutOfRange",
-                "Retention limit out of range",
-            ),
+            (12, "RetentionLimitOutOfRange", "Retention limit out of range"),
             (13, "DuplicateOutageInput", "Duplicate outage input"),
             (14, "InvalidPenaltyAmount", "Invalid penalty amount"),
             (15, "InvalidRewardAmount", "Invalid reward amount"),
@@ -1551,9 +1511,7 @@ impl SLACalculatorContract {
             if prev.config_version_hash == config_version_hash {
                 // Explicit duplicate policy: same outage_id is idempotent only when
                 // execution inputs resolve to the same deterministic result.
-                if prev.mttr_minutes != mttr_minutes
-                    || prev.threshold_minutes != cfg.threshold_minutes
-                {
+                if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
                     return Err(SLAError::DuplicateOutageInput);
                 }
                 return Ok(prev);
@@ -1903,9 +1861,7 @@ impl SLACalculatorContract {
                 .instance()
                 .get(&CONFIG_KEY)
                 .ok_or(SLAError::NotInitialized)?;
-            return configs
-                .get(severity.clone())
-                .ok_or(SLAError::ConfigNotFound);
+            return configs.get(severity.clone()).ok_or(SLAError::ConfigNotFound);
         }
 
         let custom: Map<Symbol, SLAConfig> = env
@@ -1921,16 +1877,12 @@ impl SLACalculatorContract {
     /// `reward`  – reward amount to add (0 on violation path).
     /// `penalty` – penalty amount to add, stored positive (0 on met path).
     fn increment_stats(env: &Env, met: bool, reward: i128, penalty: i128) {
-        let mut stats: SLAStats = env
-            .storage()
-            .instance()
-            .get(&STATS_KEY)
-            .unwrap_or(SLAStats {
-                total_calculations: 0,
-                total_violations: 0,
-                total_rewards: 0,
-                total_penalties: 0,
-            });
+        let mut stats: SLAStats = env.storage().instance().get(&STATS_KEY).unwrap_or(SLAStats {
+            total_calculations: 0,
+            total_violations: 0,
+            total_rewards: 0,
+            total_penalties: 0,
+        });
 
         // Each counter uses checked_* so a saturating increment can be detected
         // and surfaced as a stats_sat event. On overflow the counter is capped
@@ -1953,12 +1905,7 @@ impl SLACalculatorContract {
             match stats.total_rewards.checked_add(reward) {
                 Some(v) => stats.total_rewards = v,
                 None => {
-                    Self::emit_stats_saturated(
-                        env,
-                        symbol_short!("totrew"),
-                        stats.total_rewards,
-                        reward,
-                    );
+                    Self::emit_stats_saturated(env, symbol_short!("totrew"), stats.total_rewards, reward);
                     stats.total_rewards = if reward > 0 { i128::MAX } else { i128::MIN };
                 }
             }
@@ -1978,12 +1925,7 @@ impl SLACalculatorContract {
             match stats.total_penalties.checked_add(penalty) {
                 Some(v) => stats.total_penalties = v,
                 None => {
-                    Self::emit_stats_saturated(
-                        env,
-                        symbol_short!("totpen"),
-                        stats.total_penalties,
-                        penalty,
-                    );
+                    Self::emit_stats_saturated(env, symbol_short!("totpen"), stats.total_penalties, penalty);
                     stats.total_penalties = if penalty > 0 { i128::MAX } else { i128::MIN };
                 }
             }
@@ -1995,12 +1937,7 @@ impl SLACalculatorContract {
     /// Emits a `stats_sat` event when a running-stats counter saturates.
     /// topic[0]=stats_sat, topic[1]=version, topic[2]=counter_name;
     /// payload=(field, previous_value, attempted_increment). See event_schema.rs.
-    fn emit_stats_saturated(
-        env: &Env,
-        counter: Symbol,
-        previous_value: i128,
-        attempted_increment: i128,
-    ) {
+    fn emit_stats_saturated(env: &Env, counter: Symbol, previous_value: i128, attempted_increment: i128) {
         env.events().publish(
             (EVENT_STATS_SAT, EVENT_VERSION, counter.clone()),
             (counter, previous_value, attempted_increment),
@@ -2048,10 +1985,18 @@ impl SLACalculatorContract {
             last_violations = Self::set_count_lane(last_violations, index, current_ledger);
         }
 
-        env.storage().instance().set(&SEVERITY_CALC_COUNTS_KEY, &calculations);
-        env.storage().instance().set(&SEVERITY_VIOL_COUNTS_KEY, &violations);
-        env.storage().instance().set(&LAST_CALCULATION_LEDGER_KEY, &last_calculations);
-        env.storage().instance().set(&LAST_VIOLATION_LEDGER_KEY, &last_violations);
+        env.storage()
+            .instance()
+            .set(&SEVERITY_CALC_COUNTS_KEY, &calculations);
+        env.storage()
+            .instance()
+            .set(&SEVERITY_VIOL_COUNTS_KEY, &violations);
+        env.storage()
+            .instance()
+            .set(&LAST_CALCULATION_LEDGER_KEY, &last_calculations);
+        env.storage()
+            .instance()
+            .set(&LAST_VIOLATION_LEDGER_KEY, &last_violations);
     }
 
     fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
@@ -2120,10 +2065,8 @@ impl SLACalculatorContract {
             }
 
             env.storage().instance().set(&HISTORY_KEY, &new_history);
-            env.events().publish(
-                (EVENT_PRUNED, EVENT_VERSION, caller),
-                (remove_count, keep_latest),
-            );
+            env.events()
+                .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, keep_latest));
         }
 
         Ok(())
@@ -2133,11 +2076,7 @@ impl SLACalculatorContract {
     /// current ledger timestamp.  Entries with `recorded_at == 0` (view-mode
     /// results that were never stored with a real timestamp) are always kept.
     /// Admin-only.  Emits a `pruned_a` event.
-    pub fn prune_history_by_age(
-        env: Env,
-        caller: Address,
-        min_age_seconds: u64,
-    ) -> Result<(), SLAError> {
+    pub fn prune_history_by_age(env: Env, caller: Address, min_age_seconds: u64) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
 
@@ -2228,10 +2167,7 @@ impl SLACalculatorContract {
 
     /// Returns the most recent history entry for the given `outage_id`, or `None`
     /// if no entry exists for that outage.
-    pub fn get_latest_by_outage(
-        env: Env,
-        outage_id: Symbol,
-    ) -> Result<Option<SLAResult>, SLAError> {
+    pub fn get_latest_by_outage(env: Env, outage_id: Symbol) -> Result<Option<SLAResult>, SLAError> {
         Self::check_version(&env)?;
         let history: Vec<SLAResult> = env
             .storage()
