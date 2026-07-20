@@ -5,6 +5,7 @@
   <img src="https://img.shields.io/badge/Soroban_SDK-21.0.0-important" alt="Soroban SDK: 21.0.0">
   <img src="https://img.shields.io/badge/rustc-stable-success" alt="Rust: stable">
   <img src="https://img.shields.io/badge/platform-Stellar_Network-000" alt="Platform: Stellar Network">
+  <a href="https://codecov.io/gh/ApexChainx/ApexChainx-Contracts"><img src="https://codecov.io/gh/ApexChainx/ApexChainx-Contracts/branch/main/graph/badge.svg" alt="Coverage"></a>
 </p>
 
 # ApexChainx Smart Contracts
