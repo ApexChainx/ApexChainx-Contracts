@@ -99,13 +99,7 @@ mod tests {
     fn test_set_config_fails_when_frozen() {
         let (_env, client, admin, _operator) = setup();
         client.freeze_config(&admin);
-        client.set_config(
-            &admin,
-            &soroban_sdk::symbol_short!("critical"),
-            &15,
-            &100,
-            &750,
-        );
+        client.set_config(&admin, &soroban_sdk::symbol_short!("critical"), &15, &100, &750);
     }
 
     #[test]
@@ -115,13 +109,7 @@ mod tests {
         assert!(client.is_config_frozen());
         client.unfreeze_config(&admin);
         assert!(!client.is_config_frozen());
-        client.set_config(
-            &admin,
-            &soroban_sdk::symbol_short!("critical"),
-            &15,
-            &100,
-            &750,
-        );
+        client.set_config(&admin, &soroban_sdk::symbol_short!("critical"), &15, &100, &750);
     }
 
     #[test]

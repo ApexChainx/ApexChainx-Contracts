@@ -178,9 +178,7 @@ mod tests {
 
         // Stamp a future schema version so check_version rejects the call.
         env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .set(&crate::STORAGE_VERSION_KEY, &99u32);
+            env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &99u32);
         });
 
         // Must panic with VersionMismatch.

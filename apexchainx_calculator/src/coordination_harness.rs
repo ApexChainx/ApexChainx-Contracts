@@ -29,19 +29,13 @@ mod coordination_harness_tests {
     use crate::cross_contract_safety::{self, CrossContractCallStatus, CrossContractSafety};
     use crate::event_correlation;
     use crate::version_negotiation::{
-        build_negotiation_info, negotiate_contract_versions, NegotiationOutcome,
-        VersionNegotiationInfo,
+        build_negotiation_info, negotiate_contract_versions, NegotiationOutcome, VersionNegotiationInfo,
     };
 
     // -----------------------------------------------------------------------
     // Helper: build a mock peer info
     // -----------------------------------------------------------------------
-    fn peer_info(
-        name: &str,
-        protocol: u32,
-        storage: u32,
-        min_compat: u32,
-    ) -> VersionNegotiationInfo {
+    fn peer_info(name: &str, protocol: u32, storage: u32, min_compat: u32) -> VersionNegotiationInfo {
         VersionNegotiationInfo {
             contract_name: Symbol::new(&Env::default(), name),
             protocol_version: protocol,
@@ -204,14 +198,8 @@ mod coordination_harness_tests {
             Vec::new(&env),
         );
 
-        assert!(
-            result.is_err(),
-            "Call to unknown contract must return error"
-        );
-        assert_eq!(
-            result.unwrap_err().status,
-            CrossContractCallStatus::FatalError
-        );
+        assert!(result.is_err(), "Call to unknown contract must return error");
+        assert_eq!(result.unwrap_err().status, CrossContractCallStatus::FatalError);
         assert_eq!(safety.depth(), 0, "No compensation registered on failure");
     }
 

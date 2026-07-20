@@ -11,13 +11,8 @@ fn is_config_valid(
     penalty_per_minute: i128,
     reward_base: i128,
 ) -> bool {
-    SLACalculatorContract::validate_config(
-        severity,
-        threshold_minutes,
-        penalty_per_minute,
-        reward_base,
-    )
-    .is_ok()
+    SLACalculatorContract::validate_config(severity, threshold_minutes, penalty_per_minute, reward_base)
+        .is_ok()
 }
 
 proptest! {

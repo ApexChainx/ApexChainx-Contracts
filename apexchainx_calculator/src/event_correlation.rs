@@ -39,11 +39,7 @@ pub const CORRELATION_TOPIC: Symbol = symbol_short!("corr_id");
 /// Uses a simple FNV-1a hash of the ledger sequence to produce a unique
 /// trace identifier per ledger. The `_outage_id` parameter is reserved for
 /// future use (Symbol bytes are not directly accessible in SDK 21.x).
-pub fn generate_correlation_id(
-    _env: &Env,
-    _outage_id: &Symbol,
-    ledger_sequence: u32,
-) -> CorrelationId {
+pub fn generate_correlation_id(_env: &Env, _outage_id: &Symbol, ledger_sequence: u32) -> CorrelationId {
     // Deterministic hash: use ledger sequence with FNV-1a mixing for temporal uniqueness
     // (Outage_id bytes are not directly accessible in Soroban SDK 21.x without Symbol::to_string)
     let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
