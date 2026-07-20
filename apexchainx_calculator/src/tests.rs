@@ -189,6 +189,45 @@ fn test_set_config_emits_versioned_config_event() {
     assert_eq!(event_data, (20u32, 200i128, 1000i128));
 }
 
+#[test]
+fn test_severity_telemetry_tracks_per_severity_violation_rates() {
+    let (_env, client, actors) = setup();
+
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT001"),
+        &symbol_short!("critical"),
+        &5,
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT002"),
+        &symbol_short!("critical"),
+        &20,
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT003"),
+        &symbol_short!("high"),
+        &10,
+    );
+
+    let telemetry = client.get_severity_telemetry();
+    assert_eq!(telemetry.len(), 4);
+
+    let critical = telemetry.get(0).unwrap();
+    assert_eq!(critical.severity, symbol_short!("critical"));
+    assert_eq!(critical.calculations, 2u32);
+    assert_eq!(critical.violations, 1u32);
+    assert_eq!(critical.violation_rate, 50u32);
+
+    let high = telemetry.get(1).unwrap();
+    assert_eq!(high.severity, symbol_short!("high"));
+    assert_eq!(high.calculations, 1u32);
+    assert_eq!(high.violations, 0u32);
+    assert_eq!(high.violation_rate, 0u32);
+}
+
 // ============================================================
 // #28 – Operator management
 // ============================================================
@@ -273,6 +312,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         PENDING_ADMIN_KEY,
         PENDING_OP_KEY,
         CONFIG_KEY,
+        CUSTOM_CONFIG_KEY,
         PAUSED_KEY,
         PAUSE_INFO_KEY,
         STATS_KEY,
@@ -878,6 +918,385 @@ fn test_set_config_budget_is_reasonable() {
     assert!(
         after - before < 150_000,
         "set_config too expensive: {} instructions",
+        after - before
+    );
+   
+}
+
+#[test]
+fn test_pause_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let reason = soroban_sdk::String::from_str(&env, "budget test");
+    let before = env.budget().cpu_instruction_cost();
+    client.pause(&admin, &reason);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "pause too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_unpause_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    client.pause(&admin, &soroban_sdk::String::from_str(&env, "setup"));
+
+    let before = env.budget().cpu_instruction_cost();
+    client.unpause(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "unpause too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_freeze_config_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.freeze_config(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "freeze_config too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_unfreeze_config_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    client.freeze_config(&admin);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.unfreeze_config(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "unfreeze_config too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_propose_admin_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.propose_admin(&admin, &new_admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 120_000,
+        "propose_admin too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_accept_admin_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_admin = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&admin, &new_admin);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.accept_admin(&new_admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 120_000,
+        "accept_admin too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_cancel_admin_proposal_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_admin = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&admin, &new_admin);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.cancel_admin_proposal(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "cancel_admin_proposal too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_propose_operator_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.propose_operator(&admin, &new_op);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 120_000,
+        "propose_operator too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_accept_operator_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_op = soroban_sdk::Address::generate(&env);
+    client.propose_operator(&admin, &new_op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.accept_operator(&new_op);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 120_000,
+        "accept_operator too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_cancel_operator_proposal_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_op = soroban_sdk::Address::generate(&env);
+    client.propose_operator(&admin, &new_op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.cancel_operator_proposal(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "cancel_operator_proposal too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_renounce_admin_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.renounce_admin(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "renounce_admin too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_set_operator_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.set_operator(&admin, &new_op);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "set_operator too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_set_retention_limit_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.set_retention_limit(&admin, &50);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "set_retention_limit too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_prune_history_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    for i in 0..20u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PB_{}", i));
+        client.calculate_sla(&op, &oid, &symbol_short!("low"), &10);
+    }
+
+    let before = env.budget().cpu_instruction_cost();
+    client.prune_history(&admin, &5);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 250_000,
+        "prune_history too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_prune_history_by_age_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    for i in 0..20u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PA_{}", i));
+        client.calculate_sla(&op, &oid, &symbol_short!("low"), &10);
+    }
+    env.ledger().set_timestamp(2000);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.prune_history_by_age(&admin, &500);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 250_000,
+        "prune_history_by_age too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_migrate_budget_is_reasonable() {
+    let env = Env::default();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.migrate(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 100_000,
+        "migrate too expensive: {} instructions",
         after - before
     );
 }
@@ -1716,6 +2135,50 @@ fn test_get_contract_metadata_is_deterministic() {
 // ============================================================
 
 #[test]
+
+#[test]
+fn test_migrate_done_symbol() {
+    let env = Env::default();
+    let _sym = soroban_sdk::Symbol::new(&env, "migrate_done");
+}
+
+
+#[test]
+fn test_migrate_emits_migrate_done_event() {
+    let (env, client, actors) = setup();
+
+    // Force storage version to 0 to trigger a real migration
+    let zero: u32 = 0;
+    env.as_contract(&client.address, || {
+        env.storage().instance().set(&symbol_short!("VER"), &zero);
+    });
+
+    client.migrate(&actors.admin);
+
+    let events = env.events().all();
+    let mut found = false;
+    for event in events.iter() {
+        let (contract_id, topic_tuple, payload) = event;
+        if contract_id != client.address {
+            continue;
+        }
+
+        let topic0: soroban_sdk::Symbol = topic_tuple.get(0).unwrap().try_into_val(&env).unwrap();
+        if topic0 == soroban_sdk::Symbol::new(&env, "migrate_done") {
+            found = true;
+            let topic1: soroban_sdk::Symbol = topic_tuple.get(1).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic1, soroban_sdk::symbol_short!("v1"));
+
+            let topic2: soroban_sdk::Address = topic_tuple.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic2, actors.admin);
+
+            let payload_tuple: (u32, u32) = payload.try_into_val(&env).unwrap();
+            assert_eq!(payload_tuple, (0, 1));
+        }
+    }
+    assert!(found, "migrate_done event not found");
+}
+
 fn test_migrate_is_idempotent_when_already_current() {
     let (_env, client, actors) = setup();
     // Already at v1 – migrate should succeed without error
@@ -5027,7 +5490,7 @@ fn test_error_already_initialized_is_terminal() {
     // Calling initialize twice always fails – no state change can make it succeed.
     let (_env, client, actors) = setup();
     let result = client.try_initialize(&actors.admin, &actors.operator);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::AlreadyInitialized);
+    assert!(error_responses::is_already_initialized(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5041,14 +5504,14 @@ fn test_error_unauthorized_is_terminal_for_stranger() {
         &100,
         &750,
     );
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::Unauthorized);
+    assert!(error_responses::is_unauthorized(&result.unwrap_err().unwrap()));
 }
 
 #[test]
 fn test_error_unauthorized_operator_calling_admin_fn_is_terminal() {
     let (_env, client, actors) = setup();
     let result = client.try_pause(&actors.operator, &soroban_sdk::String::from_str(&_env, "x"));
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::Unauthorized);
+    assert!(error_responses::is_unauthorized(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5056,7 +5519,7 @@ fn test_error_invalid_threshold_is_terminal() {
     let (_env, client, actors) = setup();
     // threshold=0 is always invalid for any severity
     let result = client.try_set_config(&actors.admin, &symbol_short!("low"), &0, &10, &600);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidThreshold);
+    assert!(error_responses::is_invalid_threshold(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5064,7 +5527,7 @@ fn test_error_invalid_penalty_is_terminal() {
     let (_env, client, actors) = setup();
     // penalty=0 is always invalid
     let result = client.try_set_config(&actors.admin, &symbol_short!("low"), &120, &0, &600);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidPenalty);
+    assert!(error_responses::is_invalid_penalty(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5072,14 +5535,14 @@ fn test_error_invalid_reward_is_terminal() {
     let (_env, client, actors) = setup();
     // reward=0 is always invalid
     let result = client.try_set_config(&actors.admin, &symbol_short!("low"), &120, &10, &0);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidReward);
+    assert!(error_responses::is_invalid_reward(&result.unwrap_err().unwrap()));
 }
 
 #[test]
 fn test_error_invalid_severity_is_terminal() {
     let (_env, client, actors) = setup();
     let result = client.try_set_config(&actors.admin, &symbol_short!("bogus"), &30, &50, &500);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::InvalidSeverity);
+    assert!(error_responses::is_invalid_severity(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5087,7 +5550,7 @@ fn test_error_no_pending_transfer_is_terminal_without_proposal() {
     let (_env, client, actors) = setup();
     // No proposal exists – cancel must fail
     let result = client.try_cancel_admin_proposal(&actors.admin);
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::NoPendingTransfer);
+    assert!(error_responses::is_no_pending_transfer(&result.unwrap_err().unwrap()));
 }
 
 #[test]
@@ -5104,10 +5567,7 @@ fn test_error_contract_paused_is_retryable_after_unpause() {
         &symbol_short!("high"),
         &10,
     );
-    assert_eq!(
-        paused_result.unwrap_err().unwrap(),
-        SLAError::ContractPaused
-    );
+    assert!(error_responses::is_contract_paused(&paused_result.unwrap_err().unwrap()));
 
     client.unpause(&actors.admin);
     let ok = client.calculate_sla(
@@ -5137,17 +5597,14 @@ fn test_error_config_not_found_is_retryable_after_set_config() {
     // We can't easily inject an unknown severity without bypassing validation,
     // so we verify ConfigNotFound is the error returned by get_config directly.
     let result = client.try_get_config(&symbol_short!("none"));
-    assert_eq!(result.unwrap_err().unwrap(), SLAError::ConfigNotFound);
+    assert!(error_responses::is_config_not_found(&result.unwrap_err().unwrap()));
 }
 
 #[test]
 fn test_error_retention_limit_out_of_range_is_terminal_for_zero() {
     let (_env, client, actors) = setup();
     let result = client.try_set_retention_limit(&actors.admin, &0);
-    assert_eq!(
-        result.unwrap_err().unwrap(),
-        SLAError::RetentionLimitOutOfRange
-    );
+    assert!(error_responses::is_retention_limit_out_of_range(&result.unwrap_err().unwrap()));
 }
 
 // ============================================================
@@ -6349,5 +6806,266 @@ fn test_issue4_repeated_set_config_produces_increasing_sequences() {
         "Repeated updates must produce an increasing sequence: second={} first={}",
         second.sequence,
         first.sequence
+    );
+}
+
+// ============================================================
+// #93 – Custom severity-level support
+// ============================================================
+
+#[test]
+fn test_admin_can_set_and_get_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let cfg = client.get_custom_severity(&symbol_short!("warning"));
+    assert_eq!(cfg.threshold_minutes, 90);
+    assert_eq!(cfg.penalty_per_minute, 5);
+    assert_eq!(cfg.reward_base, 200);
+}
+
+#[test]
+#[should_panic]
+fn test_operator_cannot_set_custom_severity() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.operator, &symbol_short!("warning"), &90, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_stranger_cannot_set_custom_severity() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.stranger, &symbol_short!("warning"), &90, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_canonical_name() {
+    let (_env, client, actors) = setup();
+    // "critical" is a canonical severity — must not be settable as custom
+    client.set_custom_severity(&actors.admin, &symbol_short!("critical"), &90, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_zero_threshold() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &0, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_threshold_over_1440() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &1441, &5, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_zero_penalty() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &0, &200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejects_zero_reward() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &0);
+}
+
+#[test]
+#[should_panic]
+fn test_get_custom_severity_not_registered() {
+    let (_env, client, _actors) = setup();
+    client.get_custom_severity(&symbol_short!("warning"));
+}
+
+#[test]
+fn test_admin_can_remove_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let before = client.get_custom_config_snapshot();
+    assert_eq!(before.entries.len(), 1);
+
+    client.remove_custom_severity(&actors.admin, &symbol_short!("warning"));
+
+    let after = client.get_custom_config_snapshot();
+    assert_eq!(
+        after.entries.len(),
+        0,
+        "custom severity must no longer appear in the snapshot after removal"
+    );
+}
+
+#[test]
+#[should_panic]
+fn test_get_custom_severity_after_removal() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    client.remove_custom_severity(&actors.admin, &symbol_short!("warning"));
+    // Must be gone now — SeverityNotInSet
+    client.get_custom_severity(&symbol_short!("warning"));
+}
+
+#[test]
+#[should_panic]
+fn test_remove_custom_severity_not_registered() {
+    let (_env, client, actors) = setup();
+    // never registered — must panic with SeverityNotInSet
+    client.remove_custom_severity(&actors.admin, &symbol_short!("warning"));
+}
+
+#[test]
+#[should_panic]
+fn test_operator_cannot_remove_custom_severity() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    client.remove_custom_severity(&actors.operator, &symbol_short!("warning"));
+}
+
+#[test]
+fn test_get_custom_config_snapshot_returns_registered_entries() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    client.set_custom_severity(&actors.admin, &symbol_short!("info"), &180, &1, &50);
+
+    let snapshot = client.get_custom_config_snapshot();
+    assert_eq!(snapshot.entries.len(), 2);
+}
+
+#[test]
+fn test_get_custom_config_snapshot_empty_when_none_registered() {
+    let (_env, client, _actors) = setup();
+
+    let snapshot = client.get_custom_config_snapshot();
+    assert_eq!(snapshot.entries.len(), 0);
+}
+
+// ------------------------------------------------------------
+// Invariant tests: custom severities must never leak into or
+// affect the canonical config surface (#93 constraints 1 and 2)
+// ------------------------------------------------------------
+
+#[test]
+fn test_canonical_snapshot_unaffected_by_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    let before = client.get_config_snapshot();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    let after = client.get_config_snapshot();
+
+    assert_eq!(
+        before, after,
+        "Canonical config snapshot must not change when a custom severity is added"
+    );
+    assert_eq!(
+        after.entries.len(),
+        4,
+        "Canonical snapshot must always contain exactly the 4 canonical entries"
+    );
+}
+
+#[test]
+fn test_config_version_hash_unaffected_by_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    let before = client.get_config_version_hash();
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    let after = client.get_config_version_hash();
+
+    assert_eq!(
+        before, after,
+        "Config version hash must be derived only from canonical severities"
+    );
+}
+
+#[test]
+fn test_result_schema_version_unaffected_by_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    let before = client.get_result_schema().schema_version;
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+    let after = client.get_result_schema().schema_version;
+
+    assert_eq!(
+        before, after,
+        "RESULT_SCHEMA_VERSION must not bump for a custom-severity addition"
+    );
+    assert_eq!(before, RESULT_SCHEMA_VERSION);
+}
+
+#[test]
+fn test_canonical_validators_unaffected_by_custom_severity_bounds() {
+    let (_env, client, actors) = setup();
+
+    // A custom severity with values that would violate critical's stricter
+    // per-severity bounds (threshold > 60, penalty < 50) must still succeed,
+    // proving custom severities bypass the canonical per-severity branches
+    // in validate_config and only go through the general bounds.
+    let sev = symbol(&_env, "service_degraded");
+    client.set_custom_severity(&actors.admin, &sev, &500, &1, &100);
+
+    let cfg = client.get_custom_severity(&sev);
+    assert_eq!(cfg.threshold_minutes, 500);
+    assert_eq!(cfg.penalty_per_minute, 1);
+}
+
+#[test]
+fn test_custom_severity_does_not_appear_in_canonical_snapshot_entries() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let snapshot = client.get_config_snapshot();
+    for entry in snapshot.entries.iter() {
+        assert_ne!(entry.severity, symbol_short!("warning"));
+    }
+}
+
+#[test]
+fn test_calculate_sla_with_dynamically_added_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    // "Test: add 'warning' severity dynamically, run calculate, get result." (#93)
+    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
+
+    let result = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("WARN001"),
+        &symbol_short!("warning"),
+        &45, // under the 90-min threshold → met
+    );
+
+    assert_eq!(result.status, symbol_short!("met"));
+    assert_eq!(result.threshold_minutes, 90);
+}
+
+#[test]
+fn test_calculate_sla_view_with_custom_severity() {
+    let (_env, client, actors) = setup();
+
+    client.set_custom_severity(&actors.admin, &symbol_short!("info"), &180, &1, &50);
+
+    let result = client.calculate_sla_view(&symbol_short!("INFO001"), &symbol_short!("info"), &200);
+
+    // 200 > 180 threshold → violated
+    assert_eq!(result.status, symbol_short!("viol"));
+}
+
+#[test]
+#[should_panic]
+fn test_calculate_sla_rejects_unregistered_custom_severity() {
+    let (_env, client, actors) = setup();
+    // "warning" was never registered via set_custom_severity — must still fail
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("WARN002"),
+        &symbol_short!("warning"),
+        &45,
     );
 }
