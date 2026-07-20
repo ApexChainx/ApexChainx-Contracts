@@ -555,16 +555,16 @@ impl SLACalculatorContract {
         );
         env.storage()
             .instance()
-            .set(&SEVERITY_CALC_COUNTS_KEY, &[0u32; 4]);
+            .set(&SEVERITY_CALC_COUNTS_KEY, &0u128);
         env.storage()
             .instance()
-            .set(&SEVERITY_VIOL_COUNTS_KEY, &[0u32; 4]);
+            .set(&SEVERITY_VIOL_COUNTS_KEY, &0u128);
         env.storage()
             .instance()
-            .set(&LAST_CALCULATION_LEDGER_KEY, &[0u32; 4]);
+            .set(&LAST_CALCULATION_LEDGER_KEY, &0u128);
         env.storage()
             .instance()
-            .set(&LAST_VIOLATION_LEDGER_KEY, &[0u32; 4]);
+            .set(&LAST_VIOLATION_LEDGER_KEY, &0u128);
         env.storage()
             .instance()
             .set(&HISTORY_KEY, &Vec::<SLAResult>::new(&env));
@@ -632,19 +632,19 @@ impl SLACalculatorContract {
         }
 
         if !inst.has(&SEVERITY_CALC_COUNTS_KEY) {
-            inst.set(&SEVERITY_CALC_COUNTS_KEY, &[0u32; 4]);
+            inst.set(&SEVERITY_CALC_COUNTS_KEY, &0u128);
         }
 
         if !inst.has(&SEVERITY_VIOL_COUNTS_KEY) {
-            inst.set(&SEVERITY_VIOL_COUNTS_KEY, &[0u32; 4]);
+            inst.set(&SEVERITY_VIOL_COUNTS_KEY, &0u128);
         }
 
         if !inst.has(&LAST_CALCULATION_LEDGER_KEY) {
-            inst.set(&LAST_CALCULATION_LEDGER_KEY, &[0u32; 4]);
+            inst.set(&LAST_CALCULATION_LEDGER_KEY, &0u128);
         }
 
         if !inst.has(&LAST_VIOLATION_LEDGER_KEY) {
-            inst.set(&LAST_VIOLATION_LEDGER_KEY, &[0u32; 4]);
+            inst.set(&LAST_VIOLATION_LEDGER_KEY, &0u128);
         }
 
         if !inst.has(&HISTORY_KEY) {
@@ -1376,7 +1376,13 @@ impl SLACalculatorContract {
             pending_admin,
             pending_operator,
             paused,
-            pause_info,
+            // Empty when unpaused, single-element when paused: `Option<PauseInfo>`
+            // cannot be a `#[contracttype]` field (the SDK's ScVal conversion
+            // needs `From<&PauseInfo>`, which `#[contracttype]` does not derive).
+            pause_info: match pause_info {
+                Some(info) => soroban_sdk::vec![&env, info],
+                None => Vec::new(&env),
+            },
             config_snapshot,
             stats,
             history_len,
@@ -1423,26 +1429,38 @@ impl SLACalculatorContract {
             .ok_or(SLAError::NotInitialized)
     }
 
+    /// Per-severity counters are packed as four `u32` lanes inside one `u128`,
+    /// one lane per canonical severity. Rust arrays are not valid Soroban
+    /// storage values, and a `Vec<u32>` object costs materially more CPU to
+    /// (de)serialise on every invocation — instance storage is read and written
+    /// whole each call, so a scalar keeps unrelated operations inside budget.
+    fn load_counts(env: &Env, key: &Symbol) -> u128 {
+        env.storage().instance().get(key).unwrap_or(0u128)
+    }
+
+    /// Reads the counter lane for `index` (0..4).
+    fn count_lane(packed: u128, index: u32) -> u32 {
+        ((packed >> (index * 32)) & 0xFFFF_FFFF) as u32
+    }
+
+    /// Returns `packed` with the lane at `index` replaced by `value`.
+    fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
+        let mask = !(0xFFFF_FFFFu128 << (index * 32));
+        (packed & mask) | ((value as u128) << (index * 32))
+    }
+
     /// #101 – Returns per-severity weekly violation-rate telemetry.
     pub fn get_severity_telemetry(env: Env) -> Result<Vec<SeverityTelemetry>, SLAError> {
         Self::check_version(&env)?;
         let mut telemetry = Vec::new(&env);
         let severities = Self::canonical_severities(&env);
-        let calculations: [u32; 4] = env
-            .storage()
-            .instance()
-            .get(&SEVERITY_CALC_COUNTS_KEY)
-            .unwrap_or([0u32; 4]);
-        let violations: [u32; 4] = env
-            .storage()
-            .instance()
-            .get(&SEVERITY_VIOL_COUNTS_KEY)
-            .unwrap_or([0u32; 4]);
+        let calculations = Self::load_counts(&env, &SEVERITY_CALC_COUNTS_KEY);
+        let violations = Self::load_counts(&env, &SEVERITY_VIOL_COUNTS_KEY);
 
         for index in 0..severities.len() {
             let severity = severities.get(index).unwrap();
-            let calc_count = calculations[index as usize];
-            let violation_count = violations[index as usize];
+            let calc_count = Self::count_lane(calculations, index);
+            let violation_count = Self::count_lane(violations, index);
             let violation_rate = if calc_count == 0 {
                 0u32
             } else {
@@ -1990,42 +2008,34 @@ impl SLACalculatorContract {
     }
 
     fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
-        let index = Self::canonical_severity_index(severity).unwrap_or(0) as usize;
-        let mut calculations: [u32; 4] = env
-            .storage()
-            .instance()
-            .get(&SEVERITY_CALC_COUNTS_KEY)
-            .unwrap_or([0u32; 4]);
-        let mut violations: [u32; 4] = env
-            .storage()
-            .instance()
-            .get(&SEVERITY_VIOL_COUNTS_KEY)
-            .unwrap_or([0u32; 4]);
-        let mut last_calculations: [u32; 4] = env
-            .storage()
-            .instance()
-            .get(&LAST_CALCULATION_LEDGER_KEY)
-            .unwrap_or([0u32; 4]);
-        let mut last_violations: [u32; 4] = env
-            .storage()
-            .instance()
-            .get(&LAST_VIOLATION_LEDGER_KEY)
-            .unwrap_or([0u32; 4]);
+        let index = Self::canonical_severity_index(severity).unwrap_or(0);
+        let mut calculations = Self::load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
+        let mut violations = Self::load_counts(env, &SEVERITY_VIOL_COUNTS_KEY);
+        let mut last_calculations = Self::load_counts(env, &LAST_CALCULATION_LEDGER_KEY);
+        let mut last_violations = Self::load_counts(env, &LAST_VIOLATION_LEDGER_KEY);
 
         let now = env.ledger().timestamp();
         let week_seconds = 7u64 * 24u64 * 60u64 * 60u64;
-        let last_calc = last_calculations[index] as u64;
-        let last_violation = last_violations[index] as u64;
+        let last_calc = Self::count_lane(last_calculations, index) as u64;
+        let last_violation = Self::count_lane(last_violations, index) as u64;
         let calc_stale = last_calc != 0 && now.saturating_sub(last_calc) >= week_seconds;
         let violation_stale = last_violation != 0 && now.saturating_sub(last_violation) >= week_seconds;
         if calc_stale || violation_stale {
-            calculations[index] = 0;
-            violations[index] = 0;
+            calculations = Self::set_count_lane(calculations, index, 0);
+            violations = Self::set_count_lane(violations, index, 0);
         }
 
-        calculations[index] = calculations[index].saturating_add(1);
+        calculations = Self::set_count_lane(
+            calculations,
+            index,
+            Self::count_lane(calculations, index).saturating_add(1),
+        );
         if !met {
-            violations[index] = violations[index].saturating_add(1);
+            violations = Self::set_count_lane(
+                violations,
+                index,
+                Self::count_lane(violations, index).saturating_add(1),
+            );
         }
 
         let current_ledger = if now > u64::from(u32::MAX) {
@@ -2033,9 +2043,9 @@ impl SLACalculatorContract {
         } else {
             now as u32
         };
-        last_calculations[index] = current_ledger;
+        last_calculations = Self::set_count_lane(last_calculations, index, current_ledger);
         if !met {
-            last_violations[index] = current_ledger;
+            last_violations = Self::set_count_lane(last_violations, index, current_ledger);
         }
 
         env.storage().instance().set(&SEVERITY_CALC_COUNTS_KEY, &calculations);
