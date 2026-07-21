@@ -8,6 +8,7 @@ expertise help make this project better for everyone in the Stellar ecosystem.
 - [Code of Conduct](#code-of-conduct)
 - [Stellar Wave Program](#stellar-wave-program)
 - [Ways to Contribute](#ways-to-contribute)
+- [Good First Issues](#good-first-issues)
 - [Getting Started](#getting-started)
 - [Development Workflow](#development-workflow)
 - [Code Style Guidelines](#code-style-guidelines)
@@ -53,6 +54,23 @@ ApexChainx participates in the [Stellar Wave Program](https://www.drips.network/
 | 🧪 Tests | Increase coverage, add edge cases | QA & developers |
 | 👀 Code Reviews | Review pull requests for quality | Senior developers |
 | 💬 Community Support | Help answer questions in discussions | All skill levels |
+
+## 🌟 Good First Issues
+
+New to ApexChainx? Looking for a place to start? Check out issues tagged with:
+
+- **`good first issue`** - Perfect for first-time contributors, low complexity, well-documented
+- **`help wanted`** - Issues that need extra attention
+- **`Stellar Wave`** - Issues eligible for the [Stellar Wave Program](https://www.drips.network/wave/stellar)
+
+[Browse all good first issues →](https://github.com/ApexChainx/ApexChainx-Contracts/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+
+### How to Pick Your First Issue
+
+1. **Browse the list** of good first issues
+2. **Read the issue description** carefully to understand what's needed
+3. **Comment on the issue** to let maintainers know you're interested
+4. **Wait for assignment** before starting work to avoid duplicate efforts
 
 ## 🚀 Getting Started
 
