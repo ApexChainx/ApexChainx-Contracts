@@ -53,6 +53,11 @@ const PENDING_ADMIN_KEY: Symbol = symbol_short!("PADMIN");
 /// Pending operator for two-step handoff. (#64)
 const PENDING_OP_KEY: Symbol = symbol_short!("POP");
 
+/// Ledger timestamp recorded the last time the admin slot was written.
+/// Set on initialize and on accept_admin; read by renounce_admin for the
+/// enriched lifecycle_terminal event payload.
+const ADMIN_SET_AT_KEY: Symbol = symbol_short!("ADM_SETAT");
+
 /// Map of severity -> SLAConfig for all configured severity levels.
 const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
 
@@ -160,7 +165,7 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // adm_can   → ()
 //   context: caller Address
 //
-// adm_ren   → ()
+// adm_ren   → (caller: Address, ledger_seq: u32, last_admin_set_at: u64)
 //   context: caller Address
 //
 // op_prop   → (new_operator: Address,)
@@ -532,6 +537,11 @@ impl SLACalculatorContract {
         }
 
         env.storage().instance().set(&ADMIN_KEY, &admin);
+        // Record the timestamp at which the admin slot was first populated so
+        // renounce_admin can include it in the lifecycle_terminal event payload.
+        env.storage()
+            .instance()
+            .set(&ADMIN_SET_AT_KEY, &env.ledger().timestamp());
         env.storage().instance().set(&OPERATOR_KEY, &operator); // #28
         env.storage().instance().set(&PAUSED_KEY, &false); // #27
 
@@ -833,6 +843,11 @@ impl SLACalculatorContract {
             return Err(SLAError::Unauthorized);
         }
         env.storage().instance().set(&ADMIN_KEY, &caller);
+        // Refresh the timestamp so renounce_admin reports when the *current*
+        // admin was installed, not the original one.
+        env.storage()
+            .instance()
+            .set(&ADMIN_SET_AT_KEY, &env.ledger().timestamp());
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
         env.events()
             .publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller), ());
@@ -924,13 +939,31 @@ impl SLACalculatorContract {
     /// Permanently renounce admin authority. This is irreversible: no admin will
     /// exist after this call and admin-gated functions will be permanently locked.
     /// Any pending admin proposal is also cleared.
+    ///
+    /// Emits `adm_ren` with payload `(caller: Address, ledger_seq: u32, last_admin_set_at: u64)`.
+    /// `last_admin_set_at` is the ledger timestamp recorded when the current admin
+    /// was last installed (via `initialize` or `accept_admin`). Backends can use
+    /// this to correlate config snapshots that were active during the admin's tenure.
     pub fn renounce_admin(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
+
+        // Capture lifecycle metadata before removing storage.
+        let ledger_seq: u32 = env.ledger().sequence();
+        let last_admin_set_at: u64 = env
+            .storage()
+            .instance()
+            .get(&ADMIN_SET_AT_KEY)
+            .unwrap_or(0u64);
+
         env.storage().instance().remove(&ADMIN_KEY);
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
-        env.events()
-            .publish((EVENT_ADMIN_REN, EVENT_VERSION, caller), ());
+        env.storage().instance().remove(&ADMIN_SET_AT_KEY);
+
+        env.events().publish(
+            (EVENT_ADMIN_REN, EVENT_VERSION, caller.clone()),
+            (caller, ledger_seq, last_admin_set_at),
+        );
         Ok(())
     }
 
@@ -1586,6 +1619,10 @@ impl SLACalculatorContract {
         recorded_at: u64,
     ) -> Result<SLAResult, SLAError> {
         let threshold = cfg.threshold_minutes;
+
+        if threshold == 0 {
+            return Err(SLAError::InvalidThreshold);
+        }
 
         // Case 1: SLA violated → penalty
         if mttr_minutes > threshold {

@@ -73,9 +73,15 @@
 //! - payload:  ()
 //!
 //! ## adm_ren (`adm_ren`)
-//! Emitted when the admin renounces their role.
+//! Emitted when the admin renounces their role (lifecycle_terminal event).
 //! - topic[2]: caller Address
-//! - payload:  ()
+//! - payload:  (caller: Address, ledger_seq: u32, last_admin_set_at: u64)
+//!
+//! `caller` is the admin executing the renounce, `ledger_seq` is the ledger
+//! sequence at renounce time, and `last_admin_set_at` is the ledger timestamp
+//! recorded when the renouncing admin was last installed (via `initialize` or
+//! `accept_admin`). Backends can use these to correlate config snapshots that
+//! were active during the admin's tenure.
 //!
 //! ## op_prop (`op_prop`)
 //! Emitted when a new operator is proposed.

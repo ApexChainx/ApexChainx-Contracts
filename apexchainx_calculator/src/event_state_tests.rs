@@ -5,8 +5,9 @@ mod event_state_tests {
         Symbol, TryIntoVal,
     };
     use crate::{
-        EVENT_CONFIG_UPD, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
-        EVENT_VERSION, SLACalculatorContract, SLACalculatorContractClient, SLAConfig,
+        EVENT_ADMIN_REN, EVENT_CONFIG_UPD, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT,
+        EVENT_SLA_CALC, EVENT_VERSION, SLACalculatorContract, SLACalculatorContractClient,
+        SLAConfig,
     };
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
@@ -602,5 +603,122 @@ mod event_state_tests {
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
         client.prune_history(&stranger, &1);
+    }
+
+    // ── adm_ren lifecycle_terminal payload shape ─────────────────────────
+
+    /// Verify that `renounce_admin` emits an `adm_ren` event whose payload
+    /// decodes as `(caller: Address, ledger_seq: u32, last_admin_set_at: u64)`.
+    ///
+    /// The test also asserts the three topic slot values so that a future
+    /// struct-layout change surfaces as a compile or assertion failure here
+    /// rather than silently at the backend.
+    #[test]
+    fn test_renounce_admin_event_payload_shape() {
+        let env = Env::default();
+        // Pin the ledger state so the assertions are deterministic.
+        env.ledger().set_sequence_number(42);
+        env.ledger().set_timestamp(9_000_000u64);
+
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        // Advance ledger before renounce so ledger_seq differs from init seq.
+        env.ledger().set_sequence_number(99);
+        env.ledger().set_timestamp(9_001_000u64);
+
+        client.renounce_admin(&admin);
+
+        let events = env.events().all();
+        for i in 0..events.len() {
+            let (_, topics, data) = events.get(i).unwrap();
+            if topics.len() < 1 {
+                continue;
+            }
+            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if name != EVENT_ADMIN_REN {
+                continue;
+            }
+
+            // ── topic layout ──────────────────────────────────────────────
+            assert_eq!(topics.len(), 3, "adm_ren must have exactly 3 topics");
+
+            let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(version, EVENT_VERSION, "topic[1] must be event version v1");
+
+            let topic_caller: Address = topics.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic_caller, admin, "topic[2] must be the renouncing admin");
+
+            // ── payload layout ────────────────────────────────────────────
+            // Decode as the canonical 3-tuple.
+            let payload: (Address, u32, u64) = data.try_into_val(&env).unwrap();
+            let (payload_caller, ledger_seq, last_admin_set_at) = payload;
+
+            assert_eq!(payload_caller, admin, "payload[0] caller must match admin");
+            // Renounce was called at sequence 99.
+            assert_eq!(ledger_seq, 99u32, "payload[1] ledger_seq must be 99");
+            // last_admin_set_at was recorded during initialize at timestamp 9_000_000.
+            assert_eq!(
+                last_admin_set_at, 9_000_000u64,
+                "payload[2] last_admin_set_at must be the initialize timestamp"
+            );
+            return;
+        }
+        panic!("adm_ren event not found");
+    }
+
+    /// Verify that when admin is transferred via accept_admin, renounce reports
+    /// the timestamp of the *transfer* (accept_admin), not the original init.
+    #[test]
+    fn test_renounce_after_transfer_reports_transfer_timestamp() {
+        let env = Env::default();
+        env.ledger().set_sequence_number(10);
+        env.ledger().set_timestamp(1_000u64);
+
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        // Propose + accept at a later timestamp.
+        env.ledger().set_sequence_number(20);
+        env.ledger().set_timestamp(5_000u64);
+        client.propose_admin(&admin, &new_admin);
+        client.accept_admin(&new_admin);
+
+        // Renounce at an even later sequence.
+        env.ledger().set_sequence_number(30);
+        env.ledger().set_timestamp(9_000u64);
+        client.renounce_admin(&new_admin);
+
+        let events = env.events().all();
+        for i in 0..events.len() {
+            let (_, topics, data) = events.get(i).unwrap();
+            if topics.len() < 1 {
+                continue;
+            }
+            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if name != EVENT_ADMIN_REN {
+                continue;
+            }
+            let payload: (Address, u32, u64) = data.try_into_val(&env).unwrap();
+            let (payload_caller, ledger_seq, last_admin_set_at) = payload;
+
+            assert_eq!(payload_caller, new_admin, "caller must be the new admin");
+            assert_eq!(ledger_seq, 30u32, "ledger_seq at renounce time");
+            // accept_admin was called at timestamp 5_000 — that is when ADMIN_SET_AT_KEY
+            // was last written.
+            assert_eq!(
+                last_admin_set_at, 5_000u64,
+                "last_admin_set_at must be the accept_admin timestamp"
+            );
+            return;
+        }
+        panic!("adm_ren event not found");
     }
 }

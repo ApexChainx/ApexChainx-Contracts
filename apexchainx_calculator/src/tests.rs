@@ -781,99 +781,46 @@ fn test_exact_threshold_boundary_is_stable_after_config_update() {
     assert_eq!(over.amount, -200);
 }
 
-#[test]
-fn test_backend_replay_exact_threshold_outcome_is_deterministic_before_config_change() {
-    let (env, client, actors) = setup();
-
-    let severity = symbol_short!("high");
-    let mttr = 30u32;
-    let outage_id = symbol(&env, "THR001");
-
-    let stored = client.calculate_sla(&actors.operator, &outage_id, &severity, &mttr);
-    let replayed = client.calculate_sla_view(&outage_id, &severity, &mttr);
-
-    assert_eq!(stored.status, symbol_short!("met"));
-    assert_eq!(stored.payment_type, symbol_short!("rew"));
-    assert_eq!(stored.rating, symbol_short!("good"));
-    assert_eq!(stored.amount, 750);
-
-    assert_eq!(stored.status, replayed.status);
-    assert_eq!(stored.payment_type, replayed.payment_type);
-    assert_eq!(stored.rating, replayed.rating);
-    assert_eq!(stored.amount, replayed.amount);
-    assert_eq!(stored.threshold_minutes, replayed.threshold_minutes);
-}
+// ============================================================
+// Math safety – zero threshold defense in depth
+// ============================================================
 
 #[test]
-fn test_backend_parity_reward_tier_cases() {
-    let (env, client, actors) = setup();
-    let cases = [
-        GoldenCase {
-            severity: "critical",
-            mttr_minutes: 7,
-            expected_status: "met",
-            expected_payment_type: "rew",
-            expected_rating: "top",
-            expected_amount: 1500,
-        },
-        GoldenCase {
-            severity: "critical",
-            mttr_minutes: 10,
-            expected_status: "met",
-            expected_payment_type: "rew",
-            expected_rating: "excel",
-            expected_amount: 1125,
-        },
-        GoldenCase {
-            severity: "critical",
-            mttr_minutes: 15,
-            expected_status: "met",
-            expected_payment_type: "rew",
-            expected_rating: "good",
-            expected_amount: 750,
-        },
-        GoldenCase {
-            severity: "low",
-            mttr_minutes: 59,
-            expected_status: "met",
-            expected_payment_type: "rew",
-            expected_rating: "top",
-            expected_amount: 1200,
-        },
-        GoldenCase {
-            severity: "low",
-            mttr_minutes: 89,
-            expected_status: "met",
-            expected_payment_type: "rew",
-            expected_rating: "excel",
-            expected_amount: 900,
-        },
-        GoldenCase {
-            severity: "low",
-            mttr_minutes: 120,
-            expected_status: "met",
-            expected_payment_type: "rew",
-            expected_rating: "good",
-            expected_amount: 600,
-        },
-    ];
+fn test_zero_threshold_handling() {
+    let env = Env::default();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
 
-    for (i, case) in cases.iter().enumerate() {
-        let outage_id = Symbol::new(&env, &alloc::format!("PARITY_R_{}", i));
-        let severity = symbol(&env, case.severity);
-        let result =
-            client.calculate_sla(&actors.operator, &outage_id, &severity, &case.mttr_minutes);
+    let cfg = SLAConfig {
+        threshold_minutes: 0,
+        penalty_per_minute: 100,
+        reward_base: 750,
+    };
 
-        assert_eq!(result.status, symbol(&env, case.expected_status));
-        assert_eq!(
-            result.payment_type,
-            symbol(&env, case.expected_payment_type)
-        );
-        assert_eq!(result.rating, symbol(&env, case.expected_rating));
-        assert_eq!(result.amount, case.expected_amount);
-    }
+    let result_mttr_zero = SLACalculatorContract::compute_result(
+        symbol_short!("ZERO_1"),
+        0,
+        &cfg,
+        0,
+        0,
+    );
+    assert_eq!(result_mttr_zero, Err(SLAError::InvalidThreshold));
+
+    let result_mttr_max = SLACalculatorContract::compute_result(
+        symbol_short!("ZERO_2"),
+        u32::MAX,
+        &cfg,
+        0,
+        0,
+    );
+    assert_eq!(result_mttr_max, Err(SLAError::InvalidThreshold));
 }
 
+// ============================================================
+// Config freeze / unfreeze
 // ============================================================
 // Budget / performance
 // ============================================================

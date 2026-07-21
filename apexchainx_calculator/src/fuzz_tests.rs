@@ -1,8 +1,9 @@
 #![cfg(test)]
 
-use crate::{SLACalculatorContract, SLAConfig};
+use crate::{SLACalculatorContract, SLAConfig, SLAError};
 use soroban_sdk::{symbol_short, Env, Symbol};
 use proptest::prelude::*;
+use proptest::proptest;
 
 // Helper to check if a config is valid for a given severity.
 fn is_config_valid(
@@ -186,5 +187,51 @@ proptest! {
             0,
             0,
         );
+    }
+}
+
+#[test]
+fn test_compute_result_handles_threshold_eq_0() {
+    let _env = Env::default();
+    let severities = [
+        symbol_short!("critical"),
+        symbol_short!("high"),
+        symbol_short!("medium"),
+        symbol_short!("low"),
+    ];
+
+    let mttr_values = [
+        0u32, 1, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95,
+        100, 150, 200, u32::MAX,
+    ];
+
+    for severity in severities.iter() {
+        for &mttr in mttr_values.iter() {
+            let cfg = SLAConfig {
+                threshold_minutes: 0,
+                penalty_per_minute: 100,
+                reward_base: 750,
+            };
+
+            let res = SLACalculatorContract::compute_result(
+                symbol_short!("outage"),
+                mttr,
+                &cfg,
+                0,
+                0,
+            );
+
+            match res {
+                Ok(result) => {
+                    panic!(
+                        "threshold=0 with severity={:?}, mttr={} must not succeed. Got status={:?}, rating={:?}, amount={}",
+                        severity, mttr, result.status, result.rating, result.amount
+                    );
+                }
+                Err(e) => {
+                    assert_eq!(e, SLAError::InvalidThreshold);
+                }
+            }
+        }
     }
 }

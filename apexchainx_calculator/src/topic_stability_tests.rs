@@ -310,4 +310,69 @@ mod topic_stability_tests {
         }
         panic!("set_int event not found");
     }
+
+    // ── adm_ren topic + payload stability ──────────────────────────────
+
+    /// Verify that the `adm_ren` event has the 3-topic layout with an Address
+    /// in topic[2], and that its payload decodes as the canonical tuple
+    /// `(caller: Address, ledger_seq: u32, last_admin_set_at: u64)`.
+    ///
+    /// This test pins ledger state so the decoded values are deterministic and
+    /// any future field-order or type change surfaces as a compile / assertion
+    /// failure rather than a silent backend regression.
+    #[test]
+    fn test_adm_ren_topic_and_payload_shape() {
+        let env = Env::default();
+        env.ledger().set_sequence_number(5);
+        env.ledger().set_timestamp(100_000u64);
+
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        // Advance ledger before renounce.
+        env.ledger().set_sequence_number(77);
+        env.ledger().set_timestamp(200_000u64);
+
+        client.renounce_admin(&admin);
+
+        let events = env.events().all();
+        for i in 0..events.len() {
+            let (_, topics, data) = events.get(i).unwrap();
+            if topics.len() < 1 {
+                continue;
+            }
+            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if name != EVENT_ADMIN_REN {
+                continue;
+            }
+
+            // ── topic structure ───────────────────────────────────────────
+            assert_eq!(topics.len(), 3, "adm_ren must have exactly 3 topics");
+
+            let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(version, EVENT_VERSION, "topic[1] must be v1");
+
+            // topic[2] is the caller Address (not a Symbol — verified by type decode).
+            let topic_caller: Address = topics.get(2).unwrap().try_into_val(&env).unwrap();
+            assert_eq!(topic_caller, admin, "topic[2] must be the renouncing admin");
+
+            // ── payload structure ─────────────────────────────────────────
+            let payload: (Address, u32, u64) = data.try_into_val(&env).unwrap();
+            let (payload_caller, ledger_seq, last_admin_set_at) = payload;
+
+            assert_eq!(payload_caller, admin, "payload[0] caller must match admin");
+            // Renounce was called at sequence 77.
+            assert_eq!(ledger_seq, 77u32, "payload[1] ledger_seq must be renounce seq");
+            // last_admin_set_at recorded during initialize at timestamp 100_000.
+            assert_eq!(
+                last_admin_set_at, 100_000u64,
+                "payload[2] last_admin_set_at must be initialize timestamp"
+            );
+            return;
+        }
+        panic!("adm_ren event not found");
+    }
 }
