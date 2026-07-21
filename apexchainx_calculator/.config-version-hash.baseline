@@ -1,0 +1,16 @@
+# config_version_hash baseline for default configuration.
+#
+# This file records the expected hash for the default SLA config:
+#   critical: threshold=15, penalty=100, reward=750
+#   high:     threshold=30, penalty=50,  reward=750
+#   medium:   threshold=60, penalty=25,  reward=750
+#   low:      threshold=120, penalty=10, reward=600
+#
+# The iteration order is: critical → high → medium → low
+# (see canonical_severity_order() in lib.rs)
+#
+# If this hash changes, verify:
+#   1. The change was intentional (algorithm or config value change)
+#   2. RESULT_SCHEMA_VERSION was bumped if severity order changed
+#   3. Backends are updated to expect the new hash
+HASH=1417728228875630226

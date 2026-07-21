@@ -179,6 +179,19 @@ Contracts must be idempotent where applicable:
 - Duplicate event consumption does not produce errors
 - Configuration updates are idempotent for same parameters
 
+### Severity Iteration Order
+
+The `config_version_hash` is computed by iterating severity configs in
+canonical order: `critical → high → medium → low`.
+
+**This ordering is public ABI.** Re-ordering the severity list requires
+a `RESULT_SCHEMA_VERSION` bump. Backends rely on identical configs
+producing identical hashes for cheap config-drift detection.
+
+The canonical order is defined by `canonical_severity_order()`
+and is enforced by regression tests. Any change to the iteration order
+must update the function, documentation, and baseline hash.
+
 ### Input Validation
 
 All function inputs are validated at the contract boundary before any state

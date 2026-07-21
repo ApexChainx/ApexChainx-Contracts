@@ -113,6 +113,19 @@
 //! the version symbol from "v1" to "v2". Additive changes (new fields at the
 //! end) are NOT considered breaking and do not require a version bump as long
 //! as old consumers ignore unrecognised trailing fields.
+//!
+//! # Severity Iteration Order (Public ABI)
+//!
+//! The `config_version_hash` is computed by iterating severity configs in a
+//! fixed canonical order: `critical → high → medium → low`.
+//!
+//! **This ordering is public ABI.** Re-ordering the canonical severity list
+//! requires a `RESULT_SCHEMA_VERSION` bump because backends rely on identical
+//! configs producing identical hashes for cheap config-drift detection.
+//!
+//! The canonical order is defined by `canonical_severity_order()` and consumed by
+//! `compute_config_version_hash`. Any change to the iteration order must
+//! update both the function and this documentation.
 
 #![allow(dead_code)]
 
