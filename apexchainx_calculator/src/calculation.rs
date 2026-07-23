@@ -1,12 +1,9 @@
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::{
-    SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry,
-    STATS_KEY, HISTORY_KEY, RETENTION_LIMIT_KEY,
-    SEVERITY_CALC_COUNTS_KEY, SEVERITY_VIOL_COUNTS_KEY,
-    LAST_CALCULATION_LEDGER_KEY, LAST_VIOLATION_LEDGER_KEY,
-    PAUSED_KEY, MAX_HISTORY_SIZE,
-    EVENT_SLA_CALC, EVENT_SETTLE_INTENT, EVENT_VERSION, EVENT_STATS_SAT,
+    SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
+    EVENT_VERSION, HISTORY_KEY, LAST_CALCULATION_LEDGER_KEY, LAST_VIOLATION_LEDGER_KEY, MAX_HISTORY_SIZE,
+    PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY, SEVERITY_VIOL_COUNTS_KEY, STATS_KEY,
 };
 
 pub fn calculate_sla(
@@ -250,11 +247,7 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
         count_lane(calculations, index).saturating_add(1),
     );
     if !met {
-        violations = set_count_lane(
-            violations,
-            index,
-            count_lane(violations, index).saturating_add(1),
-        );
+        violations = set_count_lane(violations, index, count_lane(violations, index).saturating_add(1));
     }
 
     let current_ledger = if now > u64::from(u32::MAX) {
@@ -292,12 +285,7 @@ pub fn increment_stats(env: &Env, met: bool, reward: i128, penalty: i128) {
     match stats.total_calculations.checked_add(1) {
         Some(v) => stats.total_calculations = v,
         None => {
-            emit_stats_saturated(
-                env,
-                symbol_short!("totcalc"),
-                stats.total_calculations as i128,
-                1,
-            );
+            emit_stats_saturated(env, symbol_short!("totcalc"), stats.total_calculations as i128, 1);
             stats.total_calculations = u64::MAX;
         }
     }
@@ -314,12 +302,7 @@ pub fn increment_stats(env: &Env, met: bool, reward: i128, penalty: i128) {
         match stats.total_violations.checked_add(1) {
             Some(v) => stats.total_violations = v,
             None => {
-                emit_stats_saturated(
-                    env,
-                    symbol_short!("totviol"),
-                    stats.total_violations as i128,
-                    1,
-                );
+                emit_stats_saturated(env, symbol_short!("totviol"), stats.total_violations as i128, 1);
                 stats.total_violations = u64::MAX;
             }
         }
