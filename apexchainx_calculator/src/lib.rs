@@ -1469,6 +1469,42 @@ impl SLACalculatorContract {
     }
 
     // -------------------------------------------------------------------
+    // Replay SLA calculation (view)                                    #95
+    // -------------------------------------------------------------------
+
+    /// Deterministic replay view for backend reconciliation.
+    ///
+    /// Returns the same `(SLAResult, config_version_hash)` pair that the
+    /// mutating `calculate_sla` path would have produced, without writing
+    /// state or emitting events.
+    ///
+    /// NOTE: The contract does not currently store per-ledger config
+    /// snapshots, so `recorded_at_ledger` is stored in the result for
+    /// audit purposes but the current config is used for evaluation.
+    /// Once per-ledger config snapshots are added, this function will
+    /// look up the config active at `recorded_at_ledger`.
+    pub fn replay_calculate_sla(
+        env: Env,
+        outage_id: Symbol,
+        severity: Symbol,
+        mttr_minutes: u32,
+        recorded_at_ledger: u64,
+    ) -> Result<(SLAResult, u64), SLAError> {
+        Self::check_version(&env)?;
+        let cfg = Self::load_config(&env, &severity)?;
+        let config_version_hash = Self::compute_config_version_hash(&env)?;
+
+        let result = Self::compute_result(
+            outage_id,
+            mttr_minutes,
+            &cfg,
+            config_version_hash,
+            recorded_at_ledger,
+        )?;
+        Ok((result, config_version_hash))
+    }
+
+    // -------------------------------------------------------------------
     // SLA calculation (operator only)                                #28
     // -------------------------------------------------------------------
 
