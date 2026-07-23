@@ -393,6 +393,23 @@ pub struct SLAResultSchema {
     pub rating_poor: Symbol,
     /// Whether the SLAResult includes config_version_hash.
     pub includes_config_version_hash: bool,
+    /// Deprecated symbols that are still emitted for backward compatibility.
+    /// Each entry is (deprecated_symbol, replacement_symbol, deprecated_at_schema_version).
+    pub deprecated_symbols: Vec<DeprecatedSymbol>,
+}
+
+/// A deprecated symbol mapping that is still emitted for backward compatibility.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeprecatedSymbol {
+    /// The deprecated symbol still present in events.
+    pub old_symbol: Symbol,
+    /// The replacement symbol that supersedes it.
+    pub new_symbol: Symbol,
+    /// The schema version at which this deprecation was introduced.
+    pub deprecated_at: u32,
+    /// The schema version at which the old symbol will be removed (None = not yet determined).
+    pub removal_version: Option<u32>,
 }
 
 /// #60 – Single introspection call for backend clients.
@@ -1288,6 +1305,7 @@ impl SLACalculatorContract {
             rating_good: symbol_short!("good"),
             rating_poor: symbol_short!("poor"),
             includes_config_version_hash: true,
+            deprecated_symbols: Vec::new(&env),
         })
     }
 

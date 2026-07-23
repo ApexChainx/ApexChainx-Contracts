@@ -124,6 +124,46 @@
 //! the version symbol from "v1" to "v2". Additive changes (new fields at the
 //! end) are NOT considered breaking and do not require a version bump as long
 //! as old consumers ignore unrecognised trailing fields.
+//!
+//! # Symbol Deprecation Protocol
+//!
+//! When a Result or Severity symbol needs to change, follow this deprecation
+//! lifecycle to avoid breaking backend consumers:
+//!
+//! 1. **Introduction (minor release)**: Add the new symbol alongside the old one.
+//!    Both symbols are emitted in events. `get_result_schema()` returns both
+//!    with a `deprecated_symbols` entry marking the old symbol as deprecated.
+//!
+//! 2. **Coexistence (at least one minor release)**: The old symbol continues to
+//!    be emitted alongside the new one. Backends can migrate at their own pace.
+//!    The `deprecated_symbols` entry includes `removed_at` = None (TBD).
+//!
+//! 3. **Removal (major release)**: The old symbol is removed from event emission.
+//!    The `schema_version` in `get_result_schema()` is bumped. The deprecated
+//!    entry remains in `deprecated_symbols` with `removed_at` set to the schema
+//!    version at which removal occurred.
+//!
+//! ## Example
+//!
+//! If we replace `"viol"` with `"violated"` as the human-readable status:
+//!
+//! - **v1**: `"viol"` is the only status symbol for violated SLAs.
+//! - **v2**: `"violated"` is introduced. Events emit both `"viol"` and
+//!   `"violated"`. `get_result_schema()` returns:
+//!   ```json
+//!   {
+//!     "status_met": "met",
+//!     "status_violated": "violated",
+//!     "deprecated_symbols": [
+//!       { "old_symbol": "viol", "new_symbol": "violated", "deprecated_at": 2, "removed_at": null }
+//!     ]
+//!   }
+//!   ```
+//! - **v3**: `"viol"` is removed. Events emit only `"violated"`.
+//!   `deprecated_symbols` is updated with `removed_at: 3`.
+//!
+//! Backends MUST check `deprecated_symbols` at startup and log warnings for
+//! any deprecated symbols they still rely on.
 
 #![allow(dead_code)]
 
