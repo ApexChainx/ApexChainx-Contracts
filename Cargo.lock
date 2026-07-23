@@ -96,15 +96,47 @@ checksum = "2af50177e190e07a26ab74f8b1efbfe2ef87da2116221318cb1c2e82baf7de06"
 
 [[package]]
 name = "bit-set"
+<<<<<<< HEAD
+<<<<<<< HEAD
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
+=======
+<<<<<<< HEAD
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
+=======
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+=======
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08807e080ed7f9d5433fa9b275196cfc35414f66a0c79d864dc51a0d825231a3"
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
 dependencies = [
  "bit-vec",
 ]
 
 [[package]]
 name = "bit-vec"
+<<<<<<< HEAD
+<<<<<<< HEAD
+version = "0.6.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
+
+[[package]]
+name = "bitflags"
+version = "2.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b588b76d00fde79687d7646a9b5bdf3cc0f655e0bbd080335a95d7e96f3587da"
+=======
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
@@ -114,6 +146,21 @@ name = "bitflags"
 version = "2.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+=======
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e764a1d40d510daf35e07be9eb06e75770908c27d411ee6c92109c9840eaaf7"
+
+[[package]]
+name = "bitflags"
+version = "2.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4388bee8683e3d04af747c73422af53102d2bd24d9eadb6cbc100baef4b43f8"
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
 
 [[package]]
 name = "block-buffer"
@@ -215,6 +262,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76"
 dependencies = [
  "generic-array",
+ "rand_core 0.6.4",
  "rand_core 0.6.4",
  "subtle",
  "zeroize",
@@ -384,6 +432,7 @@ dependencies = [
  "curve25519-dalek",
  "ed25519",
  "rand_core 0.6.4",
+ "rand_core 0.6.4",
  "serde",
  "sha2",
  "subtle",
@@ -408,6 +457,7 @@ dependencies = [
  "ff",
  "generic-array",
  "group",
+ "rand_core 0.6.4",
  "rand_core 0.6.4",
  "sec1",
  "subtle",
@@ -454,6 +504,7 @@ version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393"
 dependencies = [
+ "rand_core 0.6.4",
  "rand_core 0.6.4",
  "subtle",
 ]
@@ -526,6 +577,10 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
@@ -538,13 +593,46 @@ dependencies = [
 
 [[package]]
 name = "getrandom"
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "899def5c37c4fd7b2664648c28120ecec138e4d395b459e5ca34f9cce2dd77fd"
+dependencies = [
+ "cfg-if",
+ "libc",
+ "r-efi 5.3.0",
+ "wasip2",
+]
+
+[[package]]
+name = "getrandom"
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
 dependencies = [
  "cfg-if",
  "libc",
+<<<<<<< HEAD
+<<<<<<< HEAD
+ "r-efi",
+=======
+<<<<<<< HEAD
+ "r-efi",
+=======
  "r-efi 6.0.0",
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+=======
+ "r-efi 6.0.0",
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
 ]
 
 [[package]]
@@ -560,6 +648,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63"
 dependencies = [
  "ff",
+ "rand_core 0.6.4",
  "rand_core 0.6.4",
  "subtle",
 ]
@@ -891,16 +980,58 @@ dependencies = [
 
 [[package]]
 name = "proptest"
+<<<<<<< HEAD
+<<<<<<< HEAD
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4c2511913b88df1637da85cc8d96ec8e43a3f8bb8ccb71ee1ac240d6f3df58d"
+=======
+<<<<<<< HEAD
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4c2511913b88df1637da85cc8d96ec8e43a3f8bb8ccb71ee1ac240d6f3df58d"
+=======
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+=======
+version = "1.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b45fcc2344c680f5025fe57779faef368840d0bd1f42f216291f0dc4ace4744"
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
 dependencies = [
  "bit-set",
  "bit-vec",
  "bitflags",
+<<<<<<< HEAD
+<<<<<<< HEAD
+ "lazy_static",
+ "num-traits",
+ "rand",
+ "rand_chacha",
+=======
+<<<<<<< HEAD
+ "lazy_static",
+ "num-traits",
+ "rand",
+ "rand_chacha",
+=======
  "num-traits",
  "rand 0.9.5",
  "rand_chacha 0.9.0",
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+=======
+ "num-traits",
+ "rand 0.9.5",
+ "rand_chacha 0.9.0",
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
  "rand_xorshift",
  "regex-syntax",
  "rusty-fork",
@@ -925,12 +1056,29 @@ dependencies = [
 
 [[package]]
 name = "r-efi"
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
 version = "5.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "r-efi"
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
+
+[[package]]
+name = "r-efi"
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
 version = "6.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
@@ -942,6 +1090,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
 dependencies = [
  "libc",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9ef1d0d795eb7d84685bca4f72f3649f064e6641543d3a8c415898726a57b41"
+dependencies = [
+ "rand_chacha 0.9.0",
+ "rand_core 0.9.5",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
 ]
@@ -974,6 +1134,17 @@ checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
 dependencies = [
  "ppv-lite86",
  "rand_core 0.9.5",
+ "rand_core 0.6.4",
+]
+
+[[package]]
+name = "rand_chacha"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3022b5f1df60f26e1ffddd6c66e8aa15de382ae63b3a0c1bfc0e4d3e3f325cb"
+dependencies = [
+ "ppv-lite86",
+ "rand_core 0.9.5",
 ]
 
 [[package]]
@@ -986,6 +1157,15 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
+<<<<<<< HEAD
+name = "rand_xorshift"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+dependencies = [
+ "rand_core",
+=======
 name = "rand_core"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1001,6 +1181,27 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
 dependencies = [
  "rand_core 0.9.5",
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+=======
+name = "rand_core"
+version = "0.9.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "76afc826de14238e6e8c374ddcc1fa19e374fd8dd986b0d2af0d02377261d83c"
+dependencies = [
+ "getrandom 0.3.4",
+]
+
+[[package]]
+name = "rand_xorshift"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "513962919efc330f829edb2535844d1b912b0fbe2ca165d613e4e8788bb05a5a"
+dependencies = [
+ "rand_core 0.9.5",
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
 ]
 
 [[package]]
@@ -1186,6 +1387,7 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest",
  "rand_core 0.6.4",
+ "rand_core 0.6.4",
 ]
 
 [[package]]
@@ -1263,6 +1465,8 @@ dependencies = [
  "p256",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
  "sec1",
  "sha2",
  "sha3",
@@ -1314,6 +1518,7 @@ dependencies = [
  "ctor",
  "derive_arbitrary",
  "ed25519-dalek",
+ "rand 0.8.5",
  "rand 0.8.5",
  "rustc_version",
  "serde",
@@ -1571,6 +1776,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasip2"
+version = "1.0.4+wasi-0.2.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b67efb37e106e55ce722a510d6b5f9c17f083e5fc79afc2badeb12cc313d9487"
+dependencies = [
+ "wit-bindgen",
+]
+
+[[package]]
 name = "wasm-bindgen"
 version = "0.2.125"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1721,12 +1935,29 @@ dependencies = [
 ]
 
 [[package]]
+<<<<<<< HEAD
+=======
+<<<<<<< HEAD
+=======
 name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
 
 [[package]]
+>>>>>>> 23b59d8 ( entries for  per network (#129))
+<<<<<<< HEAD
+<<<<<<< HEAD
+=======
+name = "wit-bindgen"
+version = "0.57.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+
+[[package]]
+=======
+>>>>>>> 8cff7a7 ( entries for  per network (#129))
+>>>>>>> 23b59d8 ( entries for  per network (#129))
 name = "zerocopy"
 version = "0.7.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"

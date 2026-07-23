@@ -1636,6 +1636,10 @@ impl SLACalculatorContract {
     ) -> Result<SLAResult, SLAError> {
         let threshold = cfg.threshold_minutes;
 
+        if threshold == 0 {
+            return Err(SLAError::InvalidThreshold);
+        }
+
         // Case 1: SLA violated → penalty
         if mttr_minutes > threshold {
             let overtime = (mttr_minutes - threshold) as i128;
