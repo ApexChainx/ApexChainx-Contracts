@@ -62,7 +62,17 @@ jobs:
 
       - name: Format check
         working-directory: apexchainx_calculator
-        run: cargo fmt --check
+        run: |
+          cargo fmt -- --check --color=always 2>&1 | tee fmt_output.log
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo ""
+            echo "=== Formatting diff ==="
+            cargo fmt -- --check 2>&1 || true
+            git diff -- '*.rs' || true
+            echo ""
+            echo "Run 'cargo fmt' locally to fix."
+            exit 1
+          fi
 
       - name: Clippy
         working-directory: apexchainx_calculator
@@ -98,6 +108,19 @@ jobs:
       - name: Run tests
         working-directory: apexchainx_calculator
         run: cargo test --lib
+
+      # Issue #81: Normalize snapshot artifacts before upload so that volatile
+      # fields (timestamp, elapsed_ms, generated_at) are stripped and keys are
+      # sorted. This prevents noisy PR diffs caused by non-semantic changes.
+      - name: Normalize snapshot artifacts
+        run: npx --yes tsx tools/normalize-snapshots.ts
+
+      - name: Upload snapshot artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sla-test-snapshots
+          path: apexchainx_calculator/test_snapshots/tests/
+          retention-days: 30
 
   fuzz-tests:
     name: Fuzz Tests (proptest)
