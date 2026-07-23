@@ -4,6 +4,7 @@ mod outage_id_tests {
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);

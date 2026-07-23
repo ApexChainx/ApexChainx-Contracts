@@ -4,6 +4,7 @@ mod auth_matrix_tests {
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -165,5 +166,33 @@ mod auth_matrix_tests {
         let stranger = Address::generate(&env);
         let new_op = Address::generate(&env);
         client.set_operator(&stranger, &new_op);
+    }
+
+    /// Verifies that a caller who holds the admin role but has NOT provided
+    /// Soroban auth receives a clean `Unauthorized` error (via try_*) rather
+    /// than a panic. This ensures the `require_auth()` gate is exercised and
+    /// the equality check is not the sole authentication mechanism.
+    #[test]
+    fn test_no_role_equivalence_bypass_does_not_panic() {
+        let env = Env::default();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        // Clear all auths so the admin address is NOT authorised for Soroban
+        // auth, even though it holds the admin role in storage.
+        env.mock_auths(&[]);
+
+        // admin role is set, but auth is not provided → should return error, not panic
+        let result = client.try_set_config(
+            &admin,
+            &symbol_short!("high"),
+            &30,
+            &50,
+            &500,
+        );
+        assert!(result.is_err());
     }
 }

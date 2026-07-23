@@ -2,6 +2,12 @@
 target/
 proptest-regressions/
 
+# Fuzz
+apexchainx_calculator/fuzz/target/
+apexchainx_calculator/fuzz/artifacts/
+!apexchainx_calculator/fuzz/corpus/
+!apexchainx_calculator/fuzz/dictionaries/
+
 
 # Soroban
 test_snapshots/
