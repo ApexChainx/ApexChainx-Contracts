@@ -2017,7 +2017,9 @@ fn test_get_contract_metadata_returns_expected_fields() {
     let (_env, client, _actors) = setup();
     let meta = client.get_contract_metadata();
     assert_eq!(meta.contract_name, symbol_short!("sla_calc"));
-    assert_eq!(meta.storage_version, 1);
+    // #97 – storage version was bumped from 1 to 2 when pending-proposal
+    // storage was retyped to a structured value.
+    assert_eq!(meta.storage_version, 2);
     assert_eq!(meta.result_schema_version, 1);
     assert_eq!(meta.supported_severities.len(), 4);
     assert_eq!(meta.features.len(), 10);
@@ -3572,8 +3574,9 @@ fn test_retention_limit_update_takes_effect_on_next_calculate() {
 fn test_get_migration_state_returns_current_version() {
     let (_env, client, _actors) = setup();
     let info = client.get_migration_state();
-    assert_eq!(info.stored_version, 1);
-    assert_eq!(info.expected_version, 1);
+    // #97 – storage version bumped 1 → 2
+    assert_eq!(info.stored_version, 2);
+    assert_eq!(info.expected_version, 2);
     assert!(!info.needs_migration);
 }
 
@@ -3593,7 +3596,9 @@ fn test_get_migration_state_detects_version_mismatch() {
 
     let info = client.get_migration_state();
     assert_eq!(info.stored_version, 99);
-    assert_eq!(info.expected_version, 1);
+    // #97 – storage version bumped 1 → 2; future-version rollback simulation
+    // still expects the binary's current constant, which is now 2.
+    assert_eq!(info.expected_version, 2);
     assert!(info.needs_migration);
 }
 
@@ -3963,7 +3968,8 @@ fn test_event_replay_after_prune_history_page_reflects_pruned_state() {
 fn test_get_version_info_returns_correct_versions_after_init() {
     let (_env, client, _actors) = setup();
     let info = client.get_version_info();
-    assert_eq!(info.storage_version, 1);
+    // #97 – storage version bumped 1 → 2
+    assert_eq!(info.storage_version, 2);
     assert_eq!(info.result_schema_version, 1);
     assert!(!info.needs_migration);
     assert!(!info.is_paused);
@@ -6879,5 +6885,220 @@ fn test_calculate_sla_rejects_unregistered_custom_severity() {
         &symbol_short!("WARN002"),
         &symbol_short!("warning"),
         &45,
+    );
+}
+
+// ============================================================
+// Issue #97 – Full pending proposal state (admin + operator)
+// ============================================================
+
+#[test]
+fn test_admin_proposal_state_records_address_timestamp_and_proposer() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1_700_000_000);
+
+    let new_admin = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&actors.admin, &new_admin);
+
+    let state = client
+        .get_admin_proposal_state()
+        .expect("pending proposal should be visible");
+    assert_eq!(state.address, new_admin);
+    assert_eq!(state.proposed_at_ledger, 1_700_000_000);
+    assert_eq!(state.proposed_by, actors.admin);
+
+    // Legacy accessor must continue to return the address untouched.
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+}
+
+#[test]
+fn test_admin_proposal_state_is_none_when_no_proposal() {
+    let (_env, client, _actors) = setup();
+    assert_eq!(client.get_admin_proposal_state(), None);
+    assert_eq!(client.get_pending_admin(), None);
+}
+
+#[test]
+fn test_admin_proposal_state_clears_after_acceptance() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &new_admin);
+    assert!(client.get_admin_proposal_state().is_some());
+
+    client.accept_admin(&new_admin);
+    assert_eq!(client.get_admin_proposal_state(), None);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_admin(), new_admin);
+}
+
+#[test]
+fn test_admin_proposal_state_clears_after_cancellation() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &new_admin);
+    client.cancel_admin_proposal(&actors.admin);
+    assert_eq!(client.get_admin_proposal_state(), None);
+}
+
+#[test]
+fn test_admin_accept_rejects_wrong_caller_with_struct_storage() {
+    // Regression guard: accept_admin must still reject when caller
+    // does not match the proposed address, even though storage now
+    // holds a struct rather than a bare Address.
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+    let stranger = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &new_admin);
+    client.accept_admin(&stranger); // must panic – Unauthorized
+}
+
+#[test]
+fn test_operator_proposal_state_records_address_timestamp_and_proposer() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1_700_000_123);
+
+    let new_op = soroban_sdk::Address::generate(&env);
+    client.propose_operator(&actors.admin, &new_op);
+
+    let state = client
+        .get_operator_proposal_state()
+        .expect("pending operator proposal should be visible");
+    assert_eq!(state.address, new_op);
+    assert_eq!(state.proposed_at_ledger, 1_700_000_123);
+    assert_eq!(state.proposed_by, actors.admin);
+    assert_eq!(client.get_pending_operator(), Some(new_op));
+}
+
+#[test]
+fn test_operator_proposal_state_is_none_when_no_proposal() {
+    let (_env, client, _actors) = setup();
+    assert_eq!(client.get_operator_proposal_state(), None);
+    assert_eq!(client.get_pending_operator(), None);
+}
+
+#[test]
+fn test_operator_proposal_state_clears_after_acceptance() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    assert!(client.get_operator_proposal_state().is_some());
+
+    client.accept_operator(&new_op);
+    assert_eq!(client.get_operator_proposal_state(), None);
+    assert_eq!(client.get_pending_operator(), None);
+    assert_eq!(client.get_operator(), new_op);
+}
+
+#[test]
+fn test_operator_proposal_state_clears_after_cancellation() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    client.cancel_operator_proposal(&actors.admin);
+    assert_eq!(client.get_operator_proposal_state(), None);
+}
+
+// ============================================================
+// Issue #92 – Tighten validate_config cross-parameter consistency
+// ============================================================
+
+#[test]
+fn test_set_config_rejects_insufficient_reward_margin() {
+    // critical: penalty 100, reward 150.  100*3 = 300, 150*2 = 300.
+    // Boundary: lhs >= rhs => reject (margin strictly less than 1.5x).
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &150);
+}
+
+#[test]
+fn test_set_config_accepts_exact_margin_upper_boundary() {
+    // penalty 100, reward 151. 100*3 = 300 < 151*2 = 302 => accept.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &151);
+}
+
+#[test]
+fn test_set_config_rejects_high_above_critical_penalty() {
+    // Push critical down to 50 (its minimum), then attempt to lift
+    // high above critical => must panic with SeverityOrderInvalid.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &50, &750);
+    client.set_config(&actors.admin, &symbol_short!("high"), &120, &60, &750);
+}
+
+#[test]
+fn test_set_config_accepts_critical_equal_to_high() {
+    // Establish high at 100 first, then verify critical can sit at 100
+    // (the equal case must be accepted -- the rule is `>=`).
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("high"), &120, &100, &750);
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
+}
+
+#[test]
+fn test_set_custom_severity_rejects_insufficient_margin() {
+    // Custom severities inherit the reward-margin rule (economic safety
+    // is independent of the severity label).
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(
+        &actors.admin,
+        &symbol_short!("warning"),
+        &90,
+        &100,
+        &150,
+    );
+}
+
+#[test]
+fn test_set_custom_severity_accepts_safe_margin() {
+    let (_env, client, actors) = setup();
+    client.set_custom_severity(
+        &actors.admin,
+        &symbol_short!("warning"),
+        &90,
+        &100,
+        &151,
+    );
+}
+
+#[test]
+fn test_failure_schema_includes_consistency_codes() {
+    let (env, client, _actors) = setup();
+    let schema = client.get_failure_schema();
+
+    let mut saw_reward_margin = false;
+    let mut saw_severity_order = false;
+    let mut saw_pre_existing_higher = false;
+
+    for entry in schema.codes.iter() {
+        match entry.code {
+            19 => {
+                saw_reward_margin = true;
+                assert_eq!(entry.label, Symbol::new(&env, "RewardMarginTooLow"));
+            }
+            20 => {
+                saw_severity_order = true;
+                assert_eq!(
+                    entry.label,
+                    Symbol::new(&env, "SeverityOrderInvalid")
+                );
+            }
+            n if n <= 18 => {
+                saw_pre_existing_higher = true;
+            }
+            _ => {}
+        }
+    }
+
+    assert!(saw_reward_margin, "code 19 (RewardMarginTooLow) missing");
+    assert!(saw_severity_order, "code 20 (SeverityOrderInvalid) missing");
+    assert!(
+        saw_pre_existing_higher,
+        "pre-existing failure codes 1-18 must still be present"
     );
 }

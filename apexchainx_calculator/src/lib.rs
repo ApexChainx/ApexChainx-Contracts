@@ -1,3 +1,18 @@
+//! ApexChainx SLA Calculator smart contract.
+//!
+//! # Soroban SDK
+//!
+//! This contract is compiled with **Soroban SDK 21.1.0**.
+//! The same version is pinned in `apexchainx_calculator/Cargo.toml`,
+//! the project README badge, the Technology Stack table, and
+//! `docs/PROJECT_CONTEXT.md`. Any future SDK bump must update all four
+//! locations together. The triple-grep acceptance check for issue #73:
+//!
+//! ```text
+//! rg -n '21\.1\.0' README.md apexchainx_calculator/Cargo.toml \
+//!     docs/PROJECT_CONTEXT.md apexchainx_calculator/src/lib.rs
+//! ```
+
 #![no_std]
 extern crate alloc;
 
@@ -91,7 +106,13 @@ const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
 
 /// The storage schema version this contract binary expects.
 /// Incremented when breaking state changes are introduced.
-const STORAGE_VERSION: u32 = 1;
+///
+/// v1 → v2 (issue #97): replaced `Address`-typed `PENDING_ADMIN_KEY`
+/// and `PENDING_OP_KEY` storage with full proposal structs
+/// (`AdminProposalState`, `OperatorProposalState`) so admin dashboards
+/// can read submission context. The migration step clears any pending
+/// proposal left in the old layout; admins re-propose after migrate.
+const STORAGE_VERSION: u32 = 2;
 
 /// Version of the SLAResult schema exposed via get_result_schema().
 /// Incremented when result encoding changes in a breaking way.
@@ -292,6 +313,14 @@ pub enum SLAError {
     InvalidInput = 17,
     /// Custom severity referenced but not registered. (#93)
     SeverityNotInSet = 18,
+    /// Reward base does not exceed penalty by the required safety margin.
+    /// Enforced by the cross-parameter consistency check in #92:
+    /// `penalty_per_minute * 1.5 < reward_base` is rejected.
+    RewardMarginTooLow = 19,
+    /// Severity hierarchy violated: the proposed config would make
+    /// `critical.penalty_per_minute < high.penalty_per_minute`. Enforced by
+    /// the cross-severity consistency check in #92.
+    SeverityOrderInvalid = 20,
 }
 
 // -----------------------------------------------------------------------
@@ -521,6 +550,41 @@ pub struct VersionInfo {
     pub contract_name: Symbol,
 }
 
+/// #97 – Full state of a pending admin handover. Returned alongside the
+/// legacy `Option<Address>` view so admin dashboards can display when the
+/// proposal was created and which admin authorised it. Recording both
+/// fields at proposal time captures accountability for the in-flight
+/// transition without requiring off-chain logs.
+///
+/// Stored under `PENDING_ADMIN_KEY` from STORAGE_VERSION v2 onward;
+/// the v1 → v2 migration step clears any legacy value so admins
+/// re-propose after a contract upgrade.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposalState {
+    /// Address that must call `accept_admin` to complete the handover.
+    pub address: Address,
+    /// Ledger timestamp (seconds) at which `propose_admin` was invoked.
+    pub proposed_at_ledger: u64,
+    /// Admin who initiated the proposal. Useful for audit trails when a
+    /// single admin is sequenced out before their proposal is accepted.
+    pub proposed_by: Address,
+}
+
+/// #97 – Operator counterpart of `AdminProposalState`. Same fields;
+/// kept as a distinct type so admin dashboards can render operator
+/// proposals under their own label without dispatching on context.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperatorProposalState {
+    /// Address that must call `accept_operator` to complete the handoff.
+    pub address: Address,
+    /// Ledger timestamp (seconds) at which `propose_operator` was invoked.
+    pub proposed_at_ledger: u64,
+    /// Admin who initiated the proposal.
+    pub proposed_by: Address,
+}
+
 // -----------------------------------------------------------------------
 // Contract implementation
 // -----------------------------------------------------------------------
@@ -736,12 +800,21 @@ impl SLACalculatorContract {
             current = 1;
         }
 
-        // v1 → v2 (placeholder for the next breaking state change):
-        // if current == 1 {
-        //     // … transform state …
-        //     env.storage().instance().set(&STORAGE_VERSION_KEY, &2u32);
-        //     current = 2;
-        // }
+        // #97 – v1 → v2: pending admin/operator proposal storage now holds
+        // a structured proposal (address + timestamp + proposer) instead of
+        // a bare Address. Reading the new struct against legacy Address bytes
+        // would panic, so we wipe the keys here. Pending transfers are
+        // ephemeral; admins re-propose after migration.
+        if current == 1 {
+            if env.storage().instance().has(&PENDING_ADMIN_KEY) {
+                env.storage().instance().remove(&PENDING_ADMIN_KEY);
+            }
+            if env.storage().instance().has(&PENDING_OP_KEY) {
+                env.storage().instance().remove(&PENDING_OP_KEY);
+            }
+            env.storage().instance().set(&STORAGE_VERSION_KEY, &2u32);
+            current = 2;
+        }
 
         // Sanity: after all steps we must be at STORAGE_VERSION
         if current != STORAGE_VERSION {
@@ -804,10 +877,20 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Propose a new admin. The current admin initiates; the new admin must call `accept_admin`.
+    /// On success both the pending address and the proposal context
+    /// (`proposed_at_ledger`, `proposed_by`) are recorded so dashboards can
+    /// display the full state via `get_admin_proposal_state()` (#97).
     pub fn propose_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
-        env.storage().instance().set(&PENDING_ADMIN_KEY, &new_admin);
+        env.storage().instance().set(
+            &PENDING_ADMIN_KEY,
+            &AdminProposalState {
+                address: new_admin.clone(),
+                proposed_at_ledger: env.ledger().timestamp(),
+                proposed_by: caller.clone(),
+            },
+        );
         env.events()
             .publish((EVENT_ADMIN_PROP, EVENT_VERSION, caller), (new_admin,));
         Ok(())
@@ -817,12 +900,12 @@ impl SLACalculatorContract {
     /// On success the caller becomes admin and the pending proposal is cleared.
     pub fn accept_admin(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
-        let pending: Address = env
+        let pending: AdminProposalState = env
             .storage()
             .instance()
             .get(&PENDING_ADMIN_KEY)
             .ok_or(SLAError::NoPendingTransfer)?;
-        if caller != pending {
+        if caller != pending.address {
             return Err(SLAError::Unauthorized);
         }
         env.storage().instance().set(&ADMIN_KEY, &caller);
@@ -845,8 +928,24 @@ impl SLACalculatorContract {
         Ok(())
     }
 
-    /// Returns the pending admin address, if any.
+    /// Returns the pending admin address, if any. Backed by the structured
+    /// `AdminProposalState` storage introduced in #97; this view preserves
+    /// the legacy `Option<Address>` shape so existing backends continue to
+    /// work without modification.
     pub fn get_pending_admin(env: Env) -> Result<Option<Address>, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get::<_, AdminProposalState>(&PENDING_ADMIN_KEY)
+            .map(|state| state.address))
+    }
+
+    /// #97 – Full pending state for admin dashboards. Returns
+    /// `Some(AdminProposalState)` when a proposal exists, otherwise `None`.
+    /// Includes the proposed address, the ledger timestamp of proposal
+    /// submission, and the admin who initiated the proposal.
+    pub fn get_admin_proposal_state(env: Env) -> Result<Option<AdminProposalState>, SLAError> {
         Self::check_version(&env)?;
         Ok(env.storage().instance().get(&PENDING_ADMIN_KEY))
     }
@@ -856,10 +955,19 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Propose a new operator. The current admin initiates; the new operator must call `accept_operator`.
+    /// Mirrors `propose_admin`: records proposal context for dashboard
+    /// display (#97).
     pub fn propose_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
-        env.storage().instance().set(&PENDING_OP_KEY, &new_operator);
+        env.storage().instance().set(
+            &PENDING_OP_KEY,
+            &OperatorProposalState {
+                address: new_operator.clone(),
+                proposed_at_ledger: env.ledger().timestamp(),
+                proposed_by: caller.clone(),
+            },
+        );
         env.events()
             .publish((EVENT_OP_PROP, EVENT_VERSION, caller), (new_operator,));
         Ok(())
@@ -868,12 +976,12 @@ impl SLACalculatorContract {
     /// Accept a pending operator handoff. Must be called by the proposed new operator.
     pub fn accept_operator(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
-        let pending: Address = env
+        let pending: OperatorProposalState = env
             .storage()
             .instance()
             .get(&PENDING_OP_KEY)
             .ok_or(SLAError::NoPendingTransfer)?;
-        if caller != pending {
+        if caller != pending.address {
             return Err(SLAError::Unauthorized);
         }
         env.storage().instance().set(&OPERATOR_KEY, &caller);
@@ -896,8 +1004,21 @@ impl SLACalculatorContract {
         Ok(())
     }
 
-    /// Returns the pending operator address, if any.
+    /// Returns the pending operator address, if any. Backed by the
+    /// structured `OperatorProposalState` storage introduced in #97; this
+    /// view preserves the legacy `Option<Address>` shape.
     pub fn get_pending_operator(env: Env) -> Result<Option<Address>, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get::<_, OperatorProposalState>(&PENDING_OP_KEY)
+            .map(|state| state.address))
+    }
+
+    /// #97 – Full pending state for operator handoffs. Returns
+    /// `Some(OperatorProposalState)` when a proposal exists.
+    pub fn get_operator_proposal_state(env: Env) -> Result<Option<OperatorProposalState>, SLAError> {
         Self::check_version(&env)?;
         Ok(env.storage().instance().get(&PENDING_OP_KEY))
     }
@@ -1017,8 +1138,11 @@ impl SLACalculatorContract {
         Self::require_admin(&env, &caller)?; // #28 – admin role enforced
         Self::require_not_frozen(&env)?;
 
-        // #70 – Validate configuration parameters
-        Self::validate_config(&severity, threshold_minutes, penalty_per_minute, reward_base)?;
+        // #70 – Validate configuration parameters.
+        // #92 – `env` is required for the cross-severity check
+        // (verifies `critical.penalty_per_minute >= high.penalty_per_minute`
+        // when either canonical severity is being updated).
+        Self::validate_config(&env, &severity, threshold_minutes, penalty_per_minute, reward_base)?;
 
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
@@ -1239,7 +1363,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 18] = [
+        let entries: [(u32, &str, &str); 20] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1258,6 +1382,9 @@ impl SLACalculatorContract {
             (16, "ConfigFrozen", "Configuration is frozen"),
             (17, "InvalidInput", "Invalid input parameter"),
             (18, "SeverityNotInSet", "Custom severity not registered"),
+            // #92 – cross-parameter / cross-severity consistency
+            (19, "RewardMarginTooLow", "Reward margin below safe ratio"),
+            (20, "SeverityOrderInvalid", "Severity hierarchy violated"),
         ];
 
         for (code, label, description) in entries {
@@ -1698,6 +1825,12 @@ impl SLACalculatorContract {
     /// #93 – General bounds shared by canonical and custom severities.
     /// Extracted from validate_config so custom severities get the same
     /// baseline safety checks without the canonical-only per-severity branches.
+    ///
+    /// #92 – Adds the cross-parameter reward-margin check: rewards must
+    /// exceed 1.5× the per-minute penalty (`penalty * 3 < reward * 2`).
+    /// This guard is enforced for both canonical and custom severities
+    /// because the economic safety property does not depend on the
+    /// severity label.
     fn validate_general_bounds(
         threshold_minutes: u32,
         penalty_per_minute: i128,
@@ -1712,11 +1845,36 @@ impl SLACalculatorContract {
         if reward_base <= 0 || reward_base > 100000 {
             return Err(SLAError::InvalidReward);
         }
+
+        // #92 – Reward margin: `penalty * 1.5 < reward`.
+        // The integer form `penalty * 3 < reward * 2` avoids floating-point
+        // math while preserving the exact semantic inequality. The bounds
+        // above (`penalty ≤ 10000`, `reward ≤ 100000`) guarantee the
+        // checked products fit within i128 (3 * 10000 = 30_000 << i128::MAX
+        // and 2 * 100_000 = 200_000 << i128::MAX), so saturating arithmetic
+        // would be defensible too — but `checked_mul` makes any future
+        // bound changes safe.
+        let lhs = penalty_per_minute
+            .checked_mul(3)
+            .ok_or(SLAError::InvalidReward)?;
+        let rhs = reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?;
+        if lhs >= rhs {
+            return Err(SLAError::RewardMarginTooLow);
+        }
+
         Ok(())
     }
 
     /// #70 – Validates configuration parameters to ensure safe and meaningful values.
+    /// #92 – Now also runs the cross-severity check
+    /// (`critical.penalty_per_minute >= high.penalty_per_minute`) against
+    /// the storage-resident configs. Reading the existing map makes the
+    /// check sensitive to the *current* on-chain state, not just the
+    /// proposed write — so an update to `high` that would invert the
+    /// `critical ≥ high` order is rejected even if the proposed values
+    /// pass per-field validation.
     fn validate_config(
+        env: &Env,
         severity: &Symbol,
         threshold_minutes: u32,
         penalty_per_minute: i128,
@@ -1774,6 +1932,30 @@ impl SLACalculatorContract {
             }
         } else {
             return Err(SLAError::InvalidSeverity);
+        }
+
+        // #92 – Cross-severity check: critical.penalty >= high.penalty.
+        // Only inspect the canonical severity pair (the issue scope).
+        // Only the *other* canonical severity is fetched from storage; the
+        // severity being updated contributes the proposed value directly.
+        // This keeps the cross-parameter check to a single Map clone even
+        // when one of the canonical entries is being rewritten.
+        let crit_sym = symbol_short!("critical");
+        let high_sym = symbol_short!("high");
+        let (critical_penalty, high_penalty) = if severity == &crit_sym {
+            (penalty_per_minute, Self::load_config(env, &high_sym)?.penalty_per_minute)
+        } else if severity == &high_sym {
+            (Self::load_config(env, &crit_sym)?.penalty_per_minute, penalty_per_minute)
+        } else {
+            // #92 – the rule explicitly concerns critical vs high. For
+            // medium / low updates the existing canonical pair is the source
+            // of truth, with no proposed contribution.
+            let stored_critical = Self::load_config(env, &crit_sym)?;
+            let stored_high = Self::load_config(env, &high_sym)?;
+            (stored_critical.penalty_per_minute, stored_high.penalty_per_minute)
+        };
+        if critical_penalty < high_penalty {
+            return Err(SLAError::SeverityOrderInvalid);
         }
 
         Ok(())

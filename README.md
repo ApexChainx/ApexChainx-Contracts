@@ -2,7 +2,7 @@
   <img src="https://img.shields.io/badge/status-active-success.svg" alt="Status: Active">
   <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
   <img src="https://img.shields.io/badge/version-0.1.0-blueviolet" alt="Version: 0.1.0">
-  <img src="https://img.shields.io/badge/Soroban_SDK-21.0.0-important" alt="Soroban SDK: 21.0.0">
+  <img src="https://img.shields.io/badge/Soroban_SDK-21.1.0-important" alt="Soroban SDK: 21.1.0">
   <img src="https://img.shields.io/badge/rustc-stable-success" alt="Rust: stable">
   <img src="https://img.shields.io/badge/platform-Stellar_Network-000" alt="Platform: Stellar Network">
   <a href="https://codecov.io/gh/ApexChainx/ApexChainx-Contracts"><img src="https://codecov.io/gh/ApexChainx/ApexChainx-Contracts/branch/main/graph/badge.svg" alt="Coverage"></a>
@@ -89,7 +89,7 @@ This contract is responsible for deterministic SLA calculation and related contr
 | Layer | Technology | Version |
 |-------|-----------|---------|
 | Language | Rust | stable (edition 2021) |
-| Framework | Soroban SDK | 21.0.0 |
+| Framework | Soroban SDK | 21.1.0 |
 | Blockchain | Stellar Network | — |
 | Build System | Cargo + wasm32 target | — |
 | Testing | Soroban testutils + cargo test | — |

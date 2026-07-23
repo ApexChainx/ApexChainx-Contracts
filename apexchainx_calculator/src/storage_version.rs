@@ -7,7 +7,7 @@
 //!
 //! # Version Lifecycle
 //!
-//! 1. Contract is deployed — `initialize()` stamps `STORAGE_VERSION` (currently 1)
+//! 1. Contract is deployed — `initialize()` stamps `STORAGE_VERSION` (currently 2; bumped from 1 by issue #97)
 //! 2. Contract is upgraded — new binary may expect a higher version
 //! 3. `get_migration_state()` reports `needs_migration: true`
 //! 4. Admin calls `migrate()` — storage is transformed and version is bumped
