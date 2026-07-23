@@ -6933,3 +6933,143 @@ fn test_calculate_sla_rejects_unregistered_custom_severity() {
         &45,
     );
 }
+
+// ============================================================
+// Issue #96 – get_economic_exposure
+// ============================================================
+
+/// (a) After initialization the function returns one entry per canonical
+/// severity in canonical order.
+#[test]
+fn test_economic_exposure_returns_all_severities() {
+    let (_env, client, _actors) = setup();
+    let exposure = client.get_economic_exposure();
+    assert_eq!(exposure.breakdown.len(), 4);
+    assert_eq!(exposure.breakdown.get(0).unwrap().severity, symbol_short!("critical"));
+    assert_eq!(exposure.breakdown.get(1).unwrap().severity, symbol_short!("high"));
+    assert_eq!(exposure.breakdown.get(2).unwrap().severity, symbol_short!("medium"));
+    assert_eq!(exposure.breakdown.get(3).unwrap().severity, symbol_short!("low"));
+}
+
+/// (b) `max_reward` for each severity equals `reward_base * 200 / 100`,
+/// matching the top-tier multiplier in `compute_result`.
+#[test]
+fn test_economic_exposure_max_reward_matches_top_tier() {
+    let (_env, client, _actors) = setup();
+    let exposure = client.get_economic_exposure();
+
+    // Default configs: critical/high/medium → reward_base 750, low → 600
+    // Top-tier (200 %): 750 * 200 / 100 = 1500; 600 * 200 / 100 = 1200
+    let critical = exposure.breakdown.get(0).unwrap();
+    let high     = exposure.breakdown.get(1).unwrap();
+    let medium   = exposure.breakdown.get(2).unwrap();
+    let low      = exposure.breakdown.get(3).unwrap();
+
+    assert_eq!(critical.max_reward, 1500);
+    assert_eq!(high.max_reward,     1500);
+    assert_eq!(medium.max_reward,   1500);
+    assert_eq!(low.max_reward,      1200);
+}
+
+/// (c) `penalty_per_minute` for each severity matches the configured rate.
+#[test]
+fn test_economic_exposure_penalty_rate_matches_config() {
+    let (_env, client, _actors) = setup();
+    let exposure = client.get_economic_exposure();
+
+    // Default penalty_per_minute: critical=100, high=50, medium=25, low=10
+    let critical = exposure.breakdown.get(0).unwrap();
+    let high     = exposure.breakdown.get(1).unwrap();
+    let medium   = exposure.breakdown.get(2).unwrap();
+    let low      = exposure.breakdown.get(3).unwrap();
+
+    assert_eq!(critical.penalty_per_minute, 100);
+    assert_eq!(high.penalty_per_minute,      50);
+    assert_eq!(medium.penalty_per_minute,    25);
+    assert_eq!(low.penalty_per_minute,       10);
+}
+
+/// (d) Aggregate `total_max_reward` equals the sum of per-severity max rewards.
+#[test]
+fn test_economic_exposure_total_max_reward_is_sum_of_breakdown() {
+    let (_env, client, _actors) = setup();
+    let exposure = client.get_economic_exposure();
+
+    // Default: 1500 + 1500 + 1500 + 1200 = 5700
+    let expected_total: i128 = exposure
+        .breakdown
+        .iter()
+        .map(|e| e.max_reward)
+        .sum();
+    assert_eq!(exposure.total_max_reward, expected_total);
+    assert_eq!(exposure.total_max_reward, 5700);
+}
+
+/// (e) Aggregate `total_penalty_per_minute` equals the sum of per-severity
+/// penalty rates.
+#[test]
+fn test_economic_exposure_total_penalty_per_minute_is_sum_of_breakdown() {
+    let (_env, client, _actors) = setup();
+    let exposure = client.get_economic_exposure();
+
+    // Default: 100 + 50 + 25 + 10 = 185
+    let expected_total: i128 = exposure
+        .breakdown
+        .iter()
+        .map(|e| e.penalty_per_minute)
+        .sum();
+    assert_eq!(exposure.total_penalty_per_minute, expected_total);
+    assert_eq!(exposure.total_penalty_per_minute, 185);
+}
+
+/// (f) After `set_config` the exposure values reflect the updated config.
+#[test]
+fn test_economic_exposure_reflects_config_change() {
+    let (_env, client, actors) = setup();
+
+    // Override critical: reward_base=1000 → max_reward = 2000; penalty_per_minute=200
+    client.set_config(&actors.admin, &symbol_short!("critical"), &10, &200, &1000);
+
+    let exposure = client.get_economic_exposure();
+    let critical = exposure.breakdown.get(0).unwrap();
+
+    assert_eq!(critical.max_reward,        2000);
+    assert_eq!(critical.penalty_per_minute, 200);
+
+    // Totals must also update: was 5700 reward, now (2000 + 1500 + 1500 + 1200) = 6200
+    assert_eq!(exposure.total_max_reward, 6200);
+    // Was 185 penalty rate, now (200 + 50 + 25 + 10) = 285
+    assert_eq!(exposure.total_penalty_per_minute, 285);
+}
+
+/// (g) The view is callable while the contract is paused — it must not
+/// return ContractPaused.
+#[test]
+fn test_economic_exposure_callable_while_paused() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    // Should not panic
+    let exposure = client.get_economic_exposure();
+    assert_eq!(exposure.breakdown.len(), 4);
+}
+
+/// (h) The view is independent of calculation history — pruning history
+/// does not alter the exposure values.
+#[test]
+fn test_economic_exposure_independent_of_history() {
+    let (env, client, actors) = setup();
+
+    // Run a couple of calculations to populate history
+    env.mock_all_auths();
+    client.calculate_sla(&actors.operator, &symbol_short!("out001"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&actors.operator, &symbol_short!("out002"), &symbol_short!("high"), &40);
+
+    let exposure_before = client.get_economic_exposure();
+
+    // Prune all but the most recent entry
+    client.prune_history(&actors.admin, &1);
+
+    let exposure_after = client.get_economic_exposure();
+
+    assert_eq!(exposure_before, exposure_after);
+}
