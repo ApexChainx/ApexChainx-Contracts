@@ -538,6 +538,9 @@ impl SLACalculatorContract {
             return Err(SLAError::AlreadyInitialized);
         }
 
+        admin.require_auth();
+        operator.require_auth();
+
         env.storage().instance().set(&ADMIN_KEY, &admin);
         env.storage().instance().set(&OPERATOR_KEY, &operator); // #28
         env.storage().instance().set(&PAUSED_KEY, &false); // #27
@@ -698,6 +701,7 @@ impl SLACalculatorContract {
     /// `VersionMismatch` without mutating any state.
     pub fn migrate(env: Env, caller: Address) -> Result<(), SLAError> {
         // Require admin without going through check_version (state may be unversioned)
+        caller.require_auth();
         let admin: Address = env
             .storage()
             .instance()
@@ -817,6 +821,7 @@ impl SLACalculatorContract {
     /// On success the caller becomes admin and the pending proposal is cleared.
     pub fn accept_admin(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
+        caller.require_auth();
         let pending: Address = env
             .storage()
             .instance()
@@ -868,6 +873,7 @@ impl SLACalculatorContract {
     /// Accept a pending operator handoff. Must be called by the proposed new operator.
     pub fn accept_operator(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
+        caller.require_auth();
         let pending: Address = env
             .storage()
             .instance()
@@ -1656,6 +1662,7 @@ impl SLACalculatorContract {
     }
 
     fn require_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
+        caller.require_auth();
         let admin: Address = env
             .storage()
             .instance()
@@ -1669,6 +1676,7 @@ impl SLACalculatorContract {
 
     /// #28 – Ensures the caller holds the operator role.
     fn require_operator(env: &Env, caller: &Address) -> Result<(), SLAError> {
+        caller.require_auth();
         let operator: Address = env
             .storage()
             .instance()

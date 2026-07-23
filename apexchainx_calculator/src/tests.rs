@@ -32,6 +32,7 @@ fn symbol(env: &Env, value: &str) -> Symbol {
 
 fn setup() -> (Env, SLACalculatorContractClient<'static>, Actors) {
     let env = Env::default();
+    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     let actors = Actors {
@@ -837,6 +838,7 @@ fn test_backend_parity_reward_tier_cases() {
 #[test]
 fn test_calculate_sla_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -859,6 +861,7 @@ fn test_calculate_sla_budget_is_reasonable() {
 #[test]
 fn test_set_config_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -881,6 +884,7 @@ fn test_set_config_budget_is_reasonable() {
 #[test]
 fn test_pause_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -904,6 +908,7 @@ fn test_pause_budget_is_reasonable() {
 #[test]
 fn test_unpause_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -927,6 +932,7 @@ fn test_unpause_budget_is_reasonable() {
 #[test]
 fn test_freeze_config_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -949,6 +955,7 @@ fn test_freeze_config_budget_is_reasonable() {
 #[test]
 fn test_unfreeze_config_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -972,6 +979,7 @@ fn test_unfreeze_config_budget_is_reasonable() {
 #[test]
 fn test_propose_admin_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -995,6 +1003,7 @@ fn test_propose_admin_budget_is_reasonable() {
 #[test]
 fn test_accept_admin_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1019,6 +1028,7 @@ fn test_accept_admin_budget_is_reasonable() {
 #[test]
 fn test_cancel_admin_proposal_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1043,6 +1053,7 @@ fn test_cancel_admin_proposal_budget_is_reasonable() {
 #[test]
 fn test_propose_operator_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1066,6 +1077,7 @@ fn test_propose_operator_budget_is_reasonable() {
 #[test]
 fn test_accept_operator_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1090,6 +1102,7 @@ fn test_accept_operator_budget_is_reasonable() {
 #[test]
 fn test_cancel_operator_proposal_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1114,6 +1127,7 @@ fn test_cancel_operator_proposal_budget_is_reasonable() {
 #[test]
 fn test_renounce_admin_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1136,6 +1150,7 @@ fn test_renounce_admin_budget_is_reasonable() {
 #[test]
 fn test_set_operator_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1159,6 +1174,7 @@ fn test_set_operator_budget_is_reasonable() {
 #[test]
 fn test_set_retention_limit_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1181,6 +1197,7 @@ fn test_set_retention_limit_budget_is_reasonable() {
 #[test]
 fn test_prune_history_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1208,6 +1225,7 @@ fn test_prune_history_budget_is_reasonable() {
 #[test]
 fn test_prune_history_by_age_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
     env.ledger().set_timestamp(1000);
 
@@ -1237,6 +1255,7 @@ fn test_prune_history_by_age_budget_is_reasonable() {
 #[test]
 fn test_migrate_budget_is_reasonable() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -1423,6 +1442,7 @@ fn test_calculate_sla_view_matches_mutating_and_does_not_mutate() {
 #[test]
 fn test_stress_1000_calculations_mixed_severities() {
     let env = Env::default();
+    env.mock_all_auths();
 
     // Reset budget to unlimited to allow 1000 sequential calls in a single test environment.
     // We will manually track CPU instruction counts to assert gas efficiency per call.
@@ -2064,6 +2084,7 @@ fn test_get_contract_metadata_is_deterministic() {
 #[test]
 fn test_migrate_done_symbol() {
     let env = Env::default();
+    env.mock_all_auths();
     let _sym = soroban_sdk::Symbol::new(&env, "migrate_done");
 }
 
@@ -2243,6 +2264,7 @@ fn test_check_version_rejects_version_mismatch() {
     // Simulate a future version stored in state by writing a different version
     // directly, then calling any versioned endpoint.
     let env = Env::default();
+    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     let admin = soroban_sdk::Address::generate(&env);
@@ -2810,6 +2832,7 @@ fn test_get_latest_by_outage_does_not_return_other_outage() {
 #[test]
 fn test_history_does_not_exceed_max_size() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -2836,6 +2859,7 @@ fn test_history_does_not_exceed_max_size() {
 #[test]
 fn test_prune_by_age_removes_old_entries() {
     let env = Env::default();
+    env.mock_all_auths();
     env.ledger().set_timestamp(1000);
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -2865,6 +2889,7 @@ fn test_prune_by_age_removes_old_entries() {
 #[test]
 fn test_prune_by_age_keeps_all_when_none_old_enough() {
     let env = Env::default();
+    env.mock_all_auths();
     env.ledger().set_timestamp(1000);
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -2902,6 +2927,7 @@ fn test_prune_by_age_operator_cannot_prune() {
 #[test]
 fn test_prune_by_age_emits_event() {
     let env = Env::default();
+    env.mock_all_auths();
     env.ledger().set_timestamp(1000);
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -2924,6 +2950,7 @@ fn test_prune_by_age_emits_event() {
 #[test]
 fn test_prune_by_age_recorded_at_is_set_on_calculate() {
     let env = Env::default();
+    env.mock_all_auths();
     env.ledger().set_timestamp(5000);
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -2947,6 +2974,7 @@ fn test_prune_by_age_recorded_at_is_set_on_calculate() {
 fn test_storage_growth_history_bounded_by_prune() {
     // Verify that repeated calculations followed by pruning keeps history bounded.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -2975,6 +3003,7 @@ fn test_storage_growth_history_bounded_by_prune() {
 fn test_storage_growth_stats_do_not_grow_with_calculations() {
     // Stats are a single fixed-size struct; verify it stays constant regardless of call count.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -3011,6 +3040,7 @@ fn test_storage_growth_config_size_is_fixed() {
 #[test]
 fn test_storage_growth_prune_by_age_bounds_history() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
     env.ledger().set_timestamp(0);
 
@@ -3132,6 +3162,7 @@ fn test_pruned_event_payload_field_count_is_two() {
 #[test]
 fn test_pruned_age_event_payload_field_count_is_two() {
     let env = Env::default();
+    env.mock_all_auths();
     env.ledger().set_timestamp(0);
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -3156,6 +3187,7 @@ fn test_pruned_age_event_payload_field_count_is_two() {
 #[test]
 fn test_history_cap_drops_oldest_entry() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -3461,6 +3493,7 @@ fn test_set_retention_limit_above_max_fails() {
 #[test]
 fn test_retention_limit_enforced_on_calculate() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -3485,6 +3518,7 @@ fn test_retention_limit_enforced_on_calculate() {
 #[test]
 fn test_retention_limit_drops_oldest_when_exceeded() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -3515,6 +3549,7 @@ fn test_retention_limit_update_takes_effect_on_next_calculate() {
     // entry and drops one (net zero change) until the history naturally drains
     // to the new limit via prune_history or prune_history_by_age.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -3580,6 +3615,7 @@ fn test_get_migration_state_returns_current_version() {
 #[test]
 fn test_get_migration_state_detects_version_mismatch() {
     let env = Env::default();
+    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     let admin = soroban_sdk::Address::generate(&env);
@@ -3621,6 +3657,7 @@ fn test_migrate_initialises_missing_fields() {
     // Simulate a frozen older snapshot that lacks keys added in later
     // schemas, then run migrate and verify deterministic defaults are set.
     let env = Env::default();
+    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     let admin = soroban_sdk::Address::generate(&env);
@@ -4291,6 +4328,7 @@ fn test_pause_metadata_cleared_between_cycles() {
 fn test_pause_metadata_timestamp_advances_across_cycles() {
     // Each pause cycle records a fresh timestamp; later pauses must have >= timestamp.
     let env = Env::default();
+    env.mock_all_auths();
     env.ledger().set_timestamp(1000);
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -4411,6 +4449,7 @@ fn test_pause_events_emitted_each_cycle() {
 fn test_storage_growth_history_grows_linearly_then_caps() {
     // History length must grow by 1 per calculation until the cap, then stay flat.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -4447,6 +4486,7 @@ fn test_storage_growth_prune_cycle_keeps_history_bounded() {
     // Simulate a long-running scenario: fill → prune → fill → prune.
     // History must never exceed the prune target.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -4475,6 +4515,7 @@ fn test_storage_growth_prune_cycle_keeps_history_bounded() {
 fn test_storage_growth_age_prune_cycle_keeps_history_bounded() {
     // Simulate time-based pruning across multiple ledger epochs.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -4526,6 +4567,7 @@ fn test_storage_growth_config_map_stays_fixed_size() {
 fn test_storage_growth_stats_struct_size_is_constant() {
     // Stats is a fixed-size struct; total_calculations must equal the number of calls.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -4561,6 +4603,7 @@ fn test_storage_growth_stats_struct_size_is_constant() {
 fn test_storage_growth_retention_limit_prevents_unbounded_growth() {
     // With a small retention limit, history must never exceed it even after many calls.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -4588,6 +4631,7 @@ fn test_storage_growth_regression_mixed_operations() {
     // Regression: interleave calculations, config updates, and pruning.
     // Verify no unexpected growth in any storage slot.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
 
     let cid = env.register_contract(None, SLACalculatorContract);
@@ -4839,6 +4883,7 @@ fn test_extreme_mttr_at_max_u32_violates_and_does_not_overflow() {
     // overtime = u32::MAX - 15 ≈ 4.29e9; penalty = overtime * 100 as i128.
     // i128 can hold up to ~1.7e38, so no overflow.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
@@ -4913,6 +4958,7 @@ fn test_extreme_penalty_large_overtime_no_i128_overflow() {
     client.set_config(&actors.admin, &symbol_short!("low"), &1, &100, &1);
 
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client2 = SLACalculatorContractClient::new(&env, &cid);
@@ -4972,6 +5018,7 @@ fn test_extreme_penalty_above_10000_rejected() {
 #[should_panic]
 fn test_get_version_info_panics_when_not_initialized() {
     let env = Env::default();
+    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     // No initialize call — must panic (NotInitialized)
@@ -5016,6 +5063,7 @@ fn test_extreme_mttr_equals_threshold_is_always_met() {
 fn test_extreme_stats_accumulate_large_values_without_overflow() {
     // Run many high-penalty violations and verify stats accumulate correctly.
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
@@ -5385,6 +5433,7 @@ fn test_error_config_not_found_is_retryable_after_set_config() {
     // (We can't remove a config directly, so we verify the error code via
     // a freshly-registered contract with no configs set.)
     let env = Env::default();
+    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     let admin = soroban_sdk::Address::generate(&env);
@@ -5684,6 +5733,7 @@ fn test_stats_penalties_unchanged_on_met() {
 #[test]
 fn test_stats_conservation_holds_after_many_mixed_calculations() {
     let env = Env::default();
+    env.mock_all_auths();
     env.budget().reset_unlimited();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
@@ -6529,6 +6579,7 @@ fn test_issue4_get_last_config_update_matches_ledger_sequence() {
 #[test]
 fn test_issue4_repeated_set_config_produces_increasing_sequences() {
     let env = Env::default();
+    env.mock_all_auths();
 
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
@@ -6567,6 +6618,7 @@ fn test_issue4_repeated_set_config_produces_increasing_sequences() {
 #[test]
 fn test_stats_saturation_emits_event() {
     let env = Env::default();
+    env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
     let admin = soroban_sdk::Address::generate(&env);

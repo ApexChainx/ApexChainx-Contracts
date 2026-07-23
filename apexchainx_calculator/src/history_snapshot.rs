@@ -65,6 +65,7 @@ mod tests {
 
     fn setup() -> (Env, SLACalculatorContractClient<'static>, Address, Address) {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
