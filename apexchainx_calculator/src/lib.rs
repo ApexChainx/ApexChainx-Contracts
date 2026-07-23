@@ -15,13 +15,13 @@ mod tests;
 mod fuzz_tests;
 
 pub mod audit_state;
+pub mod calculation;
 pub mod config;
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
-pub mod calculation;
 pub mod error_responses;
 pub mod event_correlation;
 mod event_schema;
@@ -54,6 +54,8 @@ pub(crate) const OPERATOR_KEY: Symbol = symbol_short!("OPERATOR");
 
 /// Pending admin for two-step transfer. (#63)
 pub(crate) const PENDING_ADMIN_KEY: Symbol = symbol_short!("PADMIN");
+/// Full pending admin proposal metadata (address + proposed_at_ledger + proposed_by). (#97)
+pub(crate) const PENDING_ADMIN_STATE_KEY: Symbol = symbol_short!("PADMSTA");
 /// Pending operator for two-step handoff. (#64)
 pub(crate) const PENDING_OP_KEY: Symbol = symbol_short!("POP");
 
@@ -457,6 +459,27 @@ pub struct PauseInfo {
     pub paused_by: Address,
 }
 
+/// #97 – Full pending admin proposal state, returned by `get_pending_admin_state`.
+///
+/// Captures the proposed `address` together with the metadata an admin dashboard
+/// needs to render a useful row: the ledger sequence at which the proposal was
+/// recorded and the address of the admin who proposed it. Without this struct,
+/// dashboards had to fall back on `get_pending_admin` (which returns just the
+/// address) and scrape `proposed_by` out of the `adm_prop` event stream.
+///
+/// `proposed_at_ledger` is a `u32` because Soroban's `env.ledger().sequence()`
+/// is u32-typed; this avoids lossy conversion at the contract boundary.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposalState {
+    /// Address of the proposed new admin (destined to become admin on accept).
+    pub address: Address,
+    /// Ledger sequence at which `propose_admin` stamped this proposal.
+    pub proposed_at_ledger: u32,
+    /// Address of the admin who initiated the proposal (the caller of `propose_admin`).
+    pub proposed_by: Address,
+}
+
 /// #4 – Metadata about the most recent configuration update.
 ///
 /// Wrapping the ledger sequence in a contract type (rather than exposing it
@@ -825,15 +848,33 @@ impl SLACalculatorContract {
         Ok(())
     }
 
+    // NOTE: Per Issue #155 and `tooling/moduleMap.ts`, the `governance` Rust
+    // module is the canonical home for these admin-transfer functions and is kept
+    // in sync for tooling/tests that import it directly. The `#[contractimpl]` block
+    // below is the binary-level surface bound to clients and must contain the actual
+    // logic. When modifying any of {propose_admin, accept_admin, cancel_admin_proposal,
+    // renounce_admin, get_pending_admin_state}, mirror the change in
+    // `apexchainx_calculator/src/governance.rs` so the two stay in lockstep.
     // -------------------------------------------------------------------
     // #63 – Two-step admin transfer
     // -------------------------------------------------------------------
 
     /// Propose a new admin. The current admin initiates; the new admin must call `accept_admin`.
+    /// #97 – Also stamps the full `AdminProposalState` (address + proposed_at_ledger + proposed_by)
+    /// so that `get_pending_admin_state` returns a complete proposal record for admin dashboards.
+    /// Both keys are written inside the same auth-checked call so a partial write is impossible.
     pub fn propose_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         env.storage().instance().set(&PENDING_ADMIN_KEY, &new_admin);
+        env.storage().instance().set(
+            &PENDING_ADMIN_STATE_KEY,
+            &AdminProposalState {
+                address: new_admin.clone(),
+                proposed_at_ledger: env.ledger().sequence(),
+                proposed_by: caller.clone(),
+            },
+        );
         env.events()
             .publish((EVENT_ADMIN_PROP, EVENT_VERSION, caller), (new_admin,));
         Ok(())
@@ -841,6 +882,8 @@ impl SLACalculatorContract {
 
     /// Accept a pending admin transfer. Must be called by the proposed new admin.
     /// On success the caller becomes admin and the pending proposal is cleared.
+    /// #97 – Clears `PENDING_ADMIN_STATE_KEY` alongside `PENDING_ADMIN_KEY` so
+    /// `get_pending_admin_state` mirrors `get_pending_admin` after acceptance.
     pub fn accept_admin(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         caller.require_auth();
@@ -854,6 +897,7 @@ impl SLACalculatorContract {
         }
         env.storage().instance().set(&ADMIN_KEY, &caller);
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
+        env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
         env.events().publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -861,6 +905,7 @@ impl SLACalculatorContract {
     /// Cancel a pending admin transfer. Only the current admin may cancel.
     /// Clears the pending proposal without changing the active admin.
     /// Returns `NoPendingTransfer` if there is nothing to cancel.
+    /// #97 – Clears `PENDING_ADMIN_STATE_KEY` alongside `PENDING_ADMIN_KEY`.
     pub fn cancel_admin_proposal(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
@@ -868,6 +913,7 @@ impl SLACalculatorContract {
             return Err(SLAError::NoPendingTransfer);
         }
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
+        env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
         env.events().publish((EVENT_ADMIN_CAN, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -876,6 +922,27 @@ impl SLACalculatorContract {
     pub fn get_pending_admin(env: Env) -> Result<Option<Address>, SLAError> {
         Self::check_version(&env)?;
         Ok(env.storage().instance().get(&PENDING_ADMIN_KEY))
+    }
+
+    /// #97 – Returns the full pending admin proposal state, if any.
+    ///
+    /// Returns an [`AdminProposalState`] containing the proposed address,
+    /// the ledger sequence at which the proposal was recorded, and the
+    /// address of the admin who proposed it. Returns `None` when there is
+    /// no pending proposal.
+    ///
+    /// This function is intended for admin dashboards that need richer
+    /// metadata than [`get_pending_admin`] exposes. The two reads are
+    /// consistent: every state transition that clears the pending admin
+    /// (`accept_admin`, `cancel_admin_proposal`, `renounce_admin`) clears
+    /// both `PENDING_ADMIN_KEY` and `PENDING_ADMIN_STATE_KEY`; conversely,
+    /// `propose_admin` stamps both keys atomically from a single auth-checked
+    /// call.
+    ///
+    /// Like `get_pending_admin`, this is a pure read and requires no auth.
+    pub fn get_pending_admin_state(env: Env) -> Result<Option<AdminProposalState>, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env.storage().instance().get(&PENDING_ADMIN_STATE_KEY))
     }
 
     // -------------------------------------------------------------------
@@ -936,12 +1003,14 @@ impl SLACalculatorContract {
 
     /// Permanently renounce admin authority. This is irreversible: no admin will
     /// exist after this call and admin-gated functions will be permanently locked.
-    /// Any pending admin proposal is also cleared.
+    /// Any pending admin proposal is also cleared. #97 – also clears
+    /// `PENDING_ADMIN_STATE_KEY` so the new endpoint returns None after renounce.
     pub fn renounce_admin(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         env.storage().instance().remove(&ADMIN_KEY);
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
+        env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
         env.events().publish((EVENT_ADMIN_REN, EVENT_VERSION, caller), ());
         Ok(())
     }

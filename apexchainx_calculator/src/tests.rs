@@ -6933,3 +6933,180 @@ fn test_calculate_sla_rejects_unregistered_custom_severity() {
         &45,
     );
 }
+
+// -------------------------------------------------------------------
+// #97 – Tests for `get_pending_admin_state`
+//
+// These cover the contract additions that publish the full admin
+// proposal metadata (address + proposed_at_ledger + proposed_by) so
+// admin dashboards can render pending proposals from a single read.
+// The behaviour under test: keys are stamped atomically with
+// PENDING_ADMIN_KEY on propose, and cleared in lockstep on accept /
+// cancel / renounce so the new reader and the legacy reader never
+// disagree.
+// -------------------------------------------------------------------
+
+#[test]
+fn test_get_pending_admin_state_empty_when_no_proposal() {
+    let (_env, client, _actors) = setup();
+    assert_eq!(client.get_pending_admin_state(), None);
+    // The legacy `get_pending_admin` must agree: both readers are
+    // consistent in the empty state.
+    assert_eq!(client.get_pending_admin(), None);
+}
+
+#[test]
+fn test_get_pending_admin_state_returns_full_record_after_propose() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &new_admin);
+
+    let state = client
+        .get_pending_admin_state()
+        .expect("proposal should be present");
+    assert_eq!(state.address, new_admin);
+    assert_eq!(state.proposed_by, actors.admin);
+    // `proposed_at_ledger` is the sequence observed by `propose_admin`;
+    // since `propose_admin` reads it before any subsequent operation, it
+    // is bounded by the sequence measured here.
+    let seq_before = env.ledger().sequence();
+    assert!(state.proposed_at_ledger <= seq_before);
+}
+
+#[test]
+fn test_get_pending_admin_state_records_caller_as_proposed_by() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    // The caller of `propose_admin` must be the *current* admin; that
+    // address is what gets recorded as `proposed_by` on the proposal
+    // state struct so dashboards can show "Proposed by <admin>".
+    client.propose_admin(&actors.admin, &new_admin);
+
+    let state = client.get_pending_admin_state().unwrap();
+    assert_eq!(state.proposed_by, actors.admin);
+    assert_ne!(state.proposed_by, actors.stranger);
+}
+
+#[test]
+fn test_get_pending_admin_state_records_ledger_sequence_at_propose() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    // record the sequence BEFORE propose, then propose — the recorded
+    // `proposed_at_ledger` must fall on or after the pre-propose sequence.
+    let seq_before = env.ledger().sequence();
+    client.propose_admin(&actors.admin, &new_admin);
+
+    let state = client.get_pending_admin_state().unwrap();
+    assert!(
+        state.proposed_at_ledger >= seq_before,
+        "proposed_at_ledger={} must be >= seq_before={}",
+        state.proposed_at_ledger,
+        seq_before
+    );
+}
+
+#[test]
+fn test_get_pending_admin_state_cleared_after_accept() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &new_admin);
+    assert!(client.get_pending_admin_state().is_some());
+
+    client.accept_admin(&new_admin);
+
+    // After accept, PENDING_ADMIN_STATE_KEY is cleared in lockstep with
+    // PENDING_ADMIN_KEY so the two public getters agree.
+    assert_eq!(client.get_pending_admin_state(), None);
+    assert_eq!(client.get_pending_admin(), None);
+    // And the new admin is now the admin.
+    assert_eq!(client.get_admin(), new_admin);
+}
+
+#[test]
+fn test_get_pending_admin_state_cleared_after_cancel() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &new_admin);
+    assert!(client.get_pending_admin_state().is_some());
+
+    client.cancel_admin_proposal(&actors.admin);
+
+    // After cancel, the full proposal state must be cleared so a stale
+    // `proposed_by` never leaks into a fresh proposal's history view.
+    assert_eq!(client.get_pending_admin_state(), None);
+    assert_eq!(client.get_pending_admin(), None);
+    // The active admin must remain who proposed (cancel never moves ADMIN_KEY).
+    assert_eq!(client.get_admin(), actors.admin);
+}
+
+#[test]
+fn test_get_pending_admin_state_cleared_after_renounce() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &new_admin);
+    assert!(client.get_pending_admin_state().is_some());
+
+    let _ = client.try_renounce_admin(&actors.admin);
+
+    // After renouncement the proposal state must also be cleared so the
+    // next caller of `get_pending_admin_state` doesn't see dangling data.
+    assert_eq!(client.get_pending_admin_state(), None);
+    assert_eq!(client.get_pending_admin(), None);
+}
+
+#[test]
+fn test_get_pending_admin_state_overwritten_on_subsequent_propose() {
+    let (env, client, actors) = setup();
+    let new_admin_a = soroban_sdk::Address::generate(&env);
+    let new_admin_b = soroban_sdk::Address::generate(&env);
+
+    client.propose_admin(&actors.admin, &new_admin_a);
+    assert_eq!(client.get_pending_admin_state().unwrap().address, new_admin_a);
+
+    // A second propose must fully overwrite the previous proposal
+    // (address + proposed_at_ledger + proposed_by), not leave stale data.
+    client.propose_admin(&actors.admin, &new_admin_b);
+    let state = client.get_pending_admin_state().unwrap();
+    assert_eq!(state.address, new_admin_b);
+    assert_eq!(state.proposed_by, actors.admin);
+}
+
+#[test]
+fn test_get_pending_admin_and_state_are_consistent_under_all_transitions() {
+    // Cross-cutting invariant: the legacy `get_pending_admin`
+    // (returns Option<Address>) and the new `get_pending_admin_state`
+    // (returns Option<AdminProposalState>) must agree on whether a
+    // proposal exists, across every state transition. If they ever
+    // diverge, admin dashboards render conflicting UI.
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    // 1) empty state: both readers None
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_admin_state(), None);
+
+    // 2) after propose: both readers Some, with matching address
+    client.propose_admin(&actors.admin, &new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+    assert_eq!(client.get_pending_admin_state().unwrap().address, new_admin);
+
+    // 3) after cancel: both readers None
+    client.cancel_admin_proposal(&actors.admin);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_admin_state(), None);
+
+    // 4) after second propose + accept: both readers None, new admin
+    let new_admin_2 = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&actors.admin, &new_admin_2);
+    assert_eq!(client.get_pending_admin_state().unwrap().address, new_admin_2);
+    client.accept_admin(&new_admin_2);
+    assert_eq!(client.get_pending_admin(), None);
+    assert_eq!(client.get_pending_admin_state(), None);
+    assert_eq!(client.get_admin(), new_admin_2);
+}

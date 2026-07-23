@@ -1,19 +1,27 @@
 use soroban_sdk::{Address, Env};
 
 use crate::{
-    SLAError, ADMIN_KEY, PENDING_ADMIN_KEY, PENDING_OP_KEY, OPERATOR_KEY, EVENT_VERSION,
-    EVENT_ADMIN_PROP, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_REN, EVENT_OP_PROP,
-    EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_SET,
+    AdminProposalState, SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP,
+    EVENT_ADMIN_REN, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_VERSION, OPERATOR_KEY,
+    PENDING_ADMIN_KEY, PENDING_ADMIN_STATE_KEY, PENDING_OP_KEY,
 };
 
-pub fn propose_admin(
-    env: &Env,
-    caller: &Address,
-    new_admin: &Address,
-) -> Result<(), SLAError> {
+pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    // #97 – keep PENDING_ADMIN_KEY populated for backward compatibility
+    // with the existing `get_pending_admin` reader.
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
+    // #97 – additionally stamp the full proposal state so dashboards can
+    // show who proposed, when (ledger sequence), and to whom, in one read.
+    env.storage().instance().set(
+        &PENDING_ADMIN_STATE_KEY,
+        &AdminProposalState {
+            address: new_admin.clone(),
+            proposed_at_ledger: env.ledger().sequence(),
+            proposed_by: caller.clone(),
+        },
+    );
     env.events().publish(
         (EVENT_ADMIN_PROP, EVENT_VERSION, caller.clone()),
         (new_admin.clone(),),
@@ -34,6 +42,9 @@ pub fn accept_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
     }
     env.storage().instance().set(&ADMIN_KEY, caller);
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
+    // #97 – clear the in-progress proposal state so the new reader mirrors
+    // `get_pending_admin` becoming None.
+    env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
     env.events()
         .publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller.clone()), ());
     Ok(())
@@ -46,6 +57,8 @@ pub fn cancel_admin_proposal(env: &Env, caller: &Address) -> Result<(), SLAError
         return Err(SLAError::NoPendingTransfer);
     }
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
+    // #97 – mirror `remove(PENDING_ADMIN_KEY)` so public reads agree.
+    env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
     env.events()
         .publish((EVENT_ADMIN_CAN, EVENT_VERSION, caller.clone()), ());
     Ok(())
@@ -56,11 +69,14 @@ pub fn get_pending_admin(env: &Env) -> Result<Option<Address>, SLAError> {
     Ok(env.storage().instance().get(&PENDING_ADMIN_KEY))
 }
 
-pub fn propose_operator(
-    env: &Env,
-    caller: &Address,
-    new_operator: &Address,
-) -> Result<(), SLAError> {
+/// #97 – Returns the full pending admin proposal state authored by
+/// `propose_admin`, or None when no proposal is in flight.
+pub fn get_pending_admin_state(env: &Env) -> Result<Option<AdminProposalState>, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    Ok(env.storage().instance().get(&PENDING_ADMIN_STATE_KEY))
+}
+
+pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_OP_KEY, new_operator);
@@ -111,16 +127,15 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().remove(&ADMIN_KEY);
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
+    // #97 – ensure the full proposal state is also cleared so
+    // `get_pending_admin_state` returns None after renouncement.
+    env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
     env.events()
         .publish((EVENT_ADMIN_REN, EVENT_VERSION, caller.clone()), ());
     Ok(())
 }
 
-pub fn set_operator(
-    env: &Env,
-    caller: &Address,
-    new_operator: &Address,
-) -> Result<(), SLAError> {
+pub fn set_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&OPERATOR_KEY, new_operator);
