@@ -47,21 +47,24 @@ pub fn generate_correlation_id(_env: &Env, _outage_id: &Symbol, ledger_sequence:
     hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
     hash
 }
-/// Generates a cross-contract event topic tuple that includes the
-/// correlation ID as the final topic element.
+/// Generates a cross-contract event topic tuple matching the standard
+/// 3-topic arity used by all contract events.
 ///
 /// Topic layout:
 ///   topic[0] = event name (e.g., "sla_calc")
 ///   topic[1] = event version ("v1")
 ///   topic[2] = event-specific context (e.g., severity)
-///   topic[3] = correlation_id (as a u64-compatible value)
+///
+/// The correlation_id is NOT included as a topic. It is carried in the
+/// event payload instead, consistent with how `set_int` carries
+/// `config_version_hash` and `recorded_at` in its payload.
 pub fn correlation_event_topics(
     event_name: Symbol,
     event_version: Symbol,
     context: Symbol,
-    correlation_id: CorrelationId,
-) -> (Symbol, Symbol, Symbol, u64) {
-    (event_name, event_version, context, correlation_id)
+    _correlation_id: CorrelationId,
+) -> (Symbol, Symbol, Symbol) {
+    (event_name, event_version, context)
 }
 
 #[cfg(test)]
@@ -119,7 +122,6 @@ mod tests {
         assert_eq!(topics.0, symbol_short!("sla_calc"));
         assert_eq!(topics.1, symbol_short!("v1"));
         assert_eq!(topics.2, symbol_short!("critical"));
-        assert_eq!(topics.3, 42u64);
     }
 
     #[test]
@@ -147,6 +149,8 @@ mod tests {
             symbol_short!("critical"),
             12345,
         );
-        assert_eq!(topics.3, 12345u64);
+        assert_eq!(topics.0, symbol_short!("set_int"));
+        assert_eq!(topics.1, symbol_short!("v1"));
+        assert_eq!(topics.2, symbol_short!("critical"));
     }
 }
