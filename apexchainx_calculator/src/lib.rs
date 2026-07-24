@@ -73,6 +73,9 @@ pub(crate) const PAUSE_INFO_KEY: Symbol = symbol_short!("PAUSEINF");
 /// Maximum length (in bytes) for the pause reason string. (#68)
 pub(crate) const MAX_REASON_LEN: usize = 256;
 
+/// Maximum length (in bytes) for the cron expression in PrunePolicy. (#94)
+pub(crate) const MAX_CRON_EXPR_LEN: usize = 128;
+
 /// Cumulative SLA statistics (SLAStats struct). (#29)
 pub(crate) const STATS_KEY: Symbol = symbol_short!("STATS");
 
@@ -109,6 +112,10 @@ pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
 /// Optional configurable retention limit override. (SC-013)
 /// When set, overrides MAX_HISTORY_SIZE for history trimming.
 pub(crate) const RETENTION_LIMIT_KEY: Symbol = symbol_short!("RETLIM");
+
+/// Cron-style history pruning policy. (#94)
+/// Stores a PrunePolicy struct governing automated history pruning.
+pub(crate) const PRUNE_POLICY_KEY: Symbol = symbol_short!("PRUNPOL");
 
 /// On-chain key storing the ledger sequence of the last config update. Re-exported
 /// here so the storage-key namespace regression test catches any future collisions.
@@ -208,6 +215,9 @@ pub(crate) const EVENT_PRUNED: Symbol = symbol_short!("pruned");
 /// Emitted after a prune_history_by_age call removes entries. (SC-063)
 pub(crate) const EVENT_PRUNED_AGE: Symbol = symbol_short!("pruned_a");
 
+/// Emitted after an apply_prune_policy call removes entries. (#94)
+pub(crate) const EVENT_PRUNED_POLICY: Symbol = symbol_short!("pruned_p");
+
 /// Emitted when a new admin is proposed. (#63)
 pub(crate) const EVENT_ADMIN_PROP: Symbol = symbol_short!("adm_prop");
 
@@ -297,6 +307,8 @@ pub enum SLAError {
     InvalidInput = 17,
     /// Custom severity referenced but not registered. (#93)
     SeverityNotInSet = 18,
+    /// No prune policy has been set when apply_prune_policy was called. (#94)
+    NoPrunePolicy = 19,
 }
 
 // -----------------------------------------------------------------------
@@ -455,6 +467,26 @@ pub struct PauseInfo {
     pub reason: String,
     pub paused_at: u64, // ledger timestamp (seconds)
     pub paused_by: Address,
+}
+
+/// #94 – Cron-style history pruning policy.
+///
+/// Operators can store a PrunePolicy to express high-level retention rules.
+/// The `cron_expr` field is informational — actual execution cadence is
+/// driven externally (e.g., by a cron job calling `apply_prune_policy`).
+/// When `apply_prune_policy` is called, both `keep_latest` (count-based)
+/// and `max_age_seconds` (age-based) pruning are applied if their values
+/// are non-zero.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrunePolicy {
+    /// Number of most recent records to retain (count-based pruning).
+    pub keep_latest: u32,
+    /// Maximum age in seconds before a record is eligible for removal.
+    pub max_age_seconds: u64,
+    /// Cron expression describing the intended pruning schedule.
+    /// This is informational only; execution timing is external.
+    pub cron_expr: String,
 }
 
 /// #4 – Metadata about the most recent configuration update.
@@ -1267,7 +1299,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 18] = [
+        let entries: [(u32, &str, &str); 19] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1286,6 +1318,7 @@ impl SLACalculatorContract {
             (16, "ConfigFrozen", "Configuration is frozen"),
             (17, "InvalidInput", "Invalid input parameter"),
             (18, "SeverityNotInSet", "Custom severity not registered"),
+            (19, "NoPrunePolicy", "No pruning policy set"),
         ];
 
         for (code, label, description) in entries {
@@ -1395,6 +1428,7 @@ impl SLACalculatorContract {
         features.push_back(symbol_short!("ver_nego"));
         features.push_back(symbol_short!("corr_id"));
         features.push_back(symbol_short!("freeze"));
+        features.push_back(symbol_short!("prune_pol"));
 
         Ok(ContractMetadata {
             contract_name: symbol_short!("sla_calc"),
@@ -2174,6 +2208,103 @@ impl SLACalculatorContract {
             env.storage().instance().set(&HISTORY_KEY, &new_history);
             env.events()
                 .publish((EVENT_PRUNED_AGE, EVENT_VERSION, caller), (removed, kept));
+        }
+
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------
+    // #94 – Cron-style history pruning policy
+    // -------------------------------------------------------------------
+
+    /// Stores a [`PrunePolicy`] in contract storage. Admin only.
+    ///
+    /// The `cron_expr` field is informational — actual pruning cadence is
+    /// driven externally. When `apply_prune_policy` is called, both the
+    /// count-based (`keep_latest`) and age-based (`max_age_seconds`)
+    /// rules are applied if their values are non-zero.
+    pub fn set_prune_policy(env: Env, caller: Address, policy: PrunePolicy) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+
+        if policy.cron_expr.len() > MAX_CRON_EXPR_LEN as u32 {
+            return Err(SLAError::InvalidInput);
+        }
+
+        env.storage().instance().set(&PRUNE_POLICY_KEY, &policy);
+        Ok(())
+    }
+
+    /// Returns the currently stored [`PrunePolicy`], or `None` if no
+    /// policy has been set via `set_prune_policy`.
+    pub fn get_prune_policy(env: Env) -> Result<Option<PrunePolicy>, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env.storage().instance().get(&PRUNE_POLICY_KEY))
+    }
+
+    /// Applies the stored [`PrunePolicy`] against the current history.
+    ///
+    /// Admin only. If no policy has been set via `set_prune_policy`,
+    /// returns [`NoPrunePolicy`](SLAError::NoPrunePolicy).
+    ///
+    /// When a policy is present:
+    /// - If `keep_latest > 0`, count-based pruning is applied first.
+    /// - If `max_age_seconds > 0`, age-based pruning is applied second.
+    /// - A single `pruned_p` event is emitted with aggregate removed/kept counts.
+    ///
+    /// Both pruning stages are independent — both are applied regardless
+    /// of whether the other stage removed any entries.
+    pub fn apply_prune_policy(env: Env, caller: Address) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+
+        let policy: PrunePolicy = env
+            .storage()
+            .instance()
+            .get(&PRUNE_POLICY_KEY)
+            .ok_or(SLAError::NoPrunePolicy)?;
+
+        let mut history: Vec<SLAResult> = env
+            .storage()
+            .instance()
+            .get(&HISTORY_KEY)
+            .unwrap_or_else(|| Vec::new(&env));
+
+        let original_len = history.len();
+        let mut total_removed: u32 = 0;
+
+        // Stage 1: count-based pruning (keep_latest)
+        if policy.keep_latest > 0 && history.len() > policy.keep_latest {
+            let remove_count = history.len() - policy.keep_latest;
+            total_removed += remove_count;
+            let mut new_history = Vec::new(&env);
+            for i in remove_count..history.len() {
+                new_history.push_back(history.get(i).unwrap());
+            }
+            history = new_history;
+        }
+
+        // Stage 2: age-based pruning (max_age_seconds)
+        if policy.max_age_seconds > 0 {
+            let now = env.ledger().timestamp();
+            let cutoff = now.saturating_sub(policy.max_age_seconds);
+            let mut new_history = Vec::new(&env);
+            for i in 0..history.len() {
+                let entry = history.get(i).unwrap();
+                if entry.recorded_at >= cutoff {
+                    new_history.push_back(entry);
+                } else {
+                    total_removed += 1;
+                }
+            }
+            history = new_history;
+        }
+
+        if total_removed > 0 {
+            let kept = history.len();
+            env.storage().instance().set(&HISTORY_KEY, &history);
+            env.events()
+                .publish((EVENT_PRUNED_POLICY, EVENT_VERSION, caller), (total_removed, kept));
         }
 
         Ok(())

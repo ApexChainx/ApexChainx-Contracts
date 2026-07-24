@@ -294,6 +294,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         HISTORY_KEY,
         STORAGE_VERSION_KEY,
         RETENTION_LIMIT_KEY,
+        PRUNE_POLICY_KEY,
     ];
 
     for i in 0..keys.len() {
@@ -6933,3 +6934,311 @@ fn test_calculate_sla_rejects_unregistered_custom_severity() {
         &45,
     );
 }
+
+// ============================================================
+// #94 – Cron-style history pruning policy
+// ============================================================
+
+#[test]
+fn test_set_get_prune_policy_admin_can_store_and_retrieve() {
+    let (env, client, actors) = setup();
+
+    let policy = PrunePolicy {
+        keep_latest: 50,
+        max_age_seconds: 86400,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 2 * * 0"),
+    };
+
+    client.set_prune_policy(&actors.admin, &policy);
+
+    let stored = client.get_prune_policy().expect("policy should be set");
+    assert_eq!(stored.keep_latest, 50);
+    assert_eq!(stored.max_age_seconds, 86400);
+}
+
+#[test]
+fn test_get_prune_policy_returns_none_when_not_set() {
+    let (_env, client, _actors) = setup();
+
+    let policy = client.get_prune_policy();
+    assert!(policy.is_none(), "Expected None when no policy has been set");
+}
+
+#[test]
+fn test_set_prune_policy_overwrites_previous() {
+    let (env, client, actors) = setup();
+
+    let policy1 = PrunePolicy {
+        keep_latest: 10,
+        max_age_seconds: 3600,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 * * * *"),
+    };
+    client.set_prune_policy(&actors.admin, &policy1);
+
+    let policy2 = PrunePolicy {
+        keep_latest: 20,
+        max_age_seconds: 7200,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 0 * * 0"),
+    };
+    client.set_prune_policy(&actors.admin, &policy2);
+
+    let stored = client.get_prune_policy().expect("policy should be set");
+    assert_eq!(stored.keep_latest, 20);
+    assert_eq!(stored.max_age_seconds, 7200);
+}
+
+#[test]
+#[should_panic]
+fn test_set_prune_policy_operator_cannot() {
+    let (env, client, actors) = setup();
+    let policy = PrunePolicy {
+        keep_latest: 10,
+        max_age_seconds: 0,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 0 * * 0"),
+    };
+    client.set_prune_policy(&actors.operator, &policy);
+}
+
+#[test]
+#[should_panic]
+fn test_set_prune_policy_stranger_cannot() {
+    let (env, client, actors) = setup();
+    let policy = PrunePolicy {
+        keep_latest: 10,
+        max_age_seconds: 0,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 0 * * 0"),
+    };
+    client.set_prune_policy(&actors.stranger, &policy);
+}
+
+#[test]
+fn test_apply_prune_policy_keep_latest_prunes_by_count() {
+    let (env, client, actors) = setup();
+
+    // Generate 10 records
+    for i in 0..10u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PPL_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    assert_eq!(client.get_history().len(), 10);
+
+    let policy = PrunePolicy {
+        keep_latest: 3,
+        max_age_seconds: 0,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 2 * * 0"),
+    };
+    client.set_prune_policy(&actors.admin, &policy);
+    client.apply_prune_policy(&actors.admin);
+
+    let history = client.get_history();
+    assert_eq!(history.len(), 3, "Should keep only the 3 most recent records");
+}
+
+#[test]
+fn test_apply_prune_policy_max_age_prunes_by_age() {
+    let (env, client, actors) = setup();
+
+    // Set timestamp and create records
+    env.ledger().set_timestamp(1000);
+    for i in 0..5u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PPA_OLD_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // Advance time and create newer records
+    env.ledger().set_timestamp(5000);
+    for i in 0..5u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PPA_NEW_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    assert_eq!(client.get_history().len(), 10);
+
+    // Policy: remove records older than 2000 seconds
+    let policy = PrunePolicy {
+        keep_latest: 0,
+        max_age_seconds: 2000,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 2 * * 0"),
+    };
+    client.set_prune_policy(&actors.admin, &policy);
+    client.apply_prune_policy(&actors.admin);
+
+    let history = client.get_history();
+    // Older batch at ts=1000 is >2000s old from ts=5000, so they get pruned
+    assert_eq!(history.len(), 5, "Should keep only the newer 5 records");
+}
+
+#[test]
+fn test_apply_prune_policy_combined_both_rules() {
+    let (env, client, actors) = setup();
+
+    // Create older records
+    env.ledger().set_timestamp(1000);
+    for i in 0..5u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PCB_OLD_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // Create newer records
+    env.ledger().set_timestamp(5000);
+    for i in 0..10u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PCB_NEW_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    assert_eq!(client.get_history().len(), 15);
+
+    // Policy: keep latest 7 AND remove records older than 2000s
+    let policy = PrunePolicy {
+        keep_latest: 7,
+        max_age_seconds: 2000,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 2 * * 0"),
+    };
+    client.set_prune_policy(&actors.admin, &policy);
+    client.apply_prune_policy(&actors.admin);
+
+    let history = client.get_history();
+    // After age-based pruning: only 10 newer remain
+    // After count-based pruning: keep latest 7 of those 10
+    assert_eq!(history.len(), 7, "Should keep 7 newest after both rules applied");
+}
+
+#[test]
+#[should_panic]
+fn test_apply_prune_policy_fails_when_no_policy_set() {
+    let (_env, client, actors) = setup();
+    // No policy set — should return NoPrunePolicy error
+    client.apply_prune_policy(&actors.admin);
+}
+
+#[test]
+#[should_panic]
+fn test_apply_prune_policy_stranger_cannot() {
+    let (env, client, actors) = setup();
+    let policy = PrunePolicy {
+        keep_latest: 5,
+        max_age_seconds: 0,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 0 * * 0"),
+    };
+    client.set_prune_policy(&actors.admin, &policy);
+    client.apply_prune_policy(&actors.stranger);
+}
+
+#[test]
+#[should_panic]
+fn test_apply_prune_policy_operator_cannot() {
+    let (env, client, actors) = setup();
+    let policy = PrunePolicy {
+        keep_latest: 5,
+        max_age_seconds: 0,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 0 * * 0"),
+    };
+    client.set_prune_policy(&actors.admin, &policy);
+    client.apply_prune_policy(&actors.operator);
+}
+
+#[test]
+fn test_apply_prune_policy_emits_pruned_p_event() {
+    let (env, client, actors) = setup();
+
+    // Generate 5 records
+    for i in 0..5u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PPEV_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    let policy = PrunePolicy {
+        keep_latest: 2,
+        max_age_seconds: 0,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 2 * * 0"),
+    };
+    client.set_prune_policy(&actors.admin, &policy);
+    client.apply_prune_policy(&actors.admin);
+
+    let events = env.events().all();
+    let (_, topics, data) = events.last().unwrap();
+
+    assert_eq!(topics.len(), 3);
+    let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+    let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+    assert_eq!(name, symbol_short!("pruned_p"));
+    assert_eq!(version, symbol_short!("v1"));
+
+    let payload: (u32, u32) = data.try_into_val(&env).unwrap();
+    assert_eq!(payload, (3u32, 2u32), "pruned_p payload must be (removed, kept)");
+}
+
+#[test]
+fn test_apply_prune_policy_noop_when_nothing_to_prune() {
+    let (env, client, actors) = setup();
+
+    // Generate 2 records
+    for i in 0..2u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PPNP_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    let policy = PrunePolicy {
+        keep_latest: 10, // more than current count — no pruning
+        max_age_seconds: 0,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 0 * * 0"),
+    };
+    client.set_prune_policy(&actors.admin, &policy);
+    client.apply_prune_policy(&actors.admin);
+
+    // All records should be retained
+    assert_eq!(client.get_history().len(), 2, "No records should be removed");
+}
+
+#[test]
+fn test_apply_prune_policy_budget_is_reasonable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    for i in 0..20u32 {
+        let oid = Symbol::new(&env, &alloc::format!("PPB_{}", i));
+        client.calculate_sla(&op, &oid, &symbol_short!("low"), &10);
+    }
+
+    let policy = PrunePolicy {
+        keep_latest: 5,
+        max_age_seconds: 0,
+        cron_expr: soroban_sdk::String::from_str(&env, "0 0 * * 0"),
+    };
+    client.set_prune_policy(&admin, &policy);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.apply_prune_policy(&admin);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 900_000,
+        "apply_prune_policy too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
+fn test_get_failure_schema_includes_no_prune_policy() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_failure_schema();
+
+    let has_no_prune_policy = schema
+        .codes
+        .iter()
+        .any(|c| c.code == 19 && c.label == symbol_short!("NoPrunePolicy"));
+    assert!(
+        has_no_prune_policy,
+        "FailureSchema should include NoPrunePolicy (code 19)"
+    );
+}
+
+
