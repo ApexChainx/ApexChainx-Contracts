@@ -15,14 +15,19 @@ pub fn set_config(
     crate::SLACalculatorContract::check_version(env)?;
     require_not_frozen(env)?;
 
-    // #92 – env is threaded through so validate_config can compare the
-    // proposed critical/high penalty against live storage.
+    // Per-field (pure) validation. The cross-severity hierarchy check is a
+    // separate env-reading call below so `validate_config` stays callable
+    // from the fuzz targets without an initialised contract environment.
     crate::SLACalculatorContract::validate_config(
-        env,
         &severity,
         threshold_minutes,
         penalty_per_minute,
         reward_base,
+    )?;
+    crate::SLACalculatorContract::enforce_cross_severity_order(
+        env,
+        &severity,
+        penalty_per_minute,
     )?;
 
     let mut configs: Map<Symbol, SLAConfig> = env

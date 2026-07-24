@@ -1204,17 +1204,17 @@ impl SLACalculatorContract {
         Self::require_admin(&env, &caller)?; // #28 – admin role enforced
         Self::require_not_frozen(&env)?;
 
-        // #70 – Validate configuration parameters.
-        // #92 – `env` is threaded through so `validate_config` can compare
-        // the proposed `critical`/`high` penalty pair against live storage
-        // and reject updates that invert the severity hierarchy.
+        // #70 – Per-field validation (pure, operates only on inputs).
         Self::validate_config(
-            &env,
             &severity,
             threshold_minutes,
             penalty_per_minute,
             reward_base,
         )?;
+        // #92 – Cross-severity hierarchy check against the live on-chain
+        // configs. Lifted out of `validate_config` so that function can stay
+        // pure (callable from the fuzz targets without an initialised env).
+        Self::enforce_cross_severity_order(&env, &severity, penalty_per_minute)?;
 
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
@@ -1982,8 +1982,15 @@ impl SLACalculatorContract {
     /// the *current* state, not just the proposed write — so an update that
     /// would invert the `critical ≥ high` order is rejected even if the
     /// proposed values pass per-field validation.
+    /// #70 – Validates configuration parameters to ensure safe and meaningful values.
+    ///
+    /// Pure: operates only on its arguments, never reads storage. This lets
+    /// the property-based fuzz tests (`apexchainx_calculator/src/fuzz_tests.rs`)
+    /// and the libfuzzer targets (`apexchainx_calculator/fuzz/fuzz_targets/`)
+    /// exercise it without seeding a contract env. The cross-severity rule
+    /// (`#92`) lives in `enforce_cross_severity_order` below, which
+    /// `set_config` invokes after this per-field pass succeeds.
     pub(crate) fn validate_config(
-        env: &Env,
         severity: &Symbol,
         threshold_minutes: u32,
         penalty_per_minute: i128,
@@ -2043,39 +2050,47 @@ impl SLACalculatorContract {
             return Err(SLAError::InvalidSeverity);
         }
 
-        // #92 – Cross-severity hierarchy check (critical ≥ high).
-        // Only inspect the canonical severity pair explicitly named in the
-        // issue. The proposed value is supplied directly for the severity
-        // being updated; the *other* canonical severity is read from live
-        // storage so the check reflects the on-chain state, not a stale
-        // snapshot. For medium/low updates both sides are read from storage
-        // because neither proposed value participates in the comparison.
+        Ok(())
+    }
+
+    /// #92 – Enforces the cross-severity hierarchy rule
+    /// `penalty(critical) >= penalty(high)` against the live on-chain config.
+    /// Lives separately from `validate_config` so the latter stays pure
+    /// (the fuzz targets can call it without an initialised env). Reading
+    /// the existing `critical` / `high` configs from storage makes the check
+    /// sensitive to the *current* on-chain state, not just the proposed
+    /// write — so an update that would invert the order is rejected even
+    /// when the proposed values pass per-field validation in `validate_config`.
+    ///
+    /// Equality is allowed so admins can deliberately align `critical` with
+    /// `high` (e.g. flat-tier policies); only an inversion is rejected.
+    pub(crate) fn enforce_cross_severity_order(
+        env: &Env,
+        proposed_severity: &Symbol,
+        proposed_penalty: i128,
+    ) -> Result<(), SLAError> {
         let crit_sym = symbol_short!("critical");
         let high_sym = symbol_short!("high");
-        let (critical_penalty, high_penalty) = if severity == &crit_sym {
+        let (critical_penalty, high_penalty) = if proposed_severity == &crit_sym {
             (
-                penalty_per_minute,
+                proposed_penalty,
                 Self::load_config(env, &high_sym)?.penalty_per_minute,
             )
-        } else if severity == &high_sym {
+        } else if proposed_severity == &high_sym {
             (
                 Self::load_config(env, &crit_sym)?.penalty_per_minute,
-                penalty_per_minute,
+                proposed_penalty,
             )
         } else {
+            // `medium` / `low`: both sides come from storage because the
+            // proposed value does not participate in the comparison.
             let stored_critical = Self::load_config(env, &crit_sym)?;
             let stored_high = Self::load_config(env, &high_sym)?;
-            (
-                stored_critical.penalty_per_minute,
-                stored_high.penalty_per_minute,
-            )
+            (stored_critical.penalty_per_minute, stored_high.penalty_per_minute)
         };
-        // Equality is allowed so admins can deliberately align `critical`
-        // with `high` for flat-tier policies; only an inversion is rejected.
         if critical_penalty < high_penalty {
             return Err(SLAError::SeverityOrderInvalid);
         }
-
         Ok(())
     }
 
