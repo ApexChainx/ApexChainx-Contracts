@@ -1,8 +1,8 @@
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
-    SLAError, SLAResult,
-    HISTORY_KEY, RETENTION_LIMIT_KEY, MAX_HISTORY_SIZE, EVENT_VERSION, EVENT_PRUNED, EVENT_PRUNED_AGE,
+    SLAError, SLAResult, PrunePolicy,
+    HISTORY_KEY, RETENTION_LIMIT_KEY, MAX_HISTORY_SIZE, MAX_CRON_EXPR_LEN, PRUNE_POLICY_KEY, EVENT_VERSION, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_PRUNED_POLICY,
 };
 
 pub fn get_history(env: &Env) -> Result<Vec<SLAResult>, SLAError> {
@@ -156,4 +156,74 @@ pub fn get_retention_limit(env: &Env) -> Result<u32, SLAError> {
         .instance()
         .get(&RETENTION_LIMIT_KEY)
         .unwrap_or(MAX_HISTORY_SIZE))
+}
+
+pub fn set_prune_policy(env: &Env, caller: &Address, policy: &PrunePolicy) -> Result<(), SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    crate::SLACalculatorContract::require_admin(env, caller)?;
+
+    if policy.cron_expr.len() > MAX_CRON_EXPR_LEN as u32 {
+        return Err(SLAError::InvalidInput);
+    }
+
+    env.storage().instance().set(&PRUNE_POLICY_KEY, policy);
+    Ok(())
+}
+
+pub fn get_prune_policy(env: &Env) -> Result<Option<PrunePolicy>, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    Ok(env.storage().instance().get(&PRUNE_POLICY_KEY))
+}
+
+pub fn apply_prune_policy(env: &Env, caller: &Address) -> Result<(), SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    crate::SLACalculatorContract::require_admin(env, caller)?;
+
+    let policy: PrunePolicy = env
+        .storage()
+        .instance()
+        .get(&PRUNE_POLICY_KEY)
+        .ok_or(SLAError::NoPrunePolicy)?;
+
+    let mut history: Vec<SLAResult> = env
+        .storage()
+        .instance()
+        .get(&HISTORY_KEY)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut total_removed: u32 = 0;
+
+    if policy.keep_latest > 0 && history.len() > policy.keep_latest {
+        let remove_count = history.len() - policy.keep_latest;
+        total_removed += remove_count;
+        let mut new_history = Vec::new(env);
+        for i in remove_count..history.len() {
+            new_history.push_back(history.get(i).unwrap());
+        }
+        history = new_history;
+    }
+
+    if policy.max_age_seconds > 0 {
+        let now = env.ledger().timestamp();
+        let cutoff = now.saturating_sub(policy.max_age_seconds);
+        let mut new_history = Vec::new(env);
+        for i in 0..history.len() {
+            let entry = history.get(i).unwrap();
+            if entry.recorded_at >= cutoff {
+                new_history.push_back(entry);
+            } else {
+                total_removed += 1;
+            }
+        }
+        history = new_history;
+    }
+
+    if total_removed > 0 {
+        let kept = history.len();
+        env.storage().instance().set(&HISTORY_KEY, &history);
+        env.events()
+            .publish((EVENT_PRUNED_POLICY, EVENT_VERSION, caller.clone()), (total_removed, kept));
+    }
+
+    Ok(())
 }

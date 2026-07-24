@@ -57,6 +57,11 @@
 //! - topic[2]: caller Address
 //! - payload:  (removed_count: u32, kept_count: u32)
 //!
+//! ## pruned_p (`pruned_p`)
+//! Emitted after an apply_prune_policy call removes entries. (#94)
+//! - topic[2]: caller Address
+//! - payload:  (removed_count: u32, kept_count: u32)
+//!
 //! ## adm_prop (`adm_prop`)
 //! Emitted when a new admin is proposed.
 //! - topic[2]: caller Address
@@ -181,6 +186,7 @@ pub const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
 pub const EVENT_OP_SET: Symbol = symbol_short!("op_set");
 pub const EVENT_PRUNED: Symbol = symbol_short!("pruned");
 pub const EVENT_PRUNED_AGE: Symbol = symbol_short!("pruned_a");
+pub const EVENT_PRUNED_POLICY: Symbol = symbol_short!("pruned_p");
 pub const EVENT_ADMIN_PROP: Symbol = symbol_short!("adm_prop");
 pub const EVENT_ADMIN_ACC: Symbol = symbol_short!("adm_acc");
 pub const EVENT_ADMIN_CAN: Symbol = symbol_short!("adm_can");
@@ -220,6 +226,7 @@ mod tests {
             EVENT_OP_SET,
             EVENT_PRUNED,
             EVENT_PRUNED_AGE,
+            EVENT_PRUNED_POLICY,
             EVENT_ADMIN_PROP,
             EVENT_ADMIN_ACC,
             EVENT_ADMIN_CAN,
