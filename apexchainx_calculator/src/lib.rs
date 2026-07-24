@@ -1,3 +1,21 @@
+//! ApexChainx SLA Calculator smart contract.
+//!
+//! # Soroban SDK
+//!
+//! This contract is compiled with **Soroban SDK 21.1.0**. The same version
+//! must be reflected across all four documentation surfaces listed below
+//! so backend consumers and CI builds see a single, consistent pin. A
+//! future SDK bump must update each location in lockstep:
+//!
+//! ```text
+//! rg -n 'soroban-sdk' apexchainx_calculator/Cargo.toml
+//! rg -n '21\.1\.0'        README.md
+//! rg -n '21\.1\.0'        RUST_TOOLCHAIN_PINNING.md
+//! rg -n '21\.1\.0'        docs/PROJECT_CONTEXT.md
+//! ```
+//!
+//! This is the acceptance check for issue #73.
+
 #![no_std]
 extern crate alloc;
 
@@ -15,13 +33,13 @@ mod tests;
 mod fuzz_tests;
 
 pub mod audit_state;
+pub mod calculation;
 pub mod config;
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
-pub mod calculation;
 pub mod error_responses;
 pub mod event_correlation;
 mod event_schema;
@@ -54,8 +72,12 @@ pub(crate) const OPERATOR_KEY: Symbol = symbol_short!("OPERATOR");
 
 /// Pending admin for two-step transfer. (#63)
 pub(crate) const PENDING_ADMIN_KEY: Symbol = symbol_short!("PADMIN");
+/// Full pending admin proposal metadata (address + proposed_at_ledger + proposed_by). (#97)
+pub(crate) const PENDING_ADMIN_STATE_KEY: Symbol = symbol_short!("PADMSTA");
 /// Pending operator for two-step handoff. (#64)
 pub(crate) const PENDING_OP_KEY: Symbol = symbol_short!("POP");
+/// Full pending operator proposal metadata (address + proposed_at_ledger + proposed_by). (#97)
+pub(crate) const PENDING_OP_STATE_KEY: Symbol = symbol_short!("POPSTA");
 
 /// Map of severity -> SLAConfig for all configured severity levels.
 pub(crate) const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
@@ -297,6 +319,14 @@ pub enum SLAError {
     InvalidInput = 17,
     /// Custom severity referenced but not registered. (#93)
     SeverityNotInSet = 18,
+    /// Reward base does not exceed penalty by the required safety margin
+    /// (`penalty_per_minute * 1.5 < reward_base`). Enforced on every severity
+    /// update by the cross-parameter consistency check in #92.
+    RewardMarginTooLow = 19,
+    /// Severity hierarchy violated: the proposed config would not satisfy
+    /// `critical.penalty_per_minute >= high.penalty_per_minute`. Enforced by
+    /// the cross-severity consistency check in #92.
+    SeverityOrderInvalid = 20,
 }
 
 // -----------------------------------------------------------------------
@@ -455,6 +485,47 @@ pub struct PauseInfo {
     pub reason: String,
     pub paused_at: u64, // ledger timestamp (seconds)
     pub paused_by: Address,
+}
+
+/// #97 – Full pending admin proposal state, returned by `get_pending_admin_state`.
+///
+/// Captures the proposed `address` together with the metadata an admin dashboard
+/// needs to render a useful row: the ledger sequence at which the proposal was
+/// recorded and the address of the admin who proposed it. Without this struct,
+/// dashboards had to fall back on `get_pending_admin` (which returns just the
+/// address) and scrape `proposed_by` out of the `adm_prop` event stream.
+///
+/// `proposed_at_ledger` is a `u32` because Soroban's `env.ledger().sequence()`
+/// is u32-typed; this avoids lossy conversion at the contract boundary.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdminProposalState {
+    /// Address of the proposed new admin (destined to become admin on accept).
+    pub address: Address,
+    /// Ledger sequence at which `propose_admin` stamped this proposal.
+    pub proposed_at_ledger: u32,
+    /// Address of the admin who initiated the proposal (the caller of `propose_admin`).
+    pub proposed_by: Address,
+}
+
+/// #97 – Operator counterpart of [`AdminProposalState`]. Carries the
+/// proposed operator address together with the proposal metadata an admin
+/// dashboard needs to render a pending operator row: the ledger sequence
+/// at which the proposal was recorded and the admin who authored it.
+///
+/// Kept as a distinct contract type from `AdminProposalState` so dashboards
+/// can render operator proposals under their own label without dispatching
+/// on context. Mirrors the admin struct's field order to keep callers
+/// ergonomic across both transfer flows.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperatorProposalState {
+    /// Address of the proposed new operator (destined to become operator on accept).
+    pub address: Address,
+    /// Ledger sequence at which `propose_operator` stamped this proposal.
+    pub proposed_at_ledger: u32,
+    /// Address of the admin who initiated the proposal (the caller of `propose_operator`).
+    pub proposed_by: Address,
 }
 
 /// #4 – Metadata about the most recent configuration update.
@@ -825,15 +896,33 @@ impl SLACalculatorContract {
         Ok(())
     }
 
+    // NOTE: Per Issue #155 and `tooling/moduleMap.ts`, the `governance` Rust
+    // module is the canonical home for these admin-transfer functions and is kept
+    // in sync for tooling/tests that import it directly. The `#[contractimpl]` block
+    // below is the binary-level surface bound to clients and must contain the actual
+    // logic. When modifying any of {propose_admin, accept_admin, cancel_admin_proposal,
+    // renounce_admin, get_pending_admin_state}, mirror the change in
+    // `apexchainx_calculator/src/governance.rs` so the two stay in lockstep.
     // -------------------------------------------------------------------
     // #63 – Two-step admin transfer
     // -------------------------------------------------------------------
 
     /// Propose a new admin. The current admin initiates; the new admin must call `accept_admin`.
+    /// #97 – Also stamps the full `AdminProposalState` (address + proposed_at_ledger + proposed_by)
+    /// so that `get_pending_admin_state` returns a complete proposal record for admin dashboards.
+    /// Both keys are written inside the same auth-checked call so a partial write is impossible.
     pub fn propose_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         env.storage().instance().set(&PENDING_ADMIN_KEY, &new_admin);
+        env.storage().instance().set(
+            &PENDING_ADMIN_STATE_KEY,
+            &AdminProposalState {
+                address: new_admin.clone(),
+                proposed_at_ledger: env.ledger().sequence(),
+                proposed_by: caller.clone(),
+            },
+        );
         env.events()
             .publish((EVENT_ADMIN_PROP, EVENT_VERSION, caller), (new_admin,));
         Ok(())
@@ -841,6 +930,8 @@ impl SLACalculatorContract {
 
     /// Accept a pending admin transfer. Must be called by the proposed new admin.
     /// On success the caller becomes admin and the pending proposal is cleared.
+    /// #97 – Clears `PENDING_ADMIN_STATE_KEY` alongside `PENDING_ADMIN_KEY` so
+    /// `get_pending_admin_state` mirrors `get_pending_admin` after acceptance.
     pub fn accept_admin(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         caller.require_auth();
@@ -854,6 +945,7 @@ impl SLACalculatorContract {
         }
         env.storage().instance().set(&ADMIN_KEY, &caller);
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
+        env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
         env.events().publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -861,6 +953,7 @@ impl SLACalculatorContract {
     /// Cancel a pending admin transfer. Only the current admin may cancel.
     /// Clears the pending proposal without changing the active admin.
     /// Returns `NoPendingTransfer` if there is nothing to cancel.
+    /// #97 – Clears `PENDING_ADMIN_STATE_KEY` alongside `PENDING_ADMIN_KEY`.
     pub fn cancel_admin_proposal(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
@@ -868,6 +961,7 @@ impl SLACalculatorContract {
             return Err(SLAError::NoPendingTransfer);
         }
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
+        env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
         env.events().publish((EVENT_ADMIN_CAN, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -878,21 +972,58 @@ impl SLACalculatorContract {
         Ok(env.storage().instance().get(&PENDING_ADMIN_KEY))
     }
 
+    /// #97 – Returns the full pending admin proposal state, if any.
+    ///
+    /// Returns an [`AdminProposalState`] containing the proposed address,
+    /// the ledger sequence at which the proposal was recorded, and the
+    /// address of the admin who proposed it. Returns `None` when there is
+    /// no pending proposal.
+    ///
+    /// This function is intended for admin dashboards that need richer
+    /// metadata than [`get_pending_admin`] exposes. The two reads are
+    /// consistent: every state transition that clears the pending admin
+    /// (`accept_admin`, `cancel_admin_proposal`, `renounce_admin`) clears
+    /// both `PENDING_ADMIN_KEY` and `PENDING_ADMIN_STATE_KEY`; conversely,
+    /// `propose_admin` stamps both keys atomically from a single auth-checked
+    /// call.
+    ///
+    /// Like `get_pending_admin`, this is a pure read and requires no auth.
+    pub fn get_pending_admin_state(env: Env) -> Result<Option<AdminProposalState>, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env.storage().instance().get(&PENDING_ADMIN_STATE_KEY))
+    }
+
     // -------------------------------------------------------------------
     // #64 – Two-step operator handoff
     // -------------------------------------------------------------------
 
     /// Propose a new operator. The current admin initiates; the new operator must call `accept_operator`.
+    /// #97 – Also stamps the full `OperatorProposalState` (address +
+    /// proposed_at_ledger + proposed_by) so that `get_pending_operator_state`
+    /// returns a complete record for admin dashboards, mirroring the admin
+    /// counterpart. Both keys are written inside the same auth-checked call
+    /// so a partial write is impossible.
     pub fn propose_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         env.storage().instance().set(&PENDING_OP_KEY, &new_operator);
+        env.storage().instance().set(
+            &PENDING_OP_STATE_KEY,
+            &OperatorProposalState {
+                address: new_operator.clone(),
+                proposed_at_ledger: env.ledger().sequence(),
+                proposed_by: caller.clone(),
+            },
+        );
         env.events()
-            .publish((EVENT_OP_PROP, EVENT_VERSION, caller), (new_operator,));
+            .publish((EVENT_OP_PROP, EVENT_VERSION, caller), (new_operator));
         Ok(())
     }
 
     /// Accept a pending operator handoff. Must be called by the proposed new operator.
+    /// #97 – Clears `PENDING_OP_STATE_KEY` alongside `PENDING_OP_KEY` so
+    /// `get_pending_operator_state` mirrors `get_pending_operator` after
+    /// acceptance.
     pub fn accept_operator(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         caller.require_auth();
@@ -906,6 +1037,7 @@ impl SLACalculatorContract {
         }
         env.storage().instance().set(&OPERATOR_KEY, &caller);
         env.storage().instance().remove(&PENDING_OP_KEY);
+        env.storage().instance().remove(&PENDING_OP_STATE_KEY);
         env.events().publish((EVENT_OP_ACC, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -913,6 +1045,8 @@ impl SLACalculatorContract {
     /// Cancel a pending operator proposal. Only the current admin may cancel.
     /// Clears the pending proposal without changing the active operator.
     /// Returns `NoPendingTransfer` if there is nothing to cancel.
+    /// #97 – Clears `PENDING_OP_STATE_KEY` alongside `PENDING_OP_KEY` so
+    /// the new state getter returns None after cancellation.
     pub fn cancel_operator_proposal(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
@@ -920,6 +1054,7 @@ impl SLACalculatorContract {
             return Err(SLAError::NoPendingTransfer);
         }
         env.storage().instance().remove(&PENDING_OP_KEY);
+        env.storage().instance().remove(&PENDING_OP_STATE_KEY);
         env.events().publish((EVENT_OP_CAN, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -930,18 +1065,42 @@ impl SLACalculatorContract {
         Ok(env.storage().instance().get(&PENDING_OP_KEY))
     }
 
+    /// #97 – Returns the full pending operator proposal state, if any.
+    ///
+    /// Returns an [`OperatorProposalState`] containing the proposed address,
+    /// the ledger sequence at which the proposal was recorded, and the
+    /// address of the admin who proposed it. Returns `None` when there is
+    /// no pending proposal.
+    ///
+    /// This function mirrors [`get_pending_operator`] but exposes the
+    /// richer metadata an admin dashboard needs to render a useful row
+    /// without falling back to event-stream scraping. The two getters are
+    /// consistent: every state transition that clears the pending operator
+    /// (`accept_operator`, `cancel_operator_proposal`) clears both
+    /// `PENDING_OP_KEY` and `PENDING_OP_STATE_KEY; conversely,
+    /// `propose_operator` stamps both keys atomically from a single
+    /// auth-checked call.
+    ///
+    /// Like `get_pending_operator`, this is a pure read and requires no auth.
+    pub fn get_pending_operator_state(env: Env) -> Result<Option<OperatorProposalState>, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env.storage().instance().get(&PENDING_OP_STATE_KEY))
+    }
+
     // -------------------------------------------------------------------
     // #65 – Admin renounce
     // -------------------------------------------------------------------
 
     /// Permanently renounce admin authority. This is irreversible: no admin will
     /// exist after this call and admin-gated functions will be permanently locked.
-    /// Any pending admin proposal is also cleared.
+    /// Any pending admin proposal is also cleared. #97 – also clears
+    /// `PENDING_ADMIN_STATE_KEY` so the new endpoint returns None after renounce.
     pub fn renounce_admin(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         env.storage().instance().remove(&ADMIN_KEY);
         env.storage().instance().remove(&PENDING_ADMIN_KEY);
+        env.storage().instance().remove(&PENDING_ADMIN_STATE_KEY);
         env.events().publish((EVENT_ADMIN_REN, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -1045,8 +1204,17 @@ impl SLACalculatorContract {
         Self::require_admin(&env, &caller)?; // #28 – admin role enforced
         Self::require_not_frozen(&env)?;
 
-        // #70 – Validate configuration parameters
-        Self::validate_config(&severity, threshold_minutes, penalty_per_minute, reward_base)?;
+        // #70 – Per-field validation (pure, operates only on inputs).
+        Self::validate_config(
+            &severity,
+            threshold_minutes,
+            penalty_per_minute,
+            reward_base,
+        )?;
+        // #92 – Cross-severity hierarchy check against the live on-chain
+        // configs. Lifted out of `validate_config` so that function can stay
+        // pure (callable from the fuzz targets without an initialised env).
+        Self::enforce_cross_severity_order(&env, &severity, penalty_per_minute)?;
 
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
@@ -1267,7 +1435,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 18] = [
+        let entries: [(u32, &str, &str); 20] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1286,6 +1454,9 @@ impl SLACalculatorContract {
             (16, "ConfigFrozen", "Configuration is frozen"),
             (17, "InvalidInput", "Invalid input parameter"),
             (18, "SeverityNotInSet", "Custom severity not registered"),
+            // #92 – cross-parameter / cross-severity consistency
+            (19, "RewardMarginTooLow", "Reward margin below safe ratio"),
+            (20, "SeverityOrderInvalid", "Severity hierarchy violated"),
         ];
 
         for (code, label, description) in entries {
@@ -1765,6 +1936,14 @@ impl SLACalculatorContract {
     /// #93 – General bounds shared by canonical and custom severities.
     /// Extracted from validate_config so custom severities get the same
     /// baseline safety checks without the canonical-only per-severity branches.
+    ///
+    /// #92 – Adds the cross-parameter reward-margin check: rewards must
+    /// strictly exceed 1.5× the per-minute penalty
+    /// (`penalty * 1.5 < reward`). The integer form `penalty * 3 < reward * 2`
+    /// is equivalent without floating-point math. The bounds above
+    /// (`penalty ≤ 10000`, `reward ≤ 100000`) keep the products
+    /// comfortably within `i128`, so `checked_mul` is only a defence against
+    /// future bound changes rather than a current overflow risk.
     pub(crate) fn validate_general_bounds(
         threshold_minutes: u32,
         penalty_per_minute: i128,
@@ -1779,10 +1958,38 @@ impl SLACalculatorContract {
         if reward_base <= 0 || reward_base > 100000 {
             return Err(SLAError::InvalidReward);
         }
+
+        // #92 – Cross-parameter reward-margin safety check. The equality
+        // case (penalty * 3 == reward * 2) is intentionally rejected: the
+        // issue explicitly asks for *strict* `1.5×` separation, so a
+        // `1.0×` ratio and an exact `1.5×` ratio are both treated as
+        // insufficient to maintain the safety margin.
+        let lhs = penalty_per_minute
+            .checked_mul(3)
+            .ok_or(SLAError::InvalidReward)?;
+        let rhs = reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?;
+        if lhs >= rhs {
+            return Err(SLAError::RewardMarginTooLow);
+        }
+
         Ok(())
     }
 
     /// #70 – Validates configuration parameters to ensure safe and meaningful values.
+    /// #92 – Now takes `env: &Env` so it can compare the proposed
+    /// `critical`/`high` penalty pair against the live on-chain configs.
+    /// Reading the existing map makes the cross-severity check sensitive to
+    /// the *current* state, not just the proposed write — so an update that
+    /// would invert the `critical ≥ high` order is rejected even if the
+    /// proposed values pass per-field validation.
+    /// #70 – Validates configuration parameters to ensure safe and meaningful values.
+    ///
+    /// Pure: operates only on its arguments, never reads storage. This lets
+    /// the property-based fuzz tests (`apexchainx_calculator/src/fuzz_tests.rs`)
+    /// and the libfuzzer targets (`apexchainx_calculator/fuzz/fuzz_targets/`)
+    /// exercise it without seeding a contract env. The cross-severity rule
+    /// (`#92`) lives in `enforce_cross_severity_order` below, which
+    /// `set_config` invokes after this per-field pass succeeds.
     pub(crate) fn validate_config(
         severity: &Symbol,
         threshold_minutes: u32,
@@ -1843,6 +2050,47 @@ impl SLACalculatorContract {
             return Err(SLAError::InvalidSeverity);
         }
 
+        Ok(())
+    }
+
+    /// #92 – Enforces the cross-severity hierarchy rule
+    /// `penalty(critical) >= penalty(high)` against the live on-chain config.
+    /// Lives separately from `validate_config` so the latter stays pure
+    /// (the fuzz targets can call it without an initialised env). Reading
+    /// the existing `critical` / `high` configs from storage makes the check
+    /// sensitive to the *current* on-chain state, not just the proposed
+    /// write — so an update that would invert the order is rejected even
+    /// when the proposed values pass per-field validation in `validate_config`.
+    ///
+    /// Equality is allowed so admins can deliberately align `critical` with
+    /// `high` (e.g. flat-tier policies); only an inversion is rejected.
+    pub(crate) fn enforce_cross_severity_order(
+        env: &Env,
+        proposed_severity: &Symbol,
+        proposed_penalty: i128,
+    ) -> Result<(), SLAError> {
+        let crit_sym = symbol_short!("critical");
+        let high_sym = symbol_short!("high");
+        let (critical_penalty, high_penalty) = if proposed_severity == &crit_sym {
+            (
+                proposed_penalty,
+                Self::load_config(env, &high_sym)?.penalty_per_minute,
+            )
+        } else if proposed_severity == &high_sym {
+            (
+                Self::load_config(env, &crit_sym)?.penalty_per_minute,
+                proposed_penalty,
+            )
+        } else {
+            // `medium` / `low`: both sides come from storage because the
+            // proposed value does not participate in the comparison.
+            let stored_critical = Self::load_config(env, &crit_sym)?;
+            let stored_high = Self::load_config(env, &high_sym)?;
+            (stored_critical.penalty_per_minute, stored_high.penalty_per_minute)
+        };
+        if critical_penalty < high_penalty {
+            return Err(SLAError::SeverityOrderInvalid);
+        }
         Ok(())
     }
 

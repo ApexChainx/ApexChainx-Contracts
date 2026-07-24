@@ -76,7 +76,7 @@ uses: dtolnay/rust-toolchain@1.94.1
 ## Why Rust 1.94.1?
 
 1. **Current Stable**: Latest stable release as of implementation (March 2026)
-2. **Soroban SDK Compatibility**: Compatible with soroban-sdk v21.0.0
+2. **Soroban SDK Compatibility**: Compatible with soroban-sdk v21.1.0
 3. **Tested & Verified**: Already in use on development systems
 4. **Recent Features**: Includes modern Rust features and optimizations
 

@@ -1,10 +1,8 @@
 use soroban_sdk::{symbol_short, Env, Map, Symbol, Vec};
 
 use crate::{
-    SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError,
-    CONFIG_KEY, CUSTOM_CONFIG_KEY,
-    EVENT_CONFIG_UPD, EVENT_VERSION,
-    config_freeze, config_metadata,
+    config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
+    CUSTOM_CONFIG_KEY, EVENT_CONFIG_UPD, EVENT_VERSION,
 };
 
 pub fn set_config(
@@ -17,7 +15,20 @@ pub fn set_config(
     crate::SLACalculatorContract::check_version(env)?;
     require_not_frozen(env)?;
 
-    crate::SLACalculatorContract::validate_config(&severity, threshold_minutes, penalty_per_minute, reward_base)?;
+    // Per-field (pure) validation. The cross-severity hierarchy check is a
+    // separate env-reading call below so `validate_config` stays callable
+    // from the fuzz targets without an initialised contract environment.
+    crate::SLACalculatorContract::validate_config(
+        &severity,
+        threshold_minutes,
+        penalty_per_minute,
+        reward_base,
+    )?;
+    crate::SLACalculatorContract::enforce_cross_severity_order(
+        env,
+        &severity,
+        penalty_per_minute,
+    )?;
 
     let mut configs: Map<Symbol, SLAConfig> = env
         .storage()
@@ -97,7 +108,11 @@ pub fn set_custom_severity(
         return Err(SLAError::InvalidSeverity);
     }
 
-    crate::SLACalculatorContract::validate_general_bounds(threshold_minutes, penalty_per_minute, reward_base)?;
+    crate::SLACalculatorContract::validate_general_bounds(
+        threshold_minutes,
+        penalty_per_minute,
+        reward_base,
+    )?;
 
     let mut custom: Map<Symbol, SLAConfig> = env
         .storage()

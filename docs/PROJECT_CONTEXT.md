@@ -20,7 +20,7 @@ The ApexChainx platform is composed of three repositories:
 |------------|------|------------|
 | `apexchainx-fe` | Frontend application | React / TypeScript |
 | `apexchainx-be` | Backend API and integration layer | Python / FastAPI |
-| `apexchainx-contracts` | Soroban smart contracts (this repo) | Rust / Soroban SDK |
+| `apexchainx-contracts` | Soroban smart contracts (this repo) | Rust / Soroban SDK 21.1.0 |
 
 ## System Flow
 

@@ -1,8 +1,8 @@
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
-    SLAError, SLAResult,
-    HISTORY_KEY, RETENTION_LIMIT_KEY, MAX_HISTORY_SIZE, EVENT_VERSION, EVENT_PRUNED, EVENT_PRUNED_AGE,
+    SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_VERSION, HISTORY_KEY, MAX_HISTORY_SIZE,
+    RETENTION_LIMIT_KEY,
 };
 
 pub fn get_history(env: &Env) -> Result<Vec<SLAResult>, SLAError> {
@@ -34,8 +34,10 @@ pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<()
         }
 
         env.storage().instance().set(&HISTORY_KEY, &new_history);
-        env.events()
-            .publish((EVENT_PRUNED, EVENT_VERSION, caller.clone()), (remove_count, keep_latest));
+        env.events().publish(
+            (EVENT_PRUNED, EVENT_VERSION, caller.clone()),
+            (remove_count, keep_latest),
+        );
     }
 
     Ok(())
