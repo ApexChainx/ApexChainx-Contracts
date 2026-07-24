@@ -14,7 +14,9 @@ crate-type = ["cdylib"]
 export-snapshots = []
 
 [dependencies]
+wee_alloc = "0.4"
 soroban-sdk = "21.0.0"
 
 [dev-dependencies]
 soroban-sdk = { version = "21.0.0", features = ["testutils"] }
+

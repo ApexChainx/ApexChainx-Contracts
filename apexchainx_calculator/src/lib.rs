@@ -1,6 +1,10 @@
 #![no_std]
 extern crate alloc;
 
+#[cfg(target_arch = "wasm32")]
+#[global_allocator]
+static ALLOCATOR: wee_alloc::WeeAlloc = wee_alloc::WeeAlloc::INIT;
+
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, String,
     Symbol, Vec,
@@ -1790,6 +1794,7 @@ impl SLACalculatorContract {
         })
     }
 }
+
 
 
 
