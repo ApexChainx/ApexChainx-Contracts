@@ -1048,6 +1048,14 @@ impl SLACalculatorContract {
         // #70 – Validate configuration parameters
         Self::validate_config(&severity, threshold_minutes, penalty_per_minute, reward_base)?;
 
+        // #92 – Cross-severity penalty ordering: enforce severity progression
+        // so higher-severity penalties are never lower than lower-severity ones.
+        Self::validate_cross_severity_penalty_ordering(
+            &env,
+            &severity,
+            penalty_per_minute,
+        )?;
+
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
             .instance()
@@ -1779,6 +1787,13 @@ impl SLACalculatorContract {
         if reward_base <= 0 || reward_base > 100000 {
             return Err(SLAError::InvalidReward);
         }
+        // Cross-parameter consistency: rewards must materially exceed penalties.
+        // penalty_per_minute * 1.5 < reward_base  →  penalty * 3 < reward_base * 2
+        if penalty_per_minute.checked_mul(3).ok_or(SLAError::InvalidReward)?
+            >= reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?
+        {
+            return Err(SLAError::InvalidReward);
+        }
         Ok(())
     }
 
@@ -1843,6 +1858,16 @@ impl SLACalculatorContract {
             return Err(SLAError::InvalidSeverity);
         }
 
+        // Cross-parameter consistency: rewards must materially exceed penalties.
+        // penalty_per_minute * 1.5 < reward_base  →  penalty * 3 < reward_base * 2
+        // This ensures meeting SLA targets is always financially better than
+        // paying penalties for minor threshold overruns.
+        if penalty_per_minute.checked_mul(3).ok_or(SLAError::InvalidReward)?
+            >= reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?
+        {
+            return Err(SLAError::InvalidReward);
+        }
+
         Ok(())
     }
 
@@ -1871,6 +1896,67 @@ impl SLACalculatorContract {
 
     pub(crate) fn is_canonical_severity(severity: &Symbol) -> bool {
         Self::canonical_severity_index(severity).is_some()
+    }
+
+    /// #92 – Cross-severity penalty ordering validation.
+    ///
+    /// Ensures that higher-severity thresholds have an equal or greater
+    /// penalty_per_minute than lower-severity ones for the canonical higher
+    /// tiers (critical ≥ high ≥ medium). The low severity is exempt from
+    /// the upper-direction check because its per-severity cap (100) can
+    /// exceed medium's minimum (10) by design.
+    ///
+    /// The rule is: for critical, high, and medium, we enforce
+    /// `higher.penalty >= lower.penalty`. This prevents accidental
+    /// inversion where a moderate severity penalises more heavily than a
+    /// higher one (e.g. medium.penalty > critical.penalty).
+    ///
+    /// Checks performed:
+    ///   - critical:  new_penalty >= existing_high.penalty
+    ///   - high:      new_penalty <= existing_critical.penalty AND
+    ///                new_penalty >= existing_medium.penalty
+    ///   - medium:    new_penalty <= existing_high.penalty
+    ///   - low:       no cross-severity check (capped independently at 100)
+    pub(crate) fn validate_cross_severity_penalty_ordering(
+        env: &Env,
+        updated_severity: &Symbol,
+        new_penalty: i128,
+    ) -> Result<(), SLAError> {
+        let configs: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CONFIG_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+
+        let index = Self::canonical_severity_index(updated_severity)
+            .ok_or(SLAError::InvalidSeverity)?;
+        let severities = Self::canonical_severities(env);
+
+        // Check against the next-lower severity (if any):
+        //   this severity's penalty >= next-lower severity's penalty
+        if index + 1 < severities.len() {
+            let lower_sev = severities.get(index + 1).unwrap();
+            if let Some(lower_cfg) = configs.get(lower_sev.clone()) {
+                if new_penalty < lower_cfg.penalty_per_minute {
+                    return Err(SLAError::InvalidPenalty);
+                }
+            }
+        }
+
+        // Check against the next-higher severity (if any) — but only for
+        // the three higher tiers. Low (index 3) is exempt from this check
+        // because its per-severity cap (100) intentionally exceeds medium's
+        // minimum (10), making a strict `low <= medium` rule impossible.
+        if index >= 1 && index <= 2 {
+            let higher_sev = severities.get(index - 1).unwrap();
+            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
+                if new_penalty > higher_cfg.penalty_per_minute {
+                    return Err(SLAError::InvalidPenalty);
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Shared config lookup that borrows env (avoids consuming it).

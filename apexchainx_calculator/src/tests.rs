@@ -2542,11 +2542,11 @@ fn test_low_penalty_too_high_fails_validation() {
 fn test_boundary_values_pass_validation() {
     let (_env, client, actors) = setup();
 
-    // Test minimum valid values
-    client.set_config(&actors.admin, &symbol_short!("critical"), &1, &50, &1);
-    client.set_config(&actors.admin, &symbol_short!("high"), &1, &25, &1);
-    client.set_config(&actors.admin, &symbol_short!("medium"), &1, &10, &1);
-    client.set_config(&actors.admin, &symbol_short!("low"), &1, &1, &1);
+    // Test minimum valid values (reward must satisfy penalty*1.5 < reward)
+    client.set_config(&actors.admin, &symbol_short!("critical"), &1, &50, &76);
+    client.set_config(&actors.admin, &symbol_short!("high"), &1, &25, &38);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &1, &10, &16);
+    client.set_config(&actors.admin, &symbol_short!("low"), &1, &1, &2);
 
     // Test maximum valid values for severity-specific constraints
     client.set_config(&actors.admin, &symbol_short!("critical"), &60, &10000, &100000);
@@ -4934,9 +4934,9 @@ fn test_extreme_config_max_valid_penalty_and_reward() {
 
 #[test]
 fn test_extreme_config_max_valid_low_threshold() {
-    // low: threshold=1440 (24h), penalty=1, reward=1
+    // low: threshold=1440 (24h), penalty=1, reward=2 (penalty*1.5=1.5 < 2 ✓)
     let (_env, client, actors) = setup();
-    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &1, &1);
+    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &1, &2);
 
     // mttr=1440 → exactly at threshold → met, good rating
     let at = client.calculate_sla_view(&symbol_short!("LT"), &symbol_short!("low"), &1440);
@@ -4955,7 +4955,8 @@ fn test_extreme_penalty_large_overtime_no_i128_overflow() {
     // overtime = u32::MAX - 1 ≈ 4.29e9; penalty = 4.29e9 * 100 ≈ 4.29e11
     // i128 max ≈ 1.7e38 — no overflow possible.
     let (_env, client, actors) = setup();
-    client.set_config(&actors.admin, &symbol_short!("low"), &1, &100, &1);
+    // reward=151 ensures penalty*1.5=150 < 151 ✓
+    client.set_config(&actors.admin, &symbol_short!("low"), &1, &100, &151);
 
     let env = Env::default();
     env.mock_all_auths();
@@ -4965,7 +4966,7 @@ fn test_extreme_penalty_large_overtime_no_i128_overflow() {
     let admin2 = soroban_sdk::Address::generate(&env);
     let op2 = soroban_sdk::Address::generate(&env);
     client2.initialize(&admin2, &op2);
-    client2.set_config(&admin2, &symbol_short!("low"), &1, &100, &1);
+    client2.set_config(&admin2, &symbol_short!("low"), &1, &100, &151);
 
     let result = client2.calculate_sla_view(&symbol_short!("OVF"), &symbol_short!("low"), &u32::MAX);
     assert_eq!(result.status, symbol_short!("viol"));
@@ -5052,8 +5053,8 @@ fn test_extreme_reward_above_100000_rejected() {
 fn test_extreme_mttr_equals_threshold_is_always_met() {
     // At exactly the threshold, result must always be "met" regardless of how large the threshold is.
     let (_env, client, actors) = setup();
-    // Set low to max threshold
-    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &1, &1);
+    // Set low to max threshold (reward=2 satisfies penalty*1.5=1.5 < 2 ✓)
+    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &1, &2);
 
     let result = client.calculate_sla_view(&symbol_short!("EQ"), &symbol_short!("low"), &1440);
     assert_eq!(result.status, symbol_short!("met"));
@@ -5943,12 +5944,13 @@ fn test_254_reward_above_ceiling_rejected() {
 #[test]
 fn test_254_valid_boundary_values_accepted() {
     // Minimum valid values for low severity must be accepted.
+    // reward=2 satisfies penalty*1.5=1.5 < 2 ✓
     let (_env, client, actors) = setup();
-    client.set_config(&actors.admin, &symbol_short!("low"), &1, &1, &1);
+    client.set_config(&actors.admin, &symbol_short!("low"), &1, &1, &2);
     let cfg = client.get_config(&symbol_short!("low"));
     assert_eq!(cfg.threshold_minutes, 1);
     assert_eq!(cfg.penalty_per_minute, 1);
-    assert_eq!(cfg.reward_base, 1);
+    assert_eq!(cfg.reward_base, 2);
 }
 
 #[test]
