@@ -62,11 +62,24 @@ validation parameters:
 | `medium` | 240 minutes (4h) | 10 units | Longer response window, moderate penalty floor |
 | `low` | 1,440 minutes (24h) | Max 100 units | Lowest priority, penalties capped to prevent over-punishment |
 
+### Cross-Parameter Consistency Rules
+
+| Rule | Condition | Error on Violation | Rationale |
+|------|-----------|-------------------|-----------|
+| Reward exceeds penalty | `penalty_per_minute × 1.5 < reward_base` | `InvalidReward` (code 10) | Ensures meeting SLA targets is always financially beneficial compared to paying penalties for minor threshold overruns |
+
+### Cross-Severity Consistency Rules
+
+| Rule | Condition | Error on Violation | Rationale |
+|------|-----------|-------------------|-----------|
+| Penalty severity ordering | `critical.penalty >= high.penalty >= medium.penalty >= low.penalty` | `InvalidPenalty` (code 9) | Maintains logical severity progression — a higher-severity outage must never carry a lower penalty than a lower-severity one |
+
 ### Rule Enforcement Order
 
 1. **General parameter bounds** are validated first (range checks)
 2. **Severity-specific constraints** are validated second (severity-dependent limits)
-3. **Cross-parameter consistency** is validated last (e.g., penalty < reward for same severity)
+3. **Cross-parameter consistency** is validated third (penalty × 1.5 < reward for same severity)
+4. **Cross-severity consistency** is validated last (higher severity penalties ≥ lower severity penalties)
 
 ## Error Handling
 
@@ -75,8 +88,8 @@ validation parameters:
 | Error Code | Name | Trigger Condition | Recovery |
 |------------|------|-------------------|----------|
 | 8 | `InvalidThreshold` | Threshold outside valid range or severity-specific limit | Adjust to valid range (1–1440, severity-dependent) |
-| 9 | `InvalidPenalty` | Penalty per minute outside valid range | Adjust to valid range (1–10,000, severity-dependent) |
-| 10 | `InvalidReward` | Reward base outside valid range | Adjust to valid range (1–100,000) |
+| 9 | `InvalidPenalty` | Penalty per minute outside valid range or violates cross-severity ordering | Adjust to valid range (1–10,000, severity-dependent) or align with adjacent severity levels |
+| 10 | `InvalidReward` | Reward base outside valid range or violates cross-parameter consistency | Adjust to valid range (1–100,000) or ensure penalty × 1.5 < reward |
 | 11 | `InvalidSeverity` | Severity not in supported set | Use one of: critical, high, medium, low |
 
 ### Deterministic Failure Guarantees
@@ -98,6 +111,10 @@ Input Parameters
 [Severity-Specific Validation]  ←── Error 8, 9
        ↓
 [Severity Existence Check]  ←── Error 11
+       ↓
+[Cross-Parameter Consistency]  ←── Error 10
+       ↓
+[Cross-Severity Consistency]  ←── Error 9
        ↓
 [Event Emission on Success]  ←── Config saved
 ```
@@ -205,6 +222,14 @@ set_config(admin, medium, 60, 25, -100);      // → InvalidReward
 
 // ERROR: unsupported severity level
 set_config(admin, urgent, 15, 100, 750);      // → InvalidSeverity
+
+// ERROR: reward too low relative to penalty (need penalty × 1.5 < reward)
+set_config(admin, critical, 15, 100, 100);    // → InvalidReward (100×1.5=150 ≮ 100)
+
+// ERROR: cross-severity penalty inversion (high penalty < medium penalty)
+// First ensure medium has a lower penalty, then try setting high below it
+set_config(admin, medium, 60, 50, 750);       // medium penalty = 50
+set_config(admin, high, 30, 25, 750);         // → InvalidPenalty (high 25 < medium 50)
 ```
 
 ## Implementation Notes
