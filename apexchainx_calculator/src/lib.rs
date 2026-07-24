@@ -19,7 +19,9 @@ pub mod cross_contract_safety;
 pub mod event_correlation;
 mod event_schema;
 pub mod version_negotiation;
+pub mod storage_ttl;
 
+use crate::storage_ttl::bump_ttl;
 use crate::config_bundle::ConfigBundle;
 
 // -----------------------------------------------------------------------
@@ -602,6 +604,8 @@ impl SLACalculatorContract {
         if current != STORAGE_VERSION {
             return Err(SLAError::VersionMismatch);
         }
+        bump_ttl(&env);
+        
 
         Ok(())
     }
@@ -794,6 +798,8 @@ impl SLACalculatorContract {
         );
         env.events()
             .publish((EVENT_PAUSED, EVENT_VERSION, caller), (true,));
+        bump_ttl(&env);
+        
         Ok(())
     }
 
@@ -807,6 +813,8 @@ impl SLACalculatorContract {
         env.storage().instance().remove(&PAUSE_INFO_KEY);
         env.events()
             .publish((EVENT_UNPAUSED, EVENT_VERSION, caller), (false,));
+        bump_ttl(&env);
+        
         Ok(())
     }
 
@@ -871,6 +879,8 @@ impl SLACalculatorContract {
             (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
             (threshold_minutes, penalty_per_minute, reward_base),
         );
+        bump_ttl(&env);
+        
         Ok(())
     }
 
@@ -1175,6 +1185,8 @@ impl SLACalculatorContract {
 
         Self::publish_sla_event(&env, severity.clone(), &result);
         Self::publish_settlement_intent_event(&env, severity, &result);
+        bump_ttl(&env);
+        
 
         Ok(result)
     }
@@ -1552,6 +1564,8 @@ impl SLACalculatorContract {
                 (remove_count, keep_latest),
             );
         }
+        bump_ttl(&env);
+        
 
         Ok(())
     }
@@ -1776,3 +1790,6 @@ impl SLACalculatorContract {
         })
     }
 }
+
+
+
