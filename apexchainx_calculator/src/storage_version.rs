@@ -8,6 +8,12 @@
 //! # Version Lifecycle
 //!
 //! 1. Contract is deployed — `initialize()` stamps `STORAGE_VERSION` (currently 1)
+//!    Note: Issues #97 (operator parity) and #92 (cross-parameter/cross-severity
+//!    validation) ship *additively* on top of v1 and do **not** bump
+//!    `STORAGE_VERSION` — existing contracts migrate transparently because
+//!    the new `PENDING_*_STATE_KEY` keys are written alongside (not in
+//!    place of) the legacy `PENDING_*_KEY` entries, and the new SLAError
+//!    codes (19, 20) only ever fail-write on invalid config updates.
 //! 2. Contract is upgraded — new binary may expect a higher version
 //! 3. `get_migration_state()` reports `needs_migration: true`
 //! 4. Admin calls `migrate()` — storage is transformed and version is bumped

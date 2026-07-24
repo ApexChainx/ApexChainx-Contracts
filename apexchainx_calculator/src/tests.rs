@@ -285,7 +285,9 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         ADMIN_KEY,
         OPERATOR_KEY,
         PENDING_ADMIN_KEY,
+        PENDING_ADMIN_STATE_KEY,
         PENDING_OP_KEY,
+        PENDING_OP_STATE_KEY,
         CONFIG_KEY,
         CUSTOM_CONFIG_KEY,
         PAUSED_KEY,
@@ -7109,4 +7111,230 @@ fn test_get_pending_admin_and_state_are_consistent_under_all_transitions() {
     assert_eq!(client.get_pending_admin(), None);
     assert_eq!(client.get_pending_admin_state(), None);
     assert_eq!(client.get_admin(), new_admin_2);
+}
+
+// ============================================================
+// #97 – Operator parity for `get_pending_operator_state`
+// ============================================================
+
+#[test]
+fn test_get_pending_operator_state_empty_when_no_proposal() {
+    let (_env, client, _actors) = setup();
+    assert_eq!(client.get_pending_operator_state(), None);
+    assert_eq!(client.get_pending_operator(), None);
+}
+
+#[test]
+fn test_get_pending_operator_state_returns_full_record_after_propose() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+
+    let state = client
+        .get_pending_operator_state()
+        .expect("operator proposal should be visible");
+    assert_eq!(state.address, new_op);
+    assert_eq!(state.proposed_by, actors.admin);
+    let seq_before = env.ledger().sequence();
+    assert!(state.proposed_at_ledger <= seq_before);
+    assert_eq!(client.get_pending_operator(), Some(new_op));
+}
+
+#[test]
+fn test_get_pending_operator_state_cleared_after_accept() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    assert!(client.get_pending_operator_state().is_some());
+
+    client.accept_operator(&new_op);
+
+    assert_eq!(client.get_pending_operator_state(), None);
+    assert_eq!(client.get_pending_operator(), None);
+    assert_eq!(client.get_operator(), new_op);
+}
+
+#[test]
+fn test_get_pending_operator_state_cleared_after_cancel() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    client.cancel_operator_proposal(&actors.admin);
+
+    assert_eq!(client.get_pending_operator_state(), None);
+    assert_eq!(client.get_pending_operator(), None);
+    assert_eq!(client.get_operator(), actors.operator);
+}
+
+#[test]
+fn test_get_pending_operator_state_overwritten_by_new_proposal() {
+    let (env, client, actors) = setup();
+    let first_op = soroban_sdk::Address::generate(&env);
+    let second_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &first_op);
+    assert_eq!(
+        client.get_pending_operator_state().unwrap().address,
+        first_op
+    );
+
+    client.propose_operator(&actors.admin, &second_op);
+    assert_eq!(
+        client.get_pending_operator_state().unwrap().address,
+        second_op
+    );
+    assert_eq!(client.get_pending_operator(), Some(second_op));
+}
+
+#[test]
+fn test_operator_and_admin_state_getters_are_independent() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    client.propose_admin(&actors.admin, &new_admin);
+
+    assert!(client.get_pending_admin_state().is_some());
+    assert!(client.get_pending_operator_state().is_some());
+    assert_ne!(
+        client.get_pending_admin_state().unwrap().address,
+        client.get_pending_operator_state().unwrap().address
+    );
+}
+
+// ============================================================
+// #92 – Cross-parameter reward-margin enforcement
+// ============================================================
+
+/// `penalty * 3 < reward * 2` is the integer form of `penalty * 1.5 < reward`.
+/// The check is strict `<`, so equality (1.0× and 1.5× exactly) is rejected,
+/// along with everything below.
+#[test]
+#[should_panic]
+fn test_set_config_rejects_exact_one_and_a_half_ratio() {
+    let (_env, client, actors) = setup();
+    // penalty=100, reward=150 → 100*3=300 = 150*2=300, equality rejected.
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &150);
+}
+
+#[test]
+fn test_set_config_accepts_just_above_one_and_a_half_ratio() {
+    let (_env, client, actors) = setup();
+    // penalty=100, reward=151 → 100*3=300 < 151*2=302 ✓
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &151);
+}
+
+#[test]
+#[should_panic]
+fn test_set_config_rejects_high_severity_below_one_and_a_half_ratio() {
+    let (_env, client, actors) = setup();
+    // penalty=25 (high minimum), reward=37 → 25*3=75 >= 37*2=74, rejected.
+    client.set_config(&actors.admin, &symbol_short!("high"), &30, &25, &37);
+}
+
+#[test]
+#[should_panic]
+fn test_set_custom_severity_rejected_on_insufficient_margin() {
+    let (_env, client, actors) = setup();
+    // Custom severity with penalty=80, reward=120 → 80*3=240 >= 120*2=240, rejected.
+    let _ = client.set_custom_severity(
+        &actors.admin,
+        &symbol_short!("alert"),
+        &90,
+        &80,
+        &120,
+    );
+}
+
+#[test]
+fn test_set_custom_severity_accepted_on_sufficient_margin() {
+    let (_env, client, actors) = setup();
+    // Custom severity with penalty=50, reward=80 → 50*3=150 < 80*2=160 ✓.
+    client.set_custom_severity(
+        &actors.admin,
+        &symbol_short!("alert"),
+        &90,
+        &50,
+        &80,
+    );
+}
+
+// ============================================================
+// #92 – Cross-severity hierarchy enforcement
+// ============================================================
+
+#[test]
+#[should_panic]
+fn test_set_config_rejects_high_above_stored_critical() {
+    let (_env, client, actors) = setup();
+    // First drop critical to its minimum penalty (50). Then push high above it.
+    client.set_config(&actors.admin, &symbol_short!("critical"), &60, &50, &200);
+    // crit.penalty=50 (live), high.penalty=60 (proposed) → 50 < 60 invalid.
+    client.set_config(&actors.admin, &symbol_short!("high"), &30, &60, &200);
+}
+
+#[test]
+fn test_set_config_allows_critical_equal_to_high() {
+    let (_env, client, actors) = setup();
+    // Set high=100 then critical=100 (the equal case must be accepted).
+    client.set_config(&actors.admin, &symbol_short!("high"), &120, &100, &800);
+    client.set_config(&actors.admin, &symbol_short!("critical"), &60, &100, &800);
+}
+
+#[test]
+#[should_panic]
+fn test_set_config_rejects_critical_below_stored_high() {
+    let (_env, client, actors) = setup();
+    // Raise high first, then attempt to drop critical below it.
+    client.set_config(&actors.admin, &symbol_short!("high"), &120, &150, &800);
+    // crit.penalty=100 (default) < high.penalty=150 (live) → invalid.
+    client.set_config(&actors.admin, &symbol_short!("critical"), &60, &100, &800);
+}
+
+#[test]
+fn test_failure_schema_includes_cross_consistency_codes() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+    let schema = client.get_failure_schema();
+
+    // #92 must keep the schema at >=20 codes.
+    assert!(
+        schema.codes.len() >= 20,
+        "expected >=20 codes after #92; got {}",
+        schema.codes.len()
+    );
+
+    // #92 must label codes 19 and 20 with the canonical machine-readable names.
+    let mut saw_reward_margin = false;
+    let mut saw_severity_order = false;
+    let mut saw_pre_existing = false;
+    for entry in schema.codes.iter() {
+        match entry.code {
+            19 => {
+                assert_eq!(entry.label, Symbol::new(&env, "RewardMarginTooLow"));
+                saw_reward_margin = true;
+            }
+            20 => {
+                assert_eq!(entry.label, Symbol::new(&env, "SeverityOrderInvalid"));
+                saw_severity_order = true;
+            }
+            1..=18 => saw_pre_existing = true,
+            _ => {}
+        }
+    }
+    assert!(saw_reward_margin, "code 19 (RewardMarginTooLow) missing");
+    assert!(saw_severity_order, "code 20 (SeverityOrderInvalid) missing");
+    assert!(
+        saw_pre_existing,
+        "pre-existing failure codes (1-18) must still be present"
+    );
 }

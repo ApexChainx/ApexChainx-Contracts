@@ -1,3 +1,21 @@
+//! ApexChainx SLA Calculator smart contract.
+//!
+//! # Soroban SDK
+//!
+//! This contract is compiled with **Soroban SDK 21.1.0**. The same version
+//! must be reflected across all four documentation surfaces listed below
+//! so backend consumers and CI builds see a single, consistent pin. A
+//! future SDK bump must update each location in lockstep:
+//!
+//! ```text
+//! rg -n 'soroban-sdk' apexchainx_calculator/Cargo.toml
+//! rg -n '21\.1\.0'        README.md
+//! rg -n '21\.1\.0'        RUST_TOOLCHAIN_PINNING.md
+//! rg -n '21\.1\.0'        docs/PROJECT_CONTEXT.md
+//! ```
+//!
+//! This is the acceptance check for issue #73.
+
 #![no_std]
 extern crate alloc;
 
@@ -58,6 +76,8 @@ pub(crate) const PENDING_ADMIN_KEY: Symbol = symbol_short!("PADMIN");
 pub(crate) const PENDING_ADMIN_STATE_KEY: Symbol = symbol_short!("PADMSTA");
 /// Pending operator for two-step handoff. (#64)
 pub(crate) const PENDING_OP_KEY: Symbol = symbol_short!("POP");
+/// Full pending operator proposal metadata (address + proposed_at_ledger + proposed_by). (#97)
+pub(crate) const PENDING_OP_STATE_KEY: Symbol = symbol_short!("POPSTA");
 
 /// Map of severity -> SLAConfig for all configured severity levels.
 pub(crate) const CONFIG_KEY: Symbol = symbol_short!("CONFIG");
@@ -299,6 +319,14 @@ pub enum SLAError {
     InvalidInput = 17,
     /// Custom severity referenced but not registered. (#93)
     SeverityNotInSet = 18,
+    /// Reward base does not exceed penalty by the required safety margin
+    /// (`penalty_per_minute * 1.5 < reward_base`). Enforced on every severity
+    /// update by the cross-parameter consistency check in #92.
+    RewardMarginTooLow = 19,
+    /// Severity hierarchy violated: the proposed config would not satisfy
+    /// `critical.penalty_per_minute >= high.penalty_per_minute`. Enforced by
+    /// the cross-severity consistency check in #92.
+    SeverityOrderInvalid = 20,
 }
 
 // -----------------------------------------------------------------------
@@ -477,6 +505,26 @@ pub struct AdminProposalState {
     /// Ledger sequence at which `propose_admin` stamped this proposal.
     pub proposed_at_ledger: u32,
     /// Address of the admin who initiated the proposal (the caller of `propose_admin`).
+    pub proposed_by: Address,
+}
+
+/// #97 – Operator counterpart of [`AdminProposalState`]. Carries the
+/// proposed operator address together with the proposal metadata an admin
+/// dashboard needs to render a pending operator row: the ledger sequence
+/// at which the proposal was recorded and the admin who authored it.
+///
+/// Kept as a distinct contract type from `AdminProposalState` so dashboards
+/// can render operator proposals under their own label without dispatching
+/// on context. Mirrors the admin struct's field order to keep callers
+/// ergonomic across both transfer flows.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OperatorProposalState {
+    /// Address of the proposed new operator (destined to become operator on accept).
+    pub address: Address,
+    /// Ledger sequence at which `propose_operator` stamped this proposal.
+    pub proposed_at_ledger: u32,
+    /// Address of the admin who initiated the proposal (the caller of `propose_operator`).
     pub proposed_by: Address,
 }
 
@@ -950,16 +998,32 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Propose a new operator. The current admin initiates; the new operator must call `accept_operator`.
+    /// #97 – Also stamps the full `OperatorProposalState` (address +
+    /// proposed_at_ledger + proposed_by) so that `get_pending_operator_state`
+    /// returns a complete record for admin dashboards, mirroring the admin
+    /// counterpart. Both keys are written inside the same auth-checked call
+    /// so a partial write is impossible.
     pub fn propose_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         env.storage().instance().set(&PENDING_OP_KEY, &new_operator);
+        env.storage().instance().set(
+            &PENDING_OP_STATE_KEY,
+            &OperatorProposalState {
+                address: new_operator.clone(),
+                proposed_at_ledger: env.ledger().sequence(),
+                proposed_by: caller.clone(),
+            },
+        );
         env.events()
-            .publish((EVENT_OP_PROP, EVENT_VERSION, caller), (new_operator,));
+            .publish((EVENT_OP_PROP, EVENT_VERSION, caller), (new_operator));
         Ok(())
     }
 
     /// Accept a pending operator handoff. Must be called by the proposed new operator.
+    /// #97 – Clears `PENDING_OP_STATE_KEY` alongside `PENDING_OP_KEY` so
+    /// `get_pending_operator_state` mirrors `get_pending_operator` after
+    /// acceptance.
     pub fn accept_operator(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         caller.require_auth();
@@ -973,6 +1037,7 @@ impl SLACalculatorContract {
         }
         env.storage().instance().set(&OPERATOR_KEY, &caller);
         env.storage().instance().remove(&PENDING_OP_KEY);
+        env.storage().instance().remove(&PENDING_OP_STATE_KEY);
         env.events().publish((EVENT_OP_ACC, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -980,6 +1045,8 @@ impl SLACalculatorContract {
     /// Cancel a pending operator proposal. Only the current admin may cancel.
     /// Clears the pending proposal without changing the active operator.
     /// Returns `NoPendingTransfer` if there is nothing to cancel.
+    /// #97 – Clears `PENDING_OP_STATE_KEY` alongside `PENDING_OP_KEY` so
+    /// the new state getter returns None after cancellation.
     pub fn cancel_operator_proposal(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
@@ -987,6 +1054,7 @@ impl SLACalculatorContract {
             return Err(SLAError::NoPendingTransfer);
         }
         env.storage().instance().remove(&PENDING_OP_KEY);
+        env.storage().instance().remove(&PENDING_OP_STATE_KEY);
         env.events().publish((EVENT_OP_CAN, EVENT_VERSION, caller), ());
         Ok(())
     }
@@ -995,6 +1063,28 @@ impl SLACalculatorContract {
     pub fn get_pending_operator(env: Env) -> Result<Option<Address>, SLAError> {
         Self::check_version(&env)?;
         Ok(env.storage().instance().get(&PENDING_OP_KEY))
+    }
+
+    /// #97 – Returns the full pending operator proposal state, if any.
+    ///
+    /// Returns an [`OperatorProposalState`] containing the proposed address,
+    /// the ledger sequence at which the proposal was recorded, and the
+    /// address of the admin who proposed it. Returns `None` when there is
+    /// no pending proposal.
+    ///
+    /// This function mirrors [`get_pending_operator`] but exposes the
+    /// richer metadata an admin dashboard needs to render a useful row
+    /// without falling back to event-stream scraping. The two getters are
+    /// consistent: every state transition that clears the pending operator
+    /// (`accept_operator`, `cancel_operator_proposal`) clears both
+    /// `PENDING_OP_KEY` and `PENDING_OP_STATE_KEY; conversely,
+    /// `propose_operator` stamps both keys atomically from a single
+    /// auth-checked call.
+    ///
+    /// Like `get_pending_operator`, this is a pure read and requires no auth.
+    pub fn get_pending_operator_state(env: Env) -> Result<Option<OperatorProposalState>, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env.storage().instance().get(&PENDING_OP_STATE_KEY))
     }
 
     // -------------------------------------------------------------------
@@ -1114,8 +1204,17 @@ impl SLACalculatorContract {
         Self::require_admin(&env, &caller)?; // #28 – admin role enforced
         Self::require_not_frozen(&env)?;
 
-        // #70 – Validate configuration parameters
-        Self::validate_config(&severity, threshold_minutes, penalty_per_minute, reward_base)?;
+        // #70 – Validate configuration parameters.
+        // #92 – `env` is threaded through so `validate_config` can compare
+        // the proposed `critical`/`high` penalty pair against live storage
+        // and reject updates that invert the severity hierarchy.
+        Self::validate_config(
+            &env,
+            &severity,
+            threshold_minutes,
+            penalty_per_minute,
+            reward_base,
+        )?;
 
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
@@ -1336,7 +1435,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 18] = [
+        let entries: [(u32, &str, &str); 20] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1355,6 +1454,9 @@ impl SLACalculatorContract {
             (16, "ConfigFrozen", "Configuration is frozen"),
             (17, "InvalidInput", "Invalid input parameter"),
             (18, "SeverityNotInSet", "Custom severity not registered"),
+            // #92 – cross-parameter / cross-severity consistency
+            (19, "RewardMarginTooLow", "Reward margin below safe ratio"),
+            (20, "SeverityOrderInvalid", "Severity hierarchy violated"),
         ];
 
         for (code, label, description) in entries {
@@ -1834,6 +1936,14 @@ impl SLACalculatorContract {
     /// #93 – General bounds shared by canonical and custom severities.
     /// Extracted from validate_config so custom severities get the same
     /// baseline safety checks without the canonical-only per-severity branches.
+    ///
+    /// #92 – Adds the cross-parameter reward-margin check: rewards must
+    /// strictly exceed 1.5× the per-minute penalty
+    /// (`penalty * 1.5 < reward`). The integer form `penalty * 3 < reward * 2`
+    /// is equivalent without floating-point math. The bounds above
+    /// (`penalty ≤ 10000`, `reward ≤ 100000`) keep the products
+    /// comfortably within `i128`, so `checked_mul` is only a defence against
+    /// future bound changes rather than a current overflow risk.
     pub(crate) fn validate_general_bounds(
         threshold_minutes: u32,
         penalty_per_minute: i128,
@@ -1848,11 +1958,32 @@ impl SLACalculatorContract {
         if reward_base <= 0 || reward_base > 100000 {
             return Err(SLAError::InvalidReward);
         }
+
+        // #92 – Cross-parameter reward-margin safety check. The equality
+        // case (penalty * 3 == reward * 2) is intentionally rejected: the
+        // issue explicitly asks for *strict* `1.5×` separation, so a
+        // `1.0×` ratio and an exact `1.5×` ratio are both treated as
+        // insufficient to maintain the safety margin.
+        let lhs = penalty_per_minute
+            .checked_mul(3)
+            .ok_or(SLAError::InvalidReward)?;
+        let rhs = reward_base.checked_mul(2).ok_or(SLAError::InvalidReward)?;
+        if lhs >= rhs {
+            return Err(SLAError::RewardMarginTooLow);
+        }
+
         Ok(())
     }
 
     /// #70 – Validates configuration parameters to ensure safe and meaningful values.
+    /// #92 – Now takes `env: &Env` so it can compare the proposed
+    /// `critical`/`high` penalty pair against the live on-chain configs.
+    /// Reading the existing map makes the cross-severity check sensitive to
+    /// the *current* state, not just the proposed write — so an update that
+    /// would invert the `critical ≥ high` order is rejected even if the
+    /// proposed values pass per-field validation.
     pub(crate) fn validate_config(
+        env: &Env,
         severity: &Symbol,
         threshold_minutes: u32,
         penalty_per_minute: i128,
@@ -1910,6 +2041,39 @@ impl SLACalculatorContract {
             }
         } else {
             return Err(SLAError::InvalidSeverity);
+        }
+
+        // #92 – Cross-severity hierarchy check (critical ≥ high).
+        // Only inspect the canonical severity pair explicitly named in the
+        // issue. The proposed value is supplied directly for the severity
+        // being updated; the *other* canonical severity is read from live
+        // storage so the check reflects the on-chain state, not a stale
+        // snapshot. For medium/low updates both sides are read from storage
+        // because neither proposed value participates in the comparison.
+        let crit_sym = symbol_short!("critical");
+        let high_sym = symbol_short!("high");
+        let (critical_penalty, high_penalty) = if severity == &crit_sym {
+            (
+                penalty_per_minute,
+                Self::load_config(env, &high_sym)?.penalty_per_minute,
+            )
+        } else if severity == &high_sym {
+            (
+                Self::load_config(env, &crit_sym)?.penalty_per_minute,
+                penalty_per_minute,
+            )
+        } else {
+            let stored_critical = Self::load_config(env, &crit_sym)?;
+            let stored_high = Self::load_config(env, &high_sym)?;
+            (
+                stored_critical.penalty_per_minute,
+                stored_high.penalty_per_minute,
+            )
+        };
+        // Equality is allowed so admins can deliberately align `critical`
+        // with `high` for flat-tier policies; only an inversion is rejected.
+        if critical_penalty < high_penalty {
+            return Err(SLAError::SeverityOrderInvalid);
         }
 
         Ok(())

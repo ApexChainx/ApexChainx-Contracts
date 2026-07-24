@@ -15,7 +15,10 @@ pub fn set_config(
     crate::SLACalculatorContract::check_version(env)?;
     require_not_frozen(env)?;
 
+    // #92 – env is threaded through so validate_config can compare the
+    // proposed critical/high penalty against live storage.
     crate::SLACalculatorContract::validate_config(
+        env,
         &severity,
         threshold_minutes,
         penalty_per_minute,
