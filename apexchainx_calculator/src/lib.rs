@@ -438,6 +438,54 @@ pub struct SLAStats {
     pub total_penalties: i128, // sum of all penalty amounts (stored positive)
 }
 
+/// #96 – Per-severity economic exposure for a single SLA event.
+///
+/// `max_reward` is the top-tier reward (`reward_base * 200 / 100`) — the most
+/// a single perfectly-resolved event of this severity can pay out.
+///
+/// `penalty_per_minute` is the configured per-minute penalty rate — the
+/// marginal cost of each overtime minute for a single violated event.
+/// The total penalty for one event grows linearly: `overtime_minutes *
+/// penalty_per_minute`. There is no contract-level cap on overtime, so the
+/// dashboard must apply its own horizon when projecting worst-case exposure.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeverityExposure {
+    /// Severity level (critical, high, medium, low).
+    pub severity: Symbol,
+    /// Maximum reward for a single top-tier event of this severity.
+    pub max_reward: i128,
+    /// Per-overtime-minute penalty rate for a single violated event.
+    pub penalty_per_minute: i128,
+}
+
+/// #96 – Aggregate economic exposure view for backend dashboarding.
+///
+/// Summarises the maximum potential reward and the per-minute penalty rate
+/// across all configured severities. This is a pure view — it reads only
+/// the current severity configs and performs no state mutation.
+///
+/// `total_max_reward` is the sum of `max_reward` across all severities —
+/// the total that would be paid out if one top-tier event occurred per
+/// severity simultaneously.
+///
+/// `total_penalty_per_minute` is the sum of `penalty_per_minute` across all
+/// severities — the aggregate cost rate if every severity had one ongoing
+/// violation simultaneously.
+///
+/// `breakdown` contains one entry per canonical severity in canonical order
+/// (critical → high → medium → low).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EconomicExposure {
+    /// Sum of `max_reward` across all severities.
+    pub total_max_reward: i128,
+    /// Sum of `penalty_per_minute` across all severities.
+    pub total_penalty_per_minute: i128,
+    /// Per-severity breakdown in canonical order.
+    pub breakdown: Vec<SeverityExposure>,
+}
+
 /// #101 – Per-severity weekly violation-rate telemetry snapshot.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1416,6 +1464,57 @@ impl SLACalculatorContract {
             .instance()
             .get(&STATS_KEY)
             .ok_or(SLAError::NotInitialized)
+    }
+
+    // -------------------------------------------------------------------
+    // #96 – Economic exposure view for backend dashboarding
+    // -------------------------------------------------------------------
+
+    /// Returns the maximum potential reward and per-minute penalty rate for
+    /// every configured severity, plus aggregate totals.
+    ///
+    /// This is a read-only view — it does **not** require auth, does not
+    /// mutate state, and does not emit events. It can be called while the
+    /// contract is paused because it only reads configuration data.
+    ///
+    /// The top-tier reward multiplier (200 %) is applied to `reward_base` to
+    /// yield `max_reward` — matching the `compute_result` path for
+    /// `performance_ratio < 50`.
+    pub fn get_economic_exposure(env: Env) -> Result<EconomicExposure, SLAError> {
+        Self::check_version(&env)?;
+
+        let mut breakdown = Vec::new(&env);
+        let mut total_max_reward: i128 = 0;
+        let mut total_penalty_per_minute: i128 = 0;
+
+        for severity in Self::canonical_severities(&env) {
+            let cfg = Self::load_config(&env, &severity)?;
+
+            // Top-tier reward: performance_ratio < 50 → multiplier = 200 %
+            // Mirrors compute_result exactly: reward_base * 200 / 100
+            let max_reward = cfg
+                .reward_base
+                .checked_mul(200)
+                .map(|v| v.div_euclid(100))
+                .unwrap_or(i128::MAX);
+
+            let penalty_rate = cfg.penalty_per_minute;
+
+            total_max_reward = total_max_reward.saturating_add(max_reward);
+            total_penalty_per_minute = total_penalty_per_minute.saturating_add(penalty_rate);
+
+            breakdown.push_back(SeverityExposure {
+                severity,
+                max_reward,
+                penalty_per_minute: penalty_rate,
+            });
+        }
+
+        Ok(EconomicExposure {
+            total_max_reward,
+            total_penalty_per_minute,
+            breakdown,
+        })
     }
 
     /// Per-severity counters are packed as four `u32` lanes inside one `u128`,
