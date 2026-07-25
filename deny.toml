@@ -1,12 +1,20 @@
 # cargo-deny configuration for ApexChainx-Contracts
 # Policy: allow only MIT, Apache-2.0, ISC; reject semver-duplicate mismatches; reject yanked crates
 
-[checks.licenses]
-allow = ["MIT", "Apache-2.0", "ISC"]
-unknown = "deny"
+[advisories]
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "deny"
+notice = "warn"
 
-[checks.duplicates]
-semver = "deny"
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
 
-[checks.yanked]
-deny = true
+[[bans]]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+skip = []

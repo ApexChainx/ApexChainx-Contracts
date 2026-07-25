@@ -154,9 +154,7 @@ pub fn negotiate_contract_versions(
 
         // If protocol versions differ but both are within min_compatible range,
         // it's a negotiated (non-breaking) difference
-        if outcome == NegotiationOutcome::Compatible
-            && peer.protocol_version != our_info.protocol_version
-        {
+        if outcome == NegotiationOutcome::Compatible && peer.protocol_version != our_info.protocol_version {
             outcome = NegotiationOutcome::Negotiated;
         }
     }

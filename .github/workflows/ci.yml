@@ -62,7 +62,17 @@ jobs:
 
       - name: Format check
         working-directory: apexchainx_calculator
-        run: cargo fmt --check
+        run: |
+          cargo fmt -- --check --color=always 2>&1 | tee fmt_output.log
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo ""
+            echo "=== Formatting diff ==="
+            cargo fmt -- --check 2>&1 || true
+            git diff -- '*.rs' || true
+            echo ""
+            echo "Run 'cargo fmt' locally to fix."
+            exit 1
+          fi
 
       - name: Clippy
         working-directory: apexchainx_calculator

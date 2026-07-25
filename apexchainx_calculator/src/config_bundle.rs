@@ -55,6 +55,7 @@ mod tests {
 
     fn setup() -> (Env, SLACalculatorContractClient<'static>, Address) {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -178,9 +179,7 @@ mod tests {
 
         // Stamp a future schema version so check_version rejects the call.
         env.as_contract(&contract_id, || {
-            env.storage()
-                .instance()
-                .set(&crate::STORAGE_VERSION_KEY, &99u32);
+            env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &99u32);
         });
 
         // Must panic with VersionMismatch.

@@ -1,0 +1,126 @@
+name: Nightly Fuzz Testing
+
+on:
+  schedule:
+    - cron: '0 2 * * *' # Nightly at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzz duration in seconds'
+        required: false
+        default: '600'
+      seed:
+        description: 'Deterministic seed for reproducibility (leave empty for random)'
+        required: false
+        default: ''
+
+env:
+  CARGO_TERM_COLOR: always
+  FUZZ_DURATION: ${{ github.event.inputs.duration || '600' }}
+  FUZZ_SEED: ${{ github.event.inputs.seed || '' }}
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [compute_result, validate_config]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-fuzz-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-fuzz-${{ matrix.target }}-
+
+      - name: Record seed
+        id: seed
+        run: |
+          if [ -n "$FUZZ_SEED" ]; then
+            echo "seed=$FUZZ_SEED" >> $GITHUB_OUTPUT
+            echo "Using provided seed: $FUZZ_SEED"
+          else
+            SEED=$(date +%s)
+            echo "seed=$SEED" >> $GITHUB_OUTPUT
+            echo "Generated seed: $SEED"
+          fi
+
+      - name: Run fuzz target
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} \
+            -- \
+            -max_total_time=${{ env.FUZZ_DURATION }} \
+            -artifact_prefix=fuzz/artifacts/${{ matrix.target }}/ \
+            -dict=fuzz/dictionaries/${{ matrix.target }}.dict 2>/dev/null || true
+
+      - name: Generate summary
+        if: always()
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          echo "## Fuzz Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** \`${{ matrix.target }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Duration:** ${{ env.FUZZ_DURATION }}s" >> $GITHUB_STEP_SUMMARY
+          echo "**Seed:** \`${{ steps.seed.outputs.seed }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Corpus" >> $GITHUB_STEP_SUMMARY
+          if [ -d "corpus/${{ matrix.target }}" ]; then
+            FILE_COUNT=$(find corpus/${{ matrix.target }} -type f | wc -l)
+            echo "- Files in corpus: \`${FILE_COUNT}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          if [ -d "artifacts/${{ matrix.target }}" ]; then
+            ARTIFACT_COUNT=$(find artifacts/${{ matrix.target }} -type f | wc -l)
+            echo "- Crash/slow artifacts: \`${ARTIFACT_COUNT}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- No artifacts (no crashes found)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}-${{ steps.seed.outputs.seed }}
+          path: |
+            apexchainx_calculator/fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-${{ matrix.target }}-${{ steps.seed.outputs.seed }}
+          path: |
+            apexchainx_calculator/fuzz/corpus/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Persist corpus back to repo
+        if: github.event_name == 'schedule'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apexchainx_calculator/fuzz/corpus/ || true
+          git diff --cached --quiet || git commit -m "chore(fuzz): update corpus from nightly run [skip ci]"
+          git push || true

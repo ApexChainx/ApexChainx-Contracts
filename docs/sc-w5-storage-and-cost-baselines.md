@@ -129,35 +129,44 @@ call, then asserts the delta stays under the ceiling below.
 |----------|------------------------|-------|
 | `calculate_sla` | 200,000 | Existing baseline |
 | `set_config` | 150,000 | Existing baseline |
-| `pause` | 100,000 | Single flag + metadata write |
-| `unpause` | 100,000 | Single flag + metadata clear |
-| `freeze_config` | 100,000 | Single flag write |
-| `unfreeze_config` | 100,000 | Single flag write |
-| `propose_admin` | 120,000 | Two-step governance write |
-| `accept_admin` | 120,000 | Two-step governance write |
-| `cancel_admin_proposal` | 100,000 | Clears pending state |
-| `propose_operator` | 120,000 | Two-step governance write |
-| `accept_operator` | 120,000 | Two-step governance write |
-| `cancel_operator_proposal` | 100,000 | Clears pending state |
-| `renounce_admin` | 100,000 | Irreversible single write |
-| `set_operator` | 100,000 | Single-step role write |
-| `set_retention_limit` | 100,000 | Single config write |
-| `prune_history` | 250,000 | Scales with history size pruned |
-| `prune_history_by_age` | 250,000 | Scales with history size pruned |
+| `pause` | 160,000 | Single flag + metadata write |
+| `unpause` | 160,000 | Single flag + metadata clear |
+| `freeze_config` | 160,000 | Single flag write |
+| `unfreeze_config` | 160,000 | Single flag write |
+| `propose_admin` | 160,000 | Two-step governance write |
+| `accept_admin` | 160,000 | Two-step governance write |
+| `cancel_admin_proposal` | 160,000 | Clears pending state |
+| `propose_operator` | 160,000 | Two-step governance write |
+| `accept_operator` | 160,000 | Two-step governance write |
+| `cancel_operator_proposal` | 160,000 | Clears pending state |
+| `renounce_admin` | 160,000 | Irreversible single write |
+| `set_operator` | 160,000 | Single-step role write |
+| `set_retention_limit` | 160,000 | Single config write |
+| `prune_history` | 900,000 | Scales with history size pruned |
+| `prune_history_by_age` | 900,000 | Scales with history size pruned |
 | `migrate` | 100,000 | No-op path when already current |
 
 ### Ceiling Rationale
 
+> **Calibration note (2026-07):** The ceilings below were reset from their
+> original aspirational estimates to values derived from actual measurement.
+> The first estimates (100k for simple flips, 250k for pruning) were never
+> validated against a compiling build, and the real costs are dominated by the
+> per-call (de)serialisation of the whole instance-storage entry — which holds
+> the `config` severity→`SLAConfig` map — not by the individual write. Every
+> mutating entrypoint therefore pays a ~120k baseline. Measurements are taken
+> under `cargo llvm-cov` instrumentation (the coverage CI job), which is the
+> higher of the instrumented vs. plain figures, plus ~15–20% headroom.
+
 - **Simple state flips** (pause/unpause/freeze/unfreeze/renounce/set_operator/set_retention_limit)
-  touch one or two storage slots, so 100,000 instructions gives comfortable
-  headroom without masking a real regression.
+  measure 119k–134k, dominated by the instance-storage round-trip; 160,000
+  gives headroom without masking a real regression.
 - **Two-step governance functions** (propose/accept/cancel for admin and
-  operator) do slightly more work validating caller identity against pending
-  state, so they get a modestly higher ceiling (120,000).
-- **History-pruning functions** iterate over stored records, so their ceiling
-  (250,000) is sized for the test's fixture volume (~20 entries) rather than
-  a fixed small state write. If typical production history sizes grow
-  significantly, this ceiling should be revisited.
+  operator) measure 122k–125k and share the same 160,000 ceiling.
+- **History-pruning functions** iterate over stored records and additionally
+  rewrite history; they measure ~730k–775k at the test's fixture volume
+  (~20 entries), so the ceiling is 900,000. If typical production history
+  sizes grow significantly, this ceiling should be revisited.
 
 ### Updating Ceilings
 

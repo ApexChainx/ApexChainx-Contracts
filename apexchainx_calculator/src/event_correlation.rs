@@ -39,11 +39,7 @@ pub const CORRELATION_TOPIC: Symbol = symbol_short!("corr_id");
 /// Uses a simple FNV-1a hash of the ledger sequence to produce a unique
 /// trace identifier per ledger. The `_outage_id` parameter is reserved for
 /// future use (Symbol bytes are not directly accessible in SDK 21.x).
-pub fn generate_correlation_id(
-    _env: &Env,
-    _outage_id: &Symbol,
-    ledger_sequence: u32,
-) -> CorrelationId {
+pub fn generate_correlation_id(_env: &Env, _outage_id: &Symbol, ledger_sequence: u32) -> CorrelationId {
     // Deterministic hash: use ledger sequence with FNV-1a mixing for temporal uniqueness
     // (Outage_id bytes are not directly accessible in Soroban SDK 21.x without Symbol::to_string)
     let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
@@ -51,21 +47,24 @@ pub fn generate_correlation_id(
     hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
     hash
 }
-/// Generates a cross-contract event topic tuple that includes the
-/// correlation ID as the final topic element.
+/// Generates a cross-contract event topic tuple matching the standard
+/// 3-topic arity used by all contract events.
 ///
 /// Topic layout:
 ///   topic[0] = event name (e.g., "sla_calc")
 ///   topic[1] = event version ("v1")
 ///   topic[2] = event-specific context (e.g., severity)
-///   topic[3] = correlation_id (as a u64-compatible value)
+///
+/// The correlation_id is NOT included as a topic. It is carried in the
+/// event payload instead, consistent with how `set_int` carries
+/// `config_version_hash` and `recorded_at` in its payload.
 pub fn correlation_event_topics(
     event_name: Symbol,
     event_version: Symbol,
     context: Symbol,
-    correlation_id: CorrelationId,
-) -> (Symbol, Symbol, Symbol, u64) {
-    (event_name, event_version, context, correlation_id)
+    _correlation_id: CorrelationId,
+) -> (Symbol, Symbol, Symbol) {
+    (event_name, event_version, context)
 }
 
 #[cfg(test)]
@@ -123,7 +122,6 @@ mod tests {
         assert_eq!(topics.0, symbol_short!("sla_calc"));
         assert_eq!(topics.1, symbol_short!("v1"));
         assert_eq!(topics.2, symbol_short!("critical"));
-        assert_eq!(topics.3, 42u64);
     }
 
     #[test]
@@ -151,6 +149,8 @@ mod tests {
             symbol_short!("critical"),
             12345,
         );
-        assert_eq!(topics.3, 12345u64);
+        assert_eq!(topics.0, symbol_short!("set_int"));
+        assert_eq!(topics.1, symbol_short!("v1"));
+        assert_eq!(topics.2, symbol_short!("critical"));
     }
 }

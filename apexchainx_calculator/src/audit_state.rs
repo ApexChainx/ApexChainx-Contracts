@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address};
+use soroban_sdk::{contracttype, Address, Vec};
 
 use crate::{PauseInfo, SLAConfigSnapshot, SLAResultSchema, SLAStats};
 
@@ -11,7 +11,9 @@ pub struct AuditState {
     pub pending_admin: Option<Address>,
     pub pending_operator: Option<Address>,
     pub paused: bool,
-    pub pause_info: Option<PauseInfo>,
+    /// Empty when unpaused, single-element when paused. A `Vec` stands in for
+    /// `Option` because `#[contracttype]` cannot convert `Option<PauseInfo>`.
+    pub pause_info: Vec<PauseInfo>,
     pub config_snapshot: SLAConfigSnapshot,
     pub stats: SLAStats,
     pub history_len: u32,
@@ -42,7 +44,7 @@ mod tests {
         assert_eq!(state.admin, admin);
         assert_eq!(state.operator, operator);
         assert!(!state.paused);
-        assert!(state.pause_info.is_none());
+        assert!(state.pause_info.is_empty());
         assert_eq!(state.history_len, 0);
     }
 
@@ -53,7 +55,7 @@ mod tests {
         assert_eq!(state.admin, client.get_admin());
         assert_eq!(state.operator, client.get_operator());
         assert_eq!(state.paused, client.is_paused());
-        assert_eq!(state.pause_info, client.get_pause_info());
+        assert_eq!(state.pause_info.first(), client.get_pause_info());
         assert_eq!(state.config_snapshot, client.get_config_snapshot());
         assert_eq!(state.stats, client.get_stats());
         assert_eq!(state.result_schema, client.get_result_schema());
