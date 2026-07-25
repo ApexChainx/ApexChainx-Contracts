@@ -110,6 +110,10 @@ pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
 /// When set, overrides MAX_HISTORY_SIZE for history trimming.
 pub(crate) const RETENTION_LIMIT_KEY: Symbol = symbol_short!("RETLIM");
 
+/// Stored prune policy for scheduled retention rules. The cron expression is
+/// informational and cadence is driven externally by the operator's scheduler.
+const PRUNE_POLICY_KEY: Symbol = symbol_short!("PRPOL");
+
 /// On-chain key storing the ledger sequence of the last config update. Re-exported
 /// here so the storage-key namespace regression test catches any future collisions.
 pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
@@ -713,6 +717,17 @@ impl SLACalculatorContract {
 
         if !inst.has(&HISTORY_KEY) {
             inst.set(&HISTORY_KEY, &Vec::<SLAResult>::new(env));
+        }
+
+        if !inst.has(&PRUNE_POLICY_KEY) {
+            inst.set(
+                &PRUNE_POLICY_KEY,
+                &PrunePolicy {
+                    keep_latest: MAX_HISTORY_SIZE,
+                    max_age_seconds: u64::MAX,
+                    cron_expr: String::from_str(env, ""),
+                },
+            );
         }
 
         if !inst.has(&CONFIG_KEY) {
@@ -2487,6 +2502,46 @@ impl SLACalculatorContract {
             .instance()
             .get(&RETENTION_LIMIT_KEY)
             .unwrap_or(MAX_HISTORY_SIZE))
+    }
+
+    /// Admin-only write path for a stored prune policy. The policy is
+    /// informational for cron scheduling, while the actual cadence remains
+    /// external to the contract execution path.
+    pub fn set_prune_policy(env: Env, caller: Address, policy: PrunePolicy) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+        env.storage().instance().set(&PRUNE_POLICY_KEY, &policy);
+        Ok(())
+    }
+
+    /// Returns the stored prune policy. If no policy has been explicitly set,
+    /// the contract falls back to the default retention profile.
+    pub fn get_prune_policy(env: Env) -> Result<PrunePolicy, SLAError> {
+        Self::check_version(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get(&PRUNE_POLICY_KEY)
+            .unwrap_or(PrunePolicy {
+                keep_latest: MAX_HISTORY_SIZE,
+                max_age_seconds: u64::MAX,
+                cron_expr: String::from_str(&env, ""),
+            }))
+    }
+
+    /// Admin-only application of the stored policy to the history store.
+    /// The current implementation applies the age filter first and then the
+    /// latest-count retention rule on the resulting history.
+    pub fn apply_prune_policy(env: Env, caller: Address) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+
+        let policy = Self::get_prune_policy(env.clone())?;
+        if policy.max_age_seconds != u64::MAX {
+            Self::prune_history_by_age(env.clone(), caller.clone(), policy.max_age_seconds)?;
+        }
+        Self::prune_history(env, caller, policy.keep_latest)?;
+        Ok(())
     }
 
     /// SC-021 – Migration state read helper
