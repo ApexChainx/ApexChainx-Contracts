@@ -2539,6 +2539,72 @@ fn test_prune_by_age_operator_cannot_prune() {
 }
 
 #[test]
+fn test_set_and_get_prune_policy_round_trips() {
+    let env = Env::default();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let policy = PrunePolicy {
+        keep_latest: 7,
+        max_age_seconds: 3600,
+        cron_expr: String::from_str(&env, "0 2 * * 0"),
+    };
+
+    client.set_prune_policy(&admin, &policy);
+    let stored = client.get_prune_policy();
+
+    assert_eq!(stored.keep_latest, 7);
+    assert_eq!(stored.max_age_seconds, 3600);
+    assert_eq!(stored.cron_expr, String::from_str(&env, "0 2 * * 0"));
+}
+
+#[test]
+#[should_panic]
+fn test_prune_policy_operator_cannot_set() {
+    let (_env, client, actors) = setup();
+    let policy = PrunePolicy {
+        keep_latest: 7,
+        max_age_seconds: 3600,
+        cron_expr: String::from_str(&_env, "0 2 * * 0"),
+    };
+    client.set_prune_policy(&actors.operator, &policy);
+}
+
+#[test]
+fn test_apply_prune_policy_prunes_by_count_and_age() {
+    let env = Env::default();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    client.calculate_sla(&op, &symbol_short!("A"), &symbol_short!("critical"), &5);
+    client.calculate_sla(&op, &symbol_short!("B"), &symbol_short!("high"), &10);
+
+    env.ledger().set_timestamp(2000);
+    client.calculate_sla(&op, &symbol_short!("C"), &symbol_short!("low"), &10);
+
+    let policy = PrunePolicy {
+        keep_latest: 2,
+        max_age_seconds: 500,
+        cron_expr: String::from_str(&env, "0 2 * * 0"),
+    };
+    client.set_prune_policy(&admin, &policy);
+
+    client.apply_prune_policy(&admin);
+
+    let history = client.get_history();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history.get(0).unwrap().outage_id, symbol_short!("C"));
+}
+
+#[test]
 fn test_prune_by_age_emits_event() {
     let env = Env::default();
     env.ledger().set_timestamp(1000);
