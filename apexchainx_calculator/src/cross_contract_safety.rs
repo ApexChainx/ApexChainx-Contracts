@@ -114,8 +114,7 @@ pub fn safe_invoke_contract(
 
 /// Determines whether the given status requires rolling back prior calls.
 pub fn requires_rollback(status: CrossContractCallStatus) -> bool {
-    status == CrossContractCallStatus::FatalError
-        || status == CrossContractCallStatus::DispatchFailed
+    status == CrossContractCallStatus::FatalError || status == CrossContractCallStatus::DispatchFailed
 }
 
 /// Tracks a stack of cross-contract calls with registered compensation
@@ -166,9 +165,7 @@ impl CrossContractSafety {
                 ));
                 Ok(result)
             }
-            CrossContractCallStatus::FatalError | CrossContractCallStatus::DispatchFailed => {
-                Err(result)
-            }
+            CrossContractCallStatus::FatalError | CrossContractCallStatus::DispatchFailed => Err(result),
             CrossContractCallStatus::Compensated => {
                 // A compensated call should not happen at this stage
                 Err(result)
@@ -196,8 +193,7 @@ impl CrossContractSafety {
             // Invoke the compensation function on the original target contract.
             // We ignore the result because there is no further recovery possible
             // during rollback.
-            let _ =
-                env.try_invoke_contract::<Val, Val>(&contract_id, &action.tag, action.args.clone());
+            let _ = env.try_invoke_contract::<Val, Val>(&contract_id, &action.tag, action.args.clone());
         }
     }
 
@@ -244,9 +240,7 @@ mod tests {
         assert!(requires_rollback(CrossContractCallStatus::FatalError));
         assert!(requires_rollback(CrossContractCallStatus::DispatchFailed));
         assert!(!requires_rollback(CrossContractCallStatus::Success));
-        assert!(!requires_rollback(
-            CrossContractCallStatus::RecoverableError
-        ));
+        assert!(!requires_rollback(CrossContractCallStatus::RecoverableError));
     }
 
     #[test]
@@ -291,10 +285,7 @@ mod tests {
             Vec::new(&env),
         );
         assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().status,
-            CrossContractCallStatus::FatalError
-        );
+        assert_eq!(result.unwrap_err().status, CrossContractCallStatus::FatalError);
     }
 
     #[test]

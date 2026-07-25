@@ -3,7 +3,12 @@
 type Severity = "critical" | "high" | "medium" | "low";
 type Rating = "top" | "excellent" | "good" | "violated";
 
-const RATING_RANK: Record<Rating, number> = { top: 3, excellent: 2, good: 1, violated: 0 };
+const RATING_RANK: Record<Rating, number> = {
+  top: 3,
+  excellent: 2,
+  good: 1,
+  violated: 0,
+};
 
 interface SlaResult {
   rating: Rating;
@@ -12,7 +17,12 @@ interface SlaResult {
 
 // Simulated deterministic SLA function (mirrors contract logic shape)
 function calcSla(severity: Severity, mttr: number): SlaResult {
-  const thresholds: Record<Severity, number> = { critical: 60, high: 120, medium: 240, low: 480 };
+  const thresholds: Record<Severity, number> = {
+    critical: 60,
+    high: 120,
+    medium: 240,
+    low: 480,
+  };
   const t = thresholds[severity];
   if (mttr <= t * 0.5) return { rating: "top", payout: 100 };
   if (mttr <= t * 0.75) return { rating: "excellent", payout: 80 };
@@ -26,7 +36,9 @@ function assertMonotonic(severity: Severity, mttrValues: number[]): boolean {
     const prev = results[i - 1];
     const curr = results[i];
     if (RATING_RANK[curr.rating] > RATING_RANK[prev.rating]) {
-      console.error(`[SC-004] FAIL: ${severity} mttr=${mttrValues[i]} improved over mttr=${mttrValues[i - 1]}`);
+      console.error(
+        `[SC-004] FAIL: ${severity} mttr=${mttrValues[i]} improved over mttr=${mttrValues[i - 1]}`,
+      );
       return false;
     }
     if (curr.payout > prev.payout) {
@@ -47,7 +59,9 @@ function runMonotonicityTests(): void {
     console.log(`[SC-004] ${sev}: ${ok ? "PASS" : "FAIL"}`);
     if (ok) passed++;
   }
-  console.log(`[SC-004] ${passed}/${severities.length} monotonicity checks passed`);
+  console.log(
+    `[SC-004] ${passed}/${severities.length} monotonicity checks passed`,
+  );
 }
 
 runMonotonicityTests();

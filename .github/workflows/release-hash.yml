@@ -63,6 +63,18 @@ jobs:
           sha256sum -c manifest.sha256
           rm apexchainx_calculator.wasm
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate ROADMAP.md
+        run: |
+          echo "📄 Generating docs/ROADMAP.md from tools/gen-roadmap.ts..."
+          npx --yes ts-node tools/gen-roadmap.ts
+          echo "✅ ROADMAP.md generated:"
+          cat docs/ROADMAP.md
+
       - name: Upload manifest as workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -70,6 +82,7 @@ jobs:
           path: |
             manifest.sha256
             apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+            docs/ROADMAP.md
           retention-days: 90
 
       - name: Attach manifest to GitHub Release
@@ -78,3 +91,4 @@ jobs:
           files: |
             manifest.sha256
             apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+            docs/ROADMAP.md

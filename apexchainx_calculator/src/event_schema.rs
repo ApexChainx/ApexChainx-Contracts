@@ -102,12 +102,68 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## stats_sat (`stats_sat`)
+//! Emitted when a running-stats counter saturates during increment_stats
+//! (e.g. total_calculations reaching u64::MAX, or an i128 total capping).
+//! Signals backend indexers that the on-chain total has capped and now
+//! under-reports true economic exposure. The counter is still capped at its
+//! bound on-chain; this event carries the pre-cap state so consumers can
+//! reconcile. (SC-W5-047)
+//! - topic[2]: counter_name Symbol (which counter saturated: `totcalc`,
+//!   `totviol`, `totrew`, `totpen`)
+//! - payload:  (field: Symbol, previous_value: i128, attempted_increment: i128)
+//!
+//! ## migrate_done (`migrate_done`)
+//! Emitted when a storage migration completes successfully.
+//! - topic[2]: caller Address
+//! - payload:  (old_version: u32, new_version: u32)
+//!
 //! # Schema Versioning
 //!
 //! Breaking changes (field removal, type changes, reordering) MUST increment
 //! the version symbol from "v1" to "v2". Additive changes (new fields at the
 //! end) are NOT considered breaking and do not require a version bump as long
 //! as old consumers ignore unrecognised trailing fields.
+//!
+//! # Symbol Deprecation Protocol
+//!
+//! When a Result or Severity symbol needs to change, follow this deprecation
+//! lifecycle to avoid breaking backend consumers:
+//!
+//! 1. **Introduction (minor release)**: Add the new symbol alongside the old one.
+//!    Both symbols are emitted in events. `get_result_schema()` returns both
+//!    with a `deprecated_symbols` entry marking the old symbol as deprecated.
+//!
+//! 2. **Coexistence (at least one minor release)**: The old symbol continues to
+//!    be emitted alongside the new one. Backends can migrate at their own pace.
+//!    The `deprecated_symbols` entry includes `removed_at` = None (TBD).
+//!
+//! 3. **Removal (major release)**: The old symbol is removed from event emission.
+//!    The `schema_version` in `get_result_schema()` is bumped. The deprecated
+//!    entry remains in `deprecated_symbols` with `removed_at` set to the schema
+//!    version at which removal occurred.
+//!
+//! ## Example
+//!
+//! If we replace `"viol"` with `"violated"` as the human-readable status:
+//!
+//! - **v1**: `"viol"` is the only status symbol for violated SLAs.
+//! - **v2**: `"violated"` is introduced. Events emit both `"viol"` and
+//!   `"violated"`. `get_result_schema()` returns:
+//!   ```json
+//!   {
+//!     "status_met": "met",
+//!     "status_violated": "violated",
+//!     "deprecated_symbols": [
+//!       { "old_symbol": "viol", "new_symbol": "violated", "deprecated_at": 2, "removed_at": null }
+//!     ]
+//!   }
+//!   ```
+//! - **v3**: `"viol"` is removed. Events emit only `"violated"`.
+//!   `deprecated_symbols` is updated with `removed_at: 3`.
+//!
+//! Backends MUST check `deprecated_symbols` at startup and log warnings for
+//! any deprecated symbols they still rely on.
 
 #![allow(dead_code)]
 
@@ -134,6 +190,9 @@ pub const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 pub const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
 pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
+/// Emitted when a running-stats counter saturates. (SC-W5-047)
+pub const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
+pub const EVENT_MIGRATE_DONE: &str = "migrate_done";
 
 /// Returns the canonical event version string for consumer documentation.
 pub fn current_event_version() -> Symbol {
@@ -170,6 +229,7 @@ mod tests {
             EVENT_OP_CAN,
             EVENT_CONFIG_FREEZE,
             EVENT_CONFIG_UNFREEZE,
+            EVENT_STATS_SAT,
         ];
 
         for i in 0..names.len() {

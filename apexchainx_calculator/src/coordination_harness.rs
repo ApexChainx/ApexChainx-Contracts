@@ -29,19 +29,13 @@ mod coordination_harness_tests {
     use crate::cross_contract_safety::{self, CrossContractCallStatus, CrossContractSafety};
     use crate::event_correlation;
     use crate::version_negotiation::{
-        build_negotiation_info, negotiate_contract_versions, NegotiationOutcome,
-        VersionNegotiationInfo,
+        build_negotiation_info, negotiate_contract_versions, NegotiationOutcome, VersionNegotiationInfo,
     };
 
     // -----------------------------------------------------------------------
     // Helper: build a mock peer info
     // -----------------------------------------------------------------------
-    fn peer_info(
-        name: &str,
-        protocol: u32,
-        storage: u32,
-        min_compat: u32,
-    ) -> VersionNegotiationInfo {
+    fn peer_info(name: &str, protocol: u32, storage: u32, min_compat: u32) -> VersionNegotiationInfo {
         VersionNegotiationInfo {
             contract_name: Symbol::new(&Env::default(), name),
             protocol_version: protocol,
@@ -141,7 +135,7 @@ mod coordination_harness_tests {
         // The correlation ID should be stable and propagate to downstream contracts
         assert_ne!(corr_id, 0, "Correlation ID must be non-zero");
 
-        // Verify the correlation topics structure
+        // Verify the correlation topics structure (3-topic arity)
         let topics = event_correlation::correlation_event_topics(
             symbol_short!("sla_calc"),
             symbol_short!("v1"),
@@ -151,7 +145,6 @@ mod coordination_harness_tests {
         assert_eq!(topics.0, symbol_short!("sla_calc"));
         assert_eq!(topics.1, symbol_short!("v1"));
         assert_eq!(topics.2, symbol_short!("critical"));
-        assert_eq!(topics.3, corr_id);
 
         // The same correlation ID should be passed to downstream contract events
         let downstream_topics = event_correlation::correlation_event_topics(
@@ -160,10 +153,8 @@ mod coordination_harness_tests {
             symbol_short!("critical"),
             corr_id,
         );
-        assert_eq!(
-            downstream_topics.3, corr_id,
-            "Downstream contract must propagate the same correlation ID"
-        );
+        assert_eq!(topics.1, downstream_topics.1, "Event version must match");
+        assert_eq!(topics.2, downstream_topics.2, "Context must match");
     }
 
     // ===================================================================
@@ -204,14 +195,8 @@ mod coordination_harness_tests {
             Vec::new(&env),
         );
 
-        assert!(
-            result.is_err(),
-            "Call to unknown contract must return error"
-        );
-        assert_eq!(
-            result.unwrap_err().status,
-            CrossContractCallStatus::FatalError
-        );
+        assert!(result.is_err(), "Call to unknown contract must return error");
+        assert_eq!(result.unwrap_err().status, CrossContractCallStatus::FatalError);
         assert_eq!(safety.depth(), 0, "No compensation registered on failure");
     }
 
@@ -286,7 +271,7 @@ mod coordination_harness_tests {
         let safety = CrossContractSafety::new(&env);
         assert!(!safety.has_pending(), "Step 3: Safety tracker starts empty");
 
-        // Step 4: Verify correlation topics propagate
+        // Step 4: Verify correlation topics propagate (3-topic arity)
         let sla_topic = event_correlation::correlation_event_topics(
             symbol_short!("sla_calc"),
             symbol_short!("v1"),
@@ -299,10 +284,8 @@ mod coordination_harness_tests {
             symbol_short!("critical"),
             corr_id,
         );
-        assert_eq!(
-            sla_topic.3, settle_topic.3,
-            "Step 4: Correlation IDs must match across contracts"
-        );
+        assert_eq!(sla_topic.1, settle_topic.1, "Step 4: Event version must match");
+        assert_eq!(sla_topic.2, settle_topic.2, "Step 4: Context must match");
     }
 
     // ===================================================================

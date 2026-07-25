@@ -45,7 +45,9 @@ function renderPlan(blocks: Map<string, TestBlock>): void {
 function main(): void {
   const src = process.argv[2] ?? "";
   if (!src) {
-    console.error("Usage: ts-node sc002-split-tests.ts <tests.rs content string>");
+    console.error(
+      "Usage: ts-node sc002-split-tests.ts <tests.rs content string>",
+    );
     process.exit(1);
   }
   const blocks = splitTestBlocks(src);

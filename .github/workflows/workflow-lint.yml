@@ -1,0 +1,48 @@
+# =============================================================================
+# ApexChainx Contracts — Workflow Secret Lint (issue #122)
+# =============================================================================
+#
+# Static check that no workflow writes secret material into the build log.
+# GitHub Actions masks known secret values, but masking is best-effort: it
+# breaks on transformed values (base64, substrings, JSON-encoded) and does
+# nothing about a full environment dump. The cheapest defence is to never print
+# the secret at all — this lints the workflow YAML for the patterns that do and
+# fails CI on a hit.
+#
+# Kept as its own workflow (rather than a step in ci.yml) so it needs no Rust
+# toolchain, runs in seconds, and reports independently of the contract build.
+#
+# Run locally:  npx --yes tsx tools/secret-leak-check.ts
+# =============================================================================
+
+name: Workflow Secret Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: workflow-secret-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  secret-leak-check:
+    name: Secret Leak Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Check workflows never echo secrets
+        run: npx --yes tsx tools/secret-leak-check.ts

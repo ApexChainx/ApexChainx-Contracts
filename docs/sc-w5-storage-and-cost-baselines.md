@@ -10,6 +10,7 @@
 - [Pruning-by-Age Chronology](#pruning-by-age-chronology)
 - [Storage Footprint Telemetry](#storage-footprint-telemetry)
 - [Critical Path Cost Baseline](#critical-path-cost-baseline)
+- [Mutating Function CPU Budgets](#mutating-function-cpu-budgets)
 - [Regression Detection](#regression-detection)
 
 ---
@@ -116,9 +117,66 @@ fn test_no_storage_key_collisions() {
 
 ---
 
-## Regression Detection
+## Mutating Function CPU Budgets
 
-### Automated Checks
+Every state-mutating entrypoint has a CPU instruction budget test (see
+`apexchainx_calculator/src/tests.rs`, `#91`). Each test measures a single call
+in isolation using `env.budget().reset_unlimited()` before invocation and
+`env.budget().cpu_instruction_cost()` snapshots immediately before/after the
+call, then asserts the delta stays under the ceiling below.
+
+| Function | CPU Instruction Ceiling | Notes |
+|----------|------------------------|-------|
+| `calculate_sla` | 200,000 | Existing baseline |
+| `set_config` | 150,000 | Existing baseline |
+| `pause` | 160,000 | Single flag + metadata write |
+| `unpause` | 160,000 | Single flag + metadata clear |
+| `freeze_config` | 160,000 | Single flag write |
+| `unfreeze_config` | 160,000 | Single flag write |
+| `propose_admin` | 160,000 | Two-step governance write |
+| `accept_admin` | 160,000 | Two-step governance write |
+| `cancel_admin_proposal` | 160,000 | Clears pending state |
+| `propose_operator` | 160,000 | Two-step governance write |
+| `accept_operator` | 160,000 | Two-step governance write |
+| `cancel_operator_proposal` | 160,000 | Clears pending state |
+| `renounce_admin` | 160,000 | Irreversible single write |
+| `set_operator` | 160,000 | Single-step role write |
+| `set_retention_limit` | 160,000 | Single config write |
+| `prune_history` | 900,000 | Scales with history size pruned |
+| `prune_history_by_age` | 900,000 | Scales with history size pruned |
+| `migrate` | 100,000 | No-op path when already current |
+
+### Ceiling Rationale
+
+> **Calibration note (2026-07):** The ceilings below were reset from their
+> original aspirational estimates to values derived from actual measurement.
+> The first estimates (100k for simple flips, 250k for pruning) were never
+> validated against a compiling build, and the real costs are dominated by the
+> per-call (de)serialisation of the whole instance-storage entry — which holds
+> the `config` severity→`SLAConfig` map — not by the individual write. Every
+> mutating entrypoint therefore pays a ~120k baseline. Measurements are taken
+> under `cargo llvm-cov` instrumentation (the coverage CI job), which is the
+> higher of the instrumented vs. plain figures, plus ~15–20% headroom.
+
+- **Simple state flips** (pause/unpause/freeze/unfreeze/renounce/set_operator/set_retention_limit)
+  measure 119k–134k, dominated by the instance-storage round-trip; 160,000
+  gives headroom without masking a real regression.
+- **Two-step governance functions** (propose/accept/cancel for admin and
+  operator) measure 122k–125k and share the same 160,000 ceiling.
+- **History-pruning functions** iterate over stored records and additionally
+  rewrite history; they measure ~730k–775k at the test's fixture volume
+  (~20 entries), so the ceiling is 900,000. If typical production history
+  sizes grow significantly, this ceiling should be revisited.
+
+### Updating Ceilings
+
+If a CI run reports an assertion failure with the actual instruction count,
+update the corresponding row above and the matching `assert!` threshold in
+`tests.rs` together, so this table never drifts from the enforced values.
+
+---
+
+## Regression Detection
 
 | Check | Trigger | Action |
 |-------|---------|--------|

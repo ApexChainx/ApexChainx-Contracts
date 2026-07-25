@@ -1,8 +1,8 @@
 #![cfg(test)]
 
-use crate::{SLACalculatorContract, SLAConfig};
-use soroban_sdk::{symbol_short, Env, Symbol};
+use crate::{SLACalculatorContract, SLAConfig, SLAError};
 use proptest::prelude::*;
+use soroban_sdk::{symbol_short, Env, Symbol};
 
 // Helper to check if a config is valid for a given severity.
 fn is_config_valid(
@@ -11,13 +11,8 @@ fn is_config_valid(
     penalty_per_minute: i128,
     reward_base: i128,
 ) -> bool {
-    SLACalculatorContract::validate_config(
-        severity,
-        threshold_minutes,
-        penalty_per_minute,
-        reward_base,
-    )
-    .is_ok()
+    SLACalculatorContract::validate_config(severity, threshold_minutes, penalty_per_minute, reward_base)
+        .is_ok()
 }
 
 proptest! {
@@ -159,6 +154,46 @@ proptest! {
                     r1.amount >= r2.amount,
                     "Monotonicity violated: amount for mttr1={} is {}, but for mttr2={} is {} (cfg threshold={}, penalty={}, reward={})",
                     mttr1, r1.amount, mttr2, r2.amount, threshold_minutes, penalty_per_minute, reward_base
+                );
+            }
+        }
+    }
+
+    /// SC-W5-047: an overflowing penalty (mttr near u32::MAX combined with a
+    /// huge penalty_per_minute) must NEVER silently collapse to amount == 0.
+    /// It must instead surface via a deterministic error code
+    /// (InvalidPenaltyAmount / InvalidRewardAmount).
+    #[test]
+    fn test_fuzz_compute_result_never_silent_zero(
+        mttr in (u32::MAX - 1_000_000)..=u32::MAX,
+        threshold_minutes in 0..1000u32,
+        penalty_per_minute in (i128::MAX / 2)..=i128::MAX,
+        reward_base in (i128::MAX / 2)..=i128::MAX,
+    ) {
+        let _env = Env::default();
+        let cfg = SLAConfig {
+            threshold_minutes,
+            penalty_per_minute,
+            reward_base,
+        };
+
+        match SLACalculatorContract::compute_result(symbol_short!("outage"), mttr, &cfg, 0, 0) {
+            Ok(res) => {
+                // No silent saturation: a successful result must carry a non-zero amount.
+                prop_assert!(
+                    res.amount != 0,
+                    "compute_result silently produced amount == 0 (mttr={}, threshold={}, penalty={}, reward={})",
+                    mttr, threshold_minutes, penalty_per_minute, reward_base
+                );
+            }
+            Err(e) => {
+                // Overflow must be exposed via a deterministic error code.
+                let code = e as u32;
+                prop_assert!(
+                    code == SLAError::InvalidPenaltyAmount as u32
+                        || code == SLAError::InvalidRewardAmount as u32,
+                    "unexpected error code {} for overflowing inputs (mttr={}, threshold={}, penalty={}, reward={})",
+                    code, mttr, threshold_minutes, penalty_per_minute, reward_base
                 );
             }
         }

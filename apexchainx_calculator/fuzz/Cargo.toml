@@ -1,0 +1,32 @@
+[package]
+name = "apexchainx-fuzz"
+version = "0.0.0"
+authors = ["Automated"]
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+soroban-sdk = "21.7.7"
+
+[dependencies.apexchainx-calculator]
+path = ".."
+
+[[bin]]
+name = "compute_result"
+path = "fuzz_targets/compute_result.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "validate_config"
+path = "fuzz_targets/validate_config.rs"
+test = false
+doc = false
+
+[profile.release]
+debug = true
+lto = false

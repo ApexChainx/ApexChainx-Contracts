@@ -1,0 +1,193 @@
+# =============================================================================
+# ApexChainx Contracts — Testnet Deploy & Smoke Test
+# =============================================================================
+#
+# Manual workflow that deploys the Soroban contract to the public Stellar
+# testnet, runs a five-step smoke test sequence, and archives the results.
+#
+# How to run:
+#   1. Navigate to the Actions tab of the repository.
+#   2. Select "Testnet Deploy & Smoke" from the workflow list.
+#   3. Click "Run workflow" → "Run workflow".
+#   4. Wait ~5–8 minutes for the job to complete.
+#   5. Download the `smoke-test-results` artifact from the run summary.
+#
+# No repository secrets are required.  An ephemeral testnet keypair is
+# generated and funded inside the job and discarded when the job finishes.
+
+name: Testnet Deploy & Smoke
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: testnet-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  deploy-smoke:
+    name: Deploy + Smoke Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/target
+          key: testnet-deploy-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            testnet-deploy-${{ runner.os }}-cargo-
+
+      - name: Install stellar-cli
+        run: |
+          cargo install stellar-cli --version 21.2.0 --locked
+
+      - name: Generate ephemeral testnet identity
+        run: |
+          set -euo pipefail
+          stellar keys generate ephemeral-smoke --network testnet --fund
+          ADDRESS="$(stellar keys address ephemeral-smoke)"
+          echo "ADDRESS=$ADDRESS" >> "$GITHUB_ENV"
+          echo "Ephemeral address: $ADDRESS"
+
+      - name: Build WASM release
+        working-directory: apexchainx_calculator
+        run: |
+          set -euo pipefail
+          cargo build --target wasm32-unknown-unknown --release
+
+      - name: Deploy contract to testnet
+        id: deploy
+        run: |
+          set -euo pipefail
+          mkdir -p smoke-test-results
+          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          echo "Deploying WASM: $WASM"
+          CONTRACT_ID="$(stellar contract deploy \
+            --wasm "$WASM" \
+            --network testnet \
+            --source ephemeral-smoke \
+            -- \
+          )"
+          echo "CONTRACT_ID=$CONTRACT_ID" >> "$GITHUB_ENV"
+          echo "contract_id=$CONTRACT_ID" >> "$GITHUB_OUTPUT"
+          echo "Contract deployed: $CONTRACT_ID" | tee smoke-test-results/00-deploy.txt
+
+      - name: a. initialize
+        run: |
+          set -euo pipefail
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source ephemeral-smoke \
+            -- \
+            initialize \
+            --admin "$ADDRESS" \
+            --operator "$ADDRESS" \
+            2>&1 \
+            | tee smoke-test-results/01-initialize.txt
+
+      - name: b. set_config
+        run: |
+          set -euo pipefail
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source ephemeral-smoke \
+            -- \
+            set_config \
+            --caller "$ADDRESS" \
+            --severity 'high' \
+            --threshold_minutes 60 \
+            --penalty_per_minute 50 \
+            --reward_base 750 \
+            2>&1 \
+            | tee smoke-test-results/02-set_config.txt
+
+      - name: c. calculate_sla
+        run: |
+          set -euo pipefail
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source ephemeral-smoke \
+            -- \
+            calculate_sla \
+            --caller "$ADDRESS" \
+            --outage_id 'smoke-001' \
+            --severity 'high' \
+            --mttr_minutes 5 \
+            2>&1 \
+            | tee smoke-test-results/03-calculate_sla.txt
+
+      - name: d. get_stats
+        run: |
+          set -euo pipefail
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source ephemeral-smoke \
+            -- \
+            get_stats \
+            2>&1 \
+            | tee smoke-test-results/04-get_stats.txt
+
+      - name: e. prune_history
+        run: |
+          set -euo pipefail
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --network testnet \
+            --source ephemeral-smoke \
+            -- \
+            prune_history \
+            --caller "$ADDRESS" \
+            --keep_latest 1 \
+            2>&1 \
+            | tee smoke-test-results/05-prune_history.txt
+
+      - name: Write summary
+        run: |
+          set -euo pipefail
+          {
+            echo "# Testnet Deploy & Smoke Test Summary"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            echo "| Network | testnet |"
+            echo "| Contract ID | \`$CONTRACT_ID\` |"
+            echo "| Admin / Operator | \`$ADDRESS\` |"
+            echo "| Deploy at | $(date -u +'%Y-%m-%dT%H:%M:%SZ') |"
+            echo ""
+            echo "## Step Results"
+            echo ""
+            for f in smoke-test-results/*.txt; do
+              echo "### $(basename "$f")"
+              echo '```'
+              cat "$f"
+              echo '```'
+            done
+          } | tee smoke-test-results/summary.txt | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload smoke-test-results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-results
+          path: smoke-test-results/
+          retention-days: 7
