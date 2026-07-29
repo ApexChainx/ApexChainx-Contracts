@@ -653,6 +653,11 @@ pub struct VersionInfo {
 // -----------------------------------------------------------------------
 // Contract implementation
 // -----------------------------------------------------------------------
+//
+// CONTRIBUTOR NOTICE:
+// Any new public methods or modifications to existing ones must be reviewed
+// against the SC-100 Public Method Review Checklist in CONTRIBUTING.md.
+// This ensures event schema, versioning, and migration rules are upheld.
 #[contractimpl]
 impl SLACalculatorContract {
     // -------------------------------------------------------------------

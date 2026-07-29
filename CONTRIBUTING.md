@@ -617,4 +617,30 @@ just corrupted indexed data and broken settlement reconciliation.
 
 ---
 
+## SC-100: Public Method Review Checklist
+
+Use this checklist when reviewing PRs that add or modify public `#[contractimpl]` methods in `apexchainx_calculator/src/lib.rs`. A seemingly harmless method can break downstream assumptions if versioning, events, or state migrations are missed.
+
+### 1. Event Schema
+- [ ] **Topic Layout**: Any new event emission strictly follows the 3-topic layout (`name`, `version`, `context`).
+- [ ] **Payload Rules**: If an existing event payload has changed, ensure fields were only appended, or the `EVENT_VERSION` was bumped. (See SC-099).
+- [ ] **Size Bounds**: Event payloads do not exceed reasonable size limits (SC-504).
+
+### 2. Versioning & Responses
+- [ ] **Schema Updates**: If the method returns new status symbols or data structures, `RESULT_SCHEMA_VERSION` is incremented.
+- [ ] **Stability Tier**: The return type's stability tier (Stable, Versioned, Experimental) is documented (SC-501).
+- [ ] **Error Codes**: Any new errors are added to the `SLAError` enum and the failure schema.
+
+### 3. State & Migration
+- [ ] **Storage Keys**: If new storage keys are introduced, the `STORAGE_VERSION` is incremented, and `get_migration_state()` reflects `needs_migration`.
+- [ ] **Determinism**: The method relies only on deterministic inputs (no unseeded randomness, no floats).
+- [ ] **History & Pruning**: If the method writes to history, it adheres to the FIFO invariants (SC-506) and bounds `MAX_RECALCS_PER_OUTAGE`.
+
+### 4. Authorisation & Safety
+- [ ] **Archetype Defined**: The doc comment clearly defines the method's archetype (Read-Only, Mutating, Privileged).
+- [ ] **Auth Checks**: Privileged and Mutating methods call `require_auth()` on the correct role.
+- [ ] **Pause Guard**: State-mutating methods check the `PAUSED_KEY` at the top of the execution.
+
+---
+
 **Happy coding! 🚀**

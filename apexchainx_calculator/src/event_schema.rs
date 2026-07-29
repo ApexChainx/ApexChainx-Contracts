@@ -164,6 +164,11 @@
 //!
 //! Backends MUST check `deprecated_symbols` at startup and log warnings for
 //! any deprecated symbols they still rely on.
+//!
+//! # Review Checklist
+//!
+//! When adding or modifying events, refer to both the SC-099 Event-Topic Schema
+//! Checklist and the SC-100 Public Method Review Checklist in `CONTRIBUTING.md`.
 
 #![allow(dead_code)]
 
