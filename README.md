@@ -39,6 +39,13 @@ frontend never interacts with contracts directly.
 The contract includes a version negotiation protocol (`get_version_info()`) that
 allows backends to verify compatibility before deployment.
 
+### How does severity telemetry reset and reinitialize?
+
+Telemetry counters (`get_severity_telemetry()`) track per-severity calculation counts, violation counts, and violation rates over a 7-day rolling window:
+- **Lazy On-Invocation Reset**: Reset logic is lazily evaluated during `calculate_sla` calls. If $\ge 7$ days (604,800 seconds) have elapsed since the last calculation or violation timestamp for a severity lane, that lane's calculation and violation counters are cleared to 0 before recording the current operation.
+- **Per-Lane Isolation**: Telemetry resets independently per severity lane (`critical`, `high`, `medium`, `low`). Infrequent calculations in one lane do not cause resets in active lanes.
+- **Impact on Dashboards & Consumers**: Querying `get_severity_telemetry()` directly reads the currently stored state. If a lane has been inactive for $\ge 7$ days, dashboards will show pre-reset cumulative counters until the next `calculate_sla` execution in that lane triggers the lazy reset. Backend consumers tracking historical trendlines should combine on-chain telemetry with event streams (`EVENT_SLA_CALC`) or store periodic snapshots.
+
 ### What stops an operator from spamming the same outage ID?
 
 `calculate_sla` is idempotent: resubmitting an outage with an unchanged config

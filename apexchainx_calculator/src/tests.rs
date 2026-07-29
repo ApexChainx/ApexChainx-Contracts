@@ -215,6 +215,86 @@ fn test_severity_telemetry_tracks_per_severity_violation_rates() {
     assert_eq!(high.violation_rate, 0u32);
 }
 
+#[test]
+fn test_severity_telemetry_weekly_reset_semantics() {
+    let (env, client, actors) = setup();
+
+    // 1. Initial state at t = 1000
+    env.ledger().set_timestamp(1000);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT001"),
+        &symbol_short!("critical"),
+        &20, // violation
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT002"),
+        &symbol_short!("high"),
+        &10, // met
+    );
+
+    let t1 = client.get_severity_telemetry();
+    let crit1 = t1.get(0).unwrap();
+    assert_eq!(crit1.calculations, 1);
+    assert_eq!(crit1.violations, 1);
+
+    let high1 = t1.get(1).unwrap();
+    assert_eq!(high1.calculations, 1);
+    assert_eq!(high1.violations, 0);
+
+    // 2. Advance time by 6 days (518,400s) — below 7-day threshold (604,800s)
+    env.ledger().set_timestamp(1000 + 6 * 86,400);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT003"),
+        &symbol_short!("critical"),
+        &5, // met
+    );
+
+    let t2 = client.get_severity_telemetry();
+    let crit2 = t2.get(0).unwrap();
+    assert_eq!(crit2.calculations, 2);
+    assert_eq!(crit2.violations, 1);
+
+    // 3. Advance time to 7 days + 1 second after last critical calculation (t = 1000 + 6*86400 + 604801 = 1,123,201)
+    let reset_timestamp = 1000 + 6 * 86,400 + 7 * 86,400 + 1;
+    env.ledger().set_timestamp(reset_timestamp);
+
+    // Critical is invoked after >= 7 days of inactivity since last critical calc -> triggers reset & reinit
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT004"),
+        &symbol_short!("critical"),
+        &5, // met
+    );
+
+    let t3 = client.get_severity_telemetry();
+    let crit3 = t3.get(0).unwrap();
+    // Reinitialized to 1 calculation and 0 violations
+    assert_eq!(crit3.calculations, 1);
+    assert_eq!(crit3.violations, 0);
+    assert_eq!(crit3.violation_rate, 0);
+
+    // High lane was NOT invoked, so high lane telemetry counter is un-reset until its next invocation
+    let high3 = t3.get(1).unwrap();
+    assert_eq!(high3.calculations, 1);
+
+    // Invoking high lane after 7+ days triggers high lane reset
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("EVT005"),
+        &symbol_short!("high"),
+        &40, // violation
+    );
+
+    let t4 = client.get_severity_telemetry();
+    let high4 = t4.get(1).unwrap();
+    assert_eq!(high4.calculations, 1);
+    assert_eq!(high4.violations, 1);
+    assert_eq!(high4.violation_rate, 100);
+}
+
 // ============================================================
 // #28 – Operator management
 // ============================================================
