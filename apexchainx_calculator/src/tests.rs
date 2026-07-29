@@ -2683,6 +2683,83 @@ fn test_get_history_page_zero_limit_returns_empty() {
 }
 
 #[test]
+fn test_get_history_page_zero_limit_with_empty_history() {
+    let (_env, client, _actors) = setup();
+
+    let page = client.get_history_page(&0, &0);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_history_page_zero_limit_at_nonzero_offset() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..5u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_ZNO_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    let page = client.get_history_page(&2, &0);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_history_page_offset_exactly_at_end_returns_empty() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..5u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_OAE_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    let page = client.get_history_page(&5, &10);
+    assert_eq!(page.len(), 0);
+}
+
+#[test]
+fn test_get_history_page_limit_larger_than_remaining() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..3u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_LLR_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    let page = client.get_history_page(&1, &100);
+    assert_eq!(page.len(), 2);
+}
+
+#[test]
+fn test_get_history_page_exact_page_boundaries() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..6u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_EPB_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // Full coverage: three pages of 2 each
+    let p0 = client.get_history_page(&0, &2);
+    assert_eq!(p0.len(), 2);
+    assert_eq!(p0.get(0).unwrap().outage_id, Symbol::new(&_env, "PG_EPB_0"));
+    assert_eq!(p0.get(1).unwrap().outage_id, Symbol::new(&_env, "PG_EPB_1"));
+
+    let p1 = client.get_history_page(&2, &2);
+    assert_eq!(p1.len(), 2);
+    assert_eq!(p1.get(0).unwrap().outage_id, Symbol::new(&_env, "PG_EPB_2"));
+    assert_eq!(p1.get(1).unwrap().outage_id, Symbol::new(&_env, "PG_EPB_3"));
+
+    let p2 = client.get_history_page(&4, &2);
+    assert_eq!(p2.len(), 2);
+    assert_eq!(p2.get(0).unwrap().outage_id, Symbol::new(&_env, "PG_EPB_4"));
+    assert_eq!(p2.get(1).unwrap().outage_id, Symbol::new(&_env, "PG_EPB_5"));
+
+    // Offset beyond end is empty
+    let p3 = client.get_history_page(&6, &2);
+    assert_eq!(p3.len(), 0);
+}
+
+#[test]
 fn test_get_history_page_order_is_oldest_first() {
     let (env, client, actors) = setup();
 
