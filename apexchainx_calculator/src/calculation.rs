@@ -9,6 +9,11 @@ use crate::{
     EVENT_SLA_CALC, EVENT_SETTLE_INTENT, EVENT_VERSION, EVENT_STATS_SAT,
 };
 
+/// Calculate the SLA outcome for an outage event (delegated implementation).
+///
+/// See [`crate::SLACalculatorContract::calculate_sla`] for the full API
+/// contract and [`crate::SLAError::DuplicateOutageInput`] for the
+/// duplicate-detection semantics.
 pub fn calculate_sla(
     env: &Env,
     caller: &Address,
