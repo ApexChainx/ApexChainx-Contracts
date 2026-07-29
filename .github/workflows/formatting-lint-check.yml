@@ -1,0 +1,33 @@
+name: Repository Formatting & Lint Drift
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - develop
+      - master
+
+jobs:
+  formatting-and-lint:
+    name: Formatting and Lint Drift Check
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
