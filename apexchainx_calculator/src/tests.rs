@@ -7075,3 +7075,198 @@ fn test_economic_exposure_independent_of_history() {
 
     assert_eq!(exposure_before, exposure_after);
 }
+
+// ============================================================
+// Anti-spam guardrails for repeated same-outage calculate_sla calls
+//
+// Policy under test (see SLACalculatorContract::calculate_sla):
+//   - replay      – unchanged config hash + identical inputs → stored result
+//                   returned, nothing written anywhere;
+//   - conflict    – unchanged config hash + different inputs → rejected with
+//                   DuplicateOutageInput;
+//   - recalc      – changed config hash opens a new generation, capped per
+//                   outage at MAX_RECALCS_PER_OUTAGE retained entries.
+//
+// The telemetry assertions are the regression guard: per-severity counters are
+// written only once a decision is certain to be stored, so a retrying (or
+// misbehaving) operator cannot skew violation rates by resubmitting one
+// outage_id.
+// ============================================================
+
+/// Fills `outage` to MAX_RECALCS_PER_OUTAGE retained generations. Every
+/// generation needs a fresh config hash, so the `low` threshold is moved
+/// between submissions.
+fn fill_generations(client: &SLACalculatorContractClient<'static>, actors: &Actors, outage: &Symbol) {
+    for i in 0..MAX_RECALCS_PER_OUTAGE {
+        if i > 0 {
+            client.set_config(&actors.admin, &symbol_short!("low"), &(100 + i), &10, &600);
+        }
+        client.calculate_sla(&actors.operator, outage, &symbol_short!("low"), &10);
+    }
+}
+
+#[test]
+fn test_replay_of_same_outage_writes_nothing() {
+    let (env, client, actors) = setup();
+    let outage = symbol_short!("SPAM_A");
+
+    let first = client.calculate_sla(&actors.operator, &outage, &symbol_short!("critical"), &5);
+
+    let history_before = client.get_history();
+    let stats_before = client.get_stats();
+    let telemetry_before = client.get_severity_telemetry();
+    let events_before = env.events().all().len();
+
+    let replay = client.calculate_sla(&actors.operator, &outage, &symbol_short!("critical"), &5);
+
+    // Every observable surface is byte-identical after the replay.
+    assert_eq!(replay, first);
+    assert_eq!(client.get_history(), history_before);
+    assert_eq!(client.get_stats(), stats_before);
+    assert_eq!(client.get_severity_telemetry(), telemetry_before);
+    assert_eq!(env.events().all().len(), events_before);
+}
+
+#[test]
+fn test_replays_do_not_inflate_severity_telemetry() {
+    let (_env, client, actors) = setup();
+    let outage = symbol_short!("SPAM_B");
+    let critical = symbol_short!("critical");
+
+    for _ in 0..5 {
+        client.calculate_sla(&actors.operator, &outage, &critical, &5);
+    }
+
+    // One stored decision → exactly one counted calculation, whatever the
+    // operator's retry behaviour was.
+    let telemetry = client.get_severity_telemetry();
+    assert_eq!(telemetry.get(0).unwrap().calculations, 1u32);
+    assert_eq!(telemetry.get(0).unwrap().violations, 0u32);
+    assert_eq!(client.get_stats().total_calculations, 1u64);
+    assert_eq!(client.get_history().len(), 1);
+}
+
+#[test]
+fn test_telemetry_and_stats_agree_under_repeated_calls() {
+    let (_env, client, actors) = setup();
+    let critical = symbol_short!("critical");
+
+    client.calculate_sla(&actors.operator, &symbol_short!("SPAM_C1"), &critical, &5);
+    client.calculate_sla(&actors.operator, &symbol_short!("SPAM_C1"), &critical, &5);
+    client.calculate_sla(&actors.operator, &symbol_short!("SPAM_C2"), &critical, &20);
+    client.calculate_sla(&actors.operator, &symbol_short!("SPAM_C2"), &critical, &20);
+
+    let telemetry = client.get_severity_telemetry();
+    let counted: u32 = telemetry.iter().map(|e| e.calculations).sum();
+    assert_eq!(counted as u64, client.get_stats().total_calculations);
+    assert_eq!(counted, 2u32);
+}
+
+#[test]
+fn test_replay_under_other_severity_leaves_that_lane_untouched() {
+    let (_env, client, actors) = setup();
+    let outage = symbol_short!("SPAM_D");
+
+    // Give `high` the same threshold as `critical` so a resubmission under the
+    // other severity resolves to an identical decision and takes the replay path.
+    client.set_config(&actors.admin, &symbol_short!("high"), &15, &100, &750);
+
+    let stored = client.calculate_sla(&actors.operator, &outage, &symbol_short!("critical"), &5);
+    let replay = client.calculate_sla(&actors.operator, &outage, &symbol_short!("high"), &5);
+    assert_eq!(replay, stored);
+
+    // The `high` lane must stay at zero: no decision was stored under it.
+    let telemetry = client.get_severity_telemetry();
+    assert_eq!(telemetry.get(0).unwrap().calculations, 1u32);
+    assert_eq!(telemetry.get(1).unwrap().calculations, 0u32);
+    assert_eq!(client.get_history().len(), 1);
+}
+
+#[test]
+fn test_conflicting_resubmission_is_rejected_without_side_effects() {
+    let (_env, client, actors) = setup();
+    let outage = symbol_short!("SPAM_E");
+    let critical = symbol_short!("critical");
+
+    client.calculate_sla(&actors.operator, &outage, &critical, &5);
+    let telemetry_before = client.get_severity_telemetry();
+
+    let rejected = client.try_calculate_sla(&actors.operator, &outage, &critical, &9);
+    assert!(error_responses::is_duplicate_outage_input(
+        &rejected.unwrap_err().unwrap()
+    ));
+
+    assert_eq!(client.get_severity_telemetry(), telemetry_before);
+    assert_eq!(client.get_history().len(), 1);
+}
+
+#[test]
+fn test_recalc_cap_rejects_further_generations_but_allows_replay() {
+    let (env, client, actors) = setup();
+    env.budget().reset_unlimited();
+    let outage = symbol_short!("SPAM_F");
+
+    fill_generations(&client, &actors, &outage);
+    let stored = client.get_latest_by_outage(&outage).unwrap();
+    let after_fill = client.get_history_by_outage(&outage).len();
+    assert_eq!(after_fill, MAX_RECALCS_PER_OUTAGE);
+
+    // At the cap, replaying the newest generation is still idempotent: the cap
+    // bounds stored generations, it does not break retry safety.
+    let replay = client.calculate_sla(&actors.operator, &outage, &symbol_short!("low"), &10);
+    assert_eq!(replay, stored);
+    let after_replay = client.get_history_by_outage(&outage).len();
+    assert_eq!(after_replay, MAX_RECALCS_PER_OUTAGE);
+
+    // A config change would open one generation too many → rejected.
+    client.set_config(&actors.admin, &symbol_short!("low"), &200, &10, &600);
+    let blocked = client.try_calculate_sla(&actors.operator, &outage, &symbol_short!("low"), &10);
+    assert!(error_responses::is_outage_recalc_limit(
+        &blocked.unwrap_err().unwrap()
+    ));
+    let after_block = client.get_history_by_outage(&outage).len();
+    assert_eq!(after_block, MAX_RECALCS_PER_OUTAGE);
+}
+
+#[test]
+fn test_recalc_cap_is_per_outage() {
+    let (env, client, actors) = setup();
+    env.budget().reset_unlimited();
+    let capped = symbol_short!("SPAM_G1");
+    let other = symbol_short!("SPAM_G2");
+
+    fill_generations(&client, &actors, &capped);
+    client.set_config(&actors.admin, &symbol_short!("low"), &200, &10, &600);
+
+    let blocked = client.try_calculate_sla(&actors.operator, &capped, &symbol_short!("low"), &10);
+    assert!(error_responses::is_outage_recalc_limit(
+        &blocked.unwrap_err().unwrap()
+    ));
+
+    // The cap is scoped to one outage_id; unrelated outages are unaffected.
+    let fresh = client.calculate_sla(&actors.operator, &other, &symbol_short!("low"), &10);
+    assert_eq!(fresh.outage_id, other);
+    assert_eq!(client.get_history_by_outage(&other).len(), 1);
+}
+
+#[test]
+fn test_pruning_restores_recalc_headroom() {
+    let (env, client, actors) = setup();
+    env.budget().reset_unlimited();
+    let outage = symbol_short!("SPAM_H");
+
+    fill_generations(&client, &actors, &outage);
+    client.set_config(&actors.admin, &symbol_short!("low"), &200, &10, &600);
+    let blocked = client.try_calculate_sla(&actors.operator, &outage, &symbol_short!("low"), &10);
+    assert!(error_responses::is_outage_recalc_limit(
+        &blocked.unwrap_err().unwrap()
+    ));
+
+    // Admin recovery path: pruning frees the outage's share of the window.
+    client.prune_history(&actors.admin, &1);
+    assert_eq!(client.get_history_by_outage(&outage).len(), 1);
+
+    let recalculated = client.calculate_sla(&actors.operator, &outage, &symbol_short!("low"), &10);
+    assert_eq!(recalculated.threshold_minutes, 200);
+    assert_eq!(client.get_history_by_outage(&outage).len(), 2);
+}

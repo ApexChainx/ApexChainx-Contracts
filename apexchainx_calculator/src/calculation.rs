@@ -5,7 +5,7 @@ use crate::{
     STATS_KEY, HISTORY_KEY, RETENTION_LIMIT_KEY,
     SEVERITY_CALC_COUNTS_KEY, SEVERITY_VIOL_COUNTS_KEY,
     LAST_CALCULATION_LEDGER_KEY, LAST_VIOLATION_LEDGER_KEY,
-    PAUSED_KEY, MAX_HISTORY_SIZE,
+    PAUSED_KEY, MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE,
     EVENT_SLA_CALC, EVENT_SETTLE_INTENT, EVENT_VERSION, EVENT_STATS_SAT,
 };
 
@@ -29,18 +29,19 @@ pub fn calculate_sla(
         config_version_hash,
         env.ledger().timestamp(),
     )?;
-    let met = result.status != symbol_short!("viol");
-    record_severity_telemetry(env, &severity, met);
     let mut history: Vec<SLAResult> = env
         .storage()
         .instance()
         .get(&HISTORY_KEY)
         .unwrap_or_else(|| Vec::new(env));
 
+    // Anti-spam accounting — mirrors SLACalculatorContract::calculate_sla.
     let mut existing: Option<SLAResult> = None;
+    let mut stored_for_outage: u32 = 0;
     for i in 0..history.len() {
         let entry = history.get(i).unwrap();
         if entry.outage_id == outage_id {
+            stored_for_outage += 1;
             existing = Some(entry);
         }
     }
@@ -49,9 +50,18 @@ pub fn calculate_sla(
             if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
                 return Err(SLAError::DuplicateOutageInput);
             }
+            // Replay: return the stored decision without touching state.
             return Ok(prev);
         }
+        if stored_for_outage >= MAX_RECALCS_PER_OUTAGE {
+            return Err(SLAError::OutageRecalcLimit);
+        }
     }
+
+    // Only recorded once the result is certain to be stored, so replays and
+    // rejected submissions cannot inflate per-severity counters.
+    let met = result.status != symbol_short!("viol");
+    record_severity_telemetry(env, &severity, met);
 
     history.push_back(result.clone());
 
