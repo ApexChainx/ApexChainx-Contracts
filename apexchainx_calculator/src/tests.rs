@@ -7075,3 +7075,73 @@ fn test_economic_exposure_independent_of_history() {
 
     assert_eq!(exposure_before, exposure_after);
 }
+
+// ============================================================
+// #218 – Read-only healthcheck path
+// ============================================================
+
+#[test]
+fn test_healthcheck_returns_ready_when_initialized() {
+    let (_env, client, _actors) = setup();
+    let hc = client.healthcheck();
+    assert!(hc.ready);
+    assert_eq!(hc.status, symbol_short!("ok"));
+    assert_eq!(hc.contract_name, symbol_short!("sla_calc"));
+}
+
+#[test]
+fn test_healthcheck_returns_not_ready_when_not_initialized() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    // healthcheck does not panic on uninitialized contract
+    let hc = client.healthcheck();
+    assert!(!hc.ready);
+    assert_eq!(hc.status, symbol_short!("noinit"));
+}
+
+#[test]
+fn test_healthcheck_returns_not_ready_on_version_mismatch() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Corrupt stored version to simulate a future schema
+    env.as_contract(&cid, || {
+        env.storage().instance().set(&STORAGE_VERSION_KEY, &99u32);
+    });
+
+    let hc = client.healthcheck();
+    assert!(!hc.ready);
+    assert_eq!(hc.status, symbol_short!("migrate"));
+}
+
+#[test]
+fn test_healthcheck_is_deterministic() {
+    let (_env, client, _actors) = setup();
+    let a = client.healthcheck();
+    let b = client.healthcheck();
+    assert_eq!(a, b);
+}
+
+#[test]
+fn test_healthcheck_does_not_mutate_state() {
+    let (_env, client, actors) = setup();
+    let stats_before = client.get_stats();
+    let _hc = client.healthcheck();
+    let stats_after = client.get_stats();
+    assert_eq!(stats_before, stats_after);
+}
+
+#[test]
+fn test_healthcheck_does_not_require_auth() {
+    let (_env, client, _actors) = setup();
+    // Calling healthcheck without any auth mock should still work
+    let hc = client.healthcheck();
+    assert!(hc.ready);
+}

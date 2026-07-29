@@ -565,6 +565,23 @@ pub struct FailureSchema {
     pub codes: Vec<FailureCode>,
 }
 
+/// #218 – Read-only healthcheck result for backend startup readiness.
+///
+/// Backend consumers call `healthcheck` before any other operation to confirm
+/// the contract is in a safe state. Unlike `get_version_info` which also
+/// bypasses `check_version`, this endpoint returns a single boolean outcome
+/// for simple load-balancer probes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HealthcheckResult {
+    /// True when the contract is initialised and on the current storage version.
+    pub ready: bool,
+    /// Human-readable contract name for log correlation.
+    pub contract_name: Symbol,
+    /// Human-readable status label: "ok", "not_initialized", "needs_migration".
+    pub status: Symbol,
+}
+
 /// SC-W5-029 – Combined version negotiation response for backend startup handshake.
 ///
 /// Backend consumers call `get_version_info` once at startup (or after an upgrade)
@@ -2535,5 +2552,34 @@ impl SLACalculatorContract {
             is_paused,
             contract_name: symbol_short!("sla_calc"),
         })
+    }
+
+    // -------------------------------------------------------------------
+    // #218 – Read-only healthcheck path for backend startup readiness
+    // -------------------------------------------------------------------
+
+    /// Returns a simple healthcheck result for load-balancer probes.
+    ///
+    /// Does **not** require authentication, does **not** modify state, and
+    /// does **not** emit events. Returns `ready: true` when the contract is
+    /// initialised and on the expected storage version. Any other state
+    /// returns `ready: false` with a descriptive status label so operators
+    /// can diagnose the issue without decoding error codes.
+    ///
+    /// This function intentionally bypasses `check_version` (like
+    /// `get_version_info` and `get_migration_state`) so it remains callable
+    /// even when the contract is in a pre-migration or pre-init state.
+    pub fn healthcheck(env: Env) -> HealthcheckResult {
+        let stored_version: Option<u32> = env.storage().instance().get(&STORAGE_VERSION_KEY);
+        let (ready, status) = match stored_version {
+            None => (false, symbol_short!("noinit")),
+            Some(v) if v != STORAGE_VERSION => (false, symbol_short!("migrate")),
+            Some(_) => (true, symbol_short!("ok")),
+        };
+        HealthcheckResult {
+            ready,
+            contract_name: symbol_short!("sla_calc"),
+            status,
+        }
     }
 }
