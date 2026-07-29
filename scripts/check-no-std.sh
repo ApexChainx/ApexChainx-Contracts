@@ -31,7 +31,7 @@ CRATE_DIR="$REPO_ROOT/apexchainx_calculator"
 # We deliberately keep the list narrow to avoid false positives on doc
 # comments or string literals.
 PATTERNS=(
-    '^[[:space:]]*use[[:space:]]+std::'
+    '^[[:space:]]*(pub([(].*[)])?[[:space:]]+)?use[[:space:]]+std::'
     '^[[:space:]]*extern[[:space:]]+crate[[:space:]]+std[[:space:]]*;'
 )
 
