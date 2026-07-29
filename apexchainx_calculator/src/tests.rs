@@ -7075,3 +7075,116 @@ fn test_economic_exposure_independent_of_history() {
 
     assert_eq!(exposure_before, exposure_after);
 }
+
+// ============================================================
+// #194 – get_result_schema coverage test with migration notes guard
+// ============================================================
+//
+// IMPORTANT: When RESULT_SCHEMA_VERSION is incremented, you MUST also
+// update the migration notes below and document what changed:
+//
+// Migration notes for schema version changes:
+// - v1: Initial schema. Fields: outage_id, status, payment_type, rating,
+//       mttr_minutes, threshold_minutes, amount, config_version_hash,
+//       recorded_at. All symbols are as defined in the SLAResultSchema.
+//       No deprecated symbols.
+
+#[test]
+fn test_get_result_schema_matches_expected_constant() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert_eq!(
+        schema.schema_version,
+        RESULT_SCHEMA_VERSION,
+        "RESULT_SCHEMA_VERSION mismatch. Update migration notes and bump constant!"
+    );
+}
+
+#[test]
+fn test_get_result_schema_is_deterministic() {
+    let (_env, client, _actors) = setup();
+    let a = client.get_result_schema();
+    let b = client.get_result_schema();
+    assert_eq!(a, b);
+}
+
+#[test]
+fn test_get_result_schema_version_change_requires_migration_note() {
+    // This test intentionally checks that the schema version constant has not
+    // drifted from a known-good value. Bumping the version is a breaking change
+    // that MUST be accompanied by an updated migration note in this file and a
+    // corresponding entry in docs/ migration documentation.
+    //
+    // When you bump RESULT_SCHEMA_VERSION:
+    //   1. Update the migration notes comment block above.
+    //   2. Document the breaking change in CHANGELOG.md.
+    //   3. Update the expected version below.
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert_eq!(
+        schema.schema_version, 1,
+        "RESULT_SCHEMA_VERSION has changed! Add migration notes before bumping."
+    );
+    assert_eq!(schema.version, symbol_short!("v1"));
+}
+
+#[test]
+fn test_get_result_schema_includes_config_version_hash_flag() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert!(
+        schema.includes_config_version_hash,
+        "Result schema must indicate config_version_hash inclusion"
+    );
+}
+
+#[test]
+fn test_get_result_schema_deprecated_symbols_empty_in_v1() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    assert_eq!(
+        schema.deprecated_symbols.len(),
+        0,
+        "v1 schema should have no deprecated symbols"
+    );
+}
+
+#[test]
+fn test_get_result_schema_requires_migration_version_if_not_v1() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    if schema.schema_version != 1 {
+        // If this test fails, you have bumped RESULT_SCHEMA_VERSION without
+        // updating the migration notes. Go back and document what changed.
+        panic!(
+            "RESULT_SCHEMA_VERSION is now {} — add migration notes and update tests!",
+            schema.schema_version
+        );
+    }
+}
+
+#[test]
+fn test_get_result_schema_all_symbols_are_short_form() {
+    let (_env, client, _actors) = setup();
+    let schema = client.get_result_schema();
+    // All symbols in the schema must be valid symbol_short!() candidates
+    // (max 9 characters, lowercase, underscore-separated).
+    let symbols = [
+        schema.status_met,
+        schema.status_violated,
+        schema.payment_reward,
+        schema.payment_penalty,
+        schema.rating_exceptional,
+        schema.rating_excellent,
+        schema.rating_good,
+        schema.rating_poor,
+    ];
+    for s in symbols.iter() {
+        let bytes = s.to_str();
+        assert!(
+            bytes.len() <= 9,
+            "Symbol '{}' exceeds 9-char limit",
+            bytes
+        );
+    }
+}
