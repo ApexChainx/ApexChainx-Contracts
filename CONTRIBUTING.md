@@ -560,7 +560,7 @@ just corrupted indexed data and broken settlement reconciliation.
 - [ ] **Field additions go at the end.** Appending new fields to the end of a payload tuple is **not** breaking — old consumers ignore unrecognised trailing fields. Inserting, removing, or reordering fields **is** breaking.
 - [ ] **Field type changes are breaking.** Changing a field's Soroban type (e.g. `u32` → `i128`, `Symbol` → `Address`) requires a version bump.
 - [ ] **All payload emission sites emit the same tuple shape.** Search the codebase for the event name and verify every `env.events().publish(...)` call for that event emits a tuple with identical field count and types.
-- [ ] **Topic stability tests pass.** Run `cargo test topic_stability` and verify all assertion-based topic-structure checks pass.
+- [ ] **Topic stability tests pass.** Run `cargo test topic_stability_tests` and verify all assertion-based topic-structure checks pass.
 - [ ] **The `event_schema.rs` doc comment is updated** to reflect the new/changed payload layout, including the type signature in the event catalog section.
 
 ### Versioning Protocol
