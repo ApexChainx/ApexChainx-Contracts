@@ -82,6 +82,14 @@ hash: wasm-release
         shasum -a 256 "$wasm" | awk '{print $1 "  {{crate}}.wasm"}'
     fi
 
+# --------------------------------------------------------------- tooling -----
+
+# Generate a ship-review note from CHANGELOG.md.
+# Pass a version tag to summarise a released block: just release-summary 0.3.0
+# Defaults to the [Unreleased] block when no argument is given.
+release-summary version="Unreleased":
+    npx --yes tsx tooling/releaseSummary.ts --version {{version}}
+
 # ----------------------------------------------------------------- all ------
 
 # Remove build artifacts.
