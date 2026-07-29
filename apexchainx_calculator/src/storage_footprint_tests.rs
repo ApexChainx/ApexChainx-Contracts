@@ -61,7 +61,7 @@ fn storage_key_count_is_stable_after_init() {
     ];
 
     for key in known_keys {
-        let sym = soroban_sdk::symbol_short!(key);
+        let sym = soroban_sdk::Symbol::new(&_env, key);
         assert!(
             _env.storage().instance().has(&sym),
             "Expected storage key {:?} to exist after initialize",
@@ -70,11 +70,11 @@ fn storage_key_count_is_stable_after_init() {
     }
 }
 
-// ── Single-write size audit ──────────────────────────────────────────
-
-/// A single `SLAResult` written to the empty history must be well under
-/// the Soroban per-entry ceiling (≈65 KiB = 65 536 bytes).
-/// Typical entries are <1 KiB, so we budget generously at 4 KiB.
+// ── Single-write size audit ──────────────────────────────────────────/// A single `SLAResult` written to the empty history must keep the
+/// history at exactly 1 entry.  While the Soroban SDK test environment
+/// does not expose raw byte counts per entry, this test validates that
+/// a single write produces a well-formed entry without triggering
+/// retention or budget alarms.
 #[test]
 fn single_sla_result_entry_under_4k_bytes() {
     let (_env, client, op) = deploy();
