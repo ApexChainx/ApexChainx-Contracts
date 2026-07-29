@@ -39,6 +39,17 @@ frontend never interacts with contracts directly.
 The contract includes a version negotiation protocol (`get_version_info()`) that
 allows backends to verify compatibility before deployment.
 
+### What stops an operator from spamming the same outage ID?
+
+`calculate_sla` is idempotent: resubmitting an outage with an unchanged config
+hash and identical inputs returns the stored result and writes nothing — no
+history entry, no statistics, no telemetry, no events — so retries are safe and
+cannot skew reported violation rates. Resubmitting the *same* outage with
+different inputs is rejected (`DuplicateOutageInput`), and a config change opens
+a new stored generation for that outage, capped at 16 retained entries
+(`OutageRecalcLimit`) so one outage cannot crowd others out of the retention
+window. Admin pruning frees that headroom again.
+
 ### Is the contract upgradeable?
 
 No. The contract is not natively upgradeable. Upgrades require deploying a new

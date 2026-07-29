@@ -534,4 +534,48 @@ Use this checklist when reviewing PRs that touch governance, config, or storage.
 
 ---
 
+---
+
+## SC-099: Event-Topic & Payload Schema Contributor Safety Checklist
+
+Use this checklist when reviewing PRs that add, remove, rename, or reorder event
+topic constants or payload fields in `apexchainx_calculator/src/lib.rs` or
+`apexchainx_calculator/src/event_schema.rs`.
+
+Backend indexers and the `apexchainx-be` bridge depend on a stable,
+deterministic event structure. A single field reorder or topic rename breaks
+downstream consumers **silently** — no compilation error, no test failure,
+just corrupted indexed data and broken settlement reconciliation.
+
+### Event-Topic Constants
+
+- [ ] **No topic name changed without a version bump.** Every event is identified by a `Symbol` constant (e.g. `EVENT_SLA_CALC`). Renaming the constant or changing its Symbol value is a **breaking change** and must increment the version symbol from `"v1"` to `"v2"` in both the constant definition and every emission site.
+- [ ] **All topic constants are covered by the distinctness test** in `event_schema.rs` (`test_event_names_are_distinct`). If a new event constant is added, ensure it is appended to the `names` array in that test.
+- [ ] **Topic index layout is unchanged.** The 3-topic layout (`topic[0]` = name, `topic[1]` = version, `topic[2]` = context) is a contract with backend consumers. Do not add, remove, or reorder topics. Any new metadata must go into the event **data payload**, not the topics array.
+- [ ] **All emission sites are updated.** Every event constant is emitted in at least one place (search for `(EVENT_*, EVENT_VERSION,`). If a new event is added, at least one emission site must be included in the same PR.
+- [ ] **The event schema doc comment in `lib.rs` (lines ~183-240) is updated.** The comment block lists every event's payload schema. New events must be documented there with the same format: `event_name  → (field: Type, ...)` and context description.
+
+### Payload Schema Changes
+
+- [ ] **Field additions go at the end.** Appending new fields to the end of a payload tuple is **not** breaking — old consumers ignore unrecognised trailing fields. Inserting, removing, or reordering fields **is** breaking.
+- [ ] **Field type changes are breaking.** Changing a field's Soroban type (e.g. `u32` → `i128`, `Symbol` → `Address`) requires a version bump.
+- [ ] **All payload emission sites emit the same tuple shape.** Search the codebase for the event name and verify every `env.events().publish(...)` call for that event emits a tuple with identical field count and types.
+- [ ] **Topic stability tests pass.** Run `cargo test topic_stability_tests` and verify all assertion-based topic-structure checks pass.
+- [ ] **The `event_schema.rs` doc comment is updated** to reflect the new/changed payload layout, including the type signature in the event catalog section.
+
+### Versioning Protocol
+
+- [ ] **Breaking changes bump `EVENT_VERSION`.** If any event's topic name, topic order, payload field count, or payload field type changes, the version Symbol must be incremented (`"v1"` → `"v2"`).
+- [ ] **Additive-only changes do NOT bump the version.** Adding a new event constant (new name, not reusing an old one) or appending a new field to the end of an existing payload tuple does not require a version bump.
+- [ ] **The Symbol Deprecation Protocol in `event_schema.rs` is followed.** If a symbol (status, payment type, rating, etc.) is being replaced, the old symbol must enter the deprecation lifecycle: introduction → coexistence → removal, as documented in `event_schema.rs` lines ~120-160.
+- [ ] **`get_result_schema()` reflects the deprecation.** If a symbol was deprecated, `deprecated_symbols` in the returned `SLAResultSchema` must include an entry with the old/new mapping and `deprecated_at` version.
+
+### Backend Integration Safety
+
+- [ ] **No event is removed without a deprecation period.** Removing an event entirely (stopping emission) is a major breaking change. Coordinate with the `apexchainx-be` team and provide at least one release cycle of coexistence.
+- [ ] **The `apexchainx-be` event schema parity tests still pass.** Coordinate with the backend team to re-run their contract-event snapshot tests after any topic or payload change.
+- [ ] **CI passes:** `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`, `wasm32` build, and the new no-std lint script.
+
+---
+
 **Happy coding! 🚀**

@@ -315,6 +315,19 @@ reconciliation alongside `sla_calc`):
   with `ContractPaused`**. Backends reconciling state should not
   synthesize missing `sla_calc` events during a pause window; instead,
   surface the gap as a paused-period audit marker.
+- **Idempotent replay** — resubmitting an `outage_id` with an unchanged
+  `config_version_hash` and identical inputs succeeds but stores nothing
+  and **emits no events**; the already-stored decision is returned. A
+  successful `calculate_sla` response is therefore *not* proof that a new
+  `sla_calc` was emitted. Backends must key off the
+  `(outage_id, config_version_hash, recorded_at)` triple above rather than
+  counting responses, and should not treat a missing event after a retry as
+  a dropped event.
+- **Recalculation cap** — a *changed* `config_version_hash` lets the same
+  outage be recorded again (a new generation, with its own `sla_calc` /
+  `set_int` pair). One outage may hold at most 16 retained entries; beyond
+  that the call is rejected with `OutageRecalcLimit` and, as with any error,
+  no events are emitted. Admin pruning frees headroom.
 
 ### Configuration update: `cfg_upd`
 
