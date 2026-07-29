@@ -72,3 +72,9 @@ This repository is the execution-layer side of the 3-repo architecture.
 - **Dependency auditing:** `cargo audit` runs on CI for every push
 - **WASM integrity:** Release artifacts include SHA-256 manifests
 - **Reproducible builds:** Local builds can be verified against CI-generated manifests
+
+## Contribution Resources
+
+- **[Contributing Guide](CONTRIBUTING.md)** — Development workflow, code style, PR checklist
+- **[Module Ownership Map](docs/MODULE_OWNERSHIP.md)** — Who reviews what: module-to-owner mapping for the contract crate, docs, CI, and tooling
+- **[API Stability Scorecard](docs/API_STABILITY_SCORECARD.md)** — Compatibility risk classification for all public entrypoints

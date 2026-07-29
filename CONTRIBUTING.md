@@ -333,6 +333,10 @@ impl SLAContract {
 
 ## ✅ Pull Request Guidelines
 
+### Review Routing
+
+Before opening a PR, consult the **[Module Ownership Map](docs/MODULE_OWNERSHIP.md)** to identify which review groups should be requested. High-risk modules (calculation, governance, storage version, event schema, config, cross-contract safety) have additional review requirements documented in the map.
+
 ### Before Submitting Checklist
 
 #### Required Checks
