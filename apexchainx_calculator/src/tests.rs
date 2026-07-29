@@ -244,7 +244,7 @@ fn test_severity_telemetry_weekly_reset_semantics() {
     assert_eq!(high1.violations, 0);
 
     // 2. Advance time by 6 days (518,400s) — below 7-day threshold (604,800s)
-    env.ledger().set_timestamp(1000 + 6 * 86,400);
+    env.ledger().set_timestamp(1000 + 6 * 86_400);
     client.calculate_sla(
         &actors.operator,
         &symbol_short!("EVT003"),
@@ -258,7 +258,7 @@ fn test_severity_telemetry_weekly_reset_semantics() {
     assert_eq!(crit2.violations, 1);
 
     // 3. Advance time to 7 days + 1 second after last critical calculation (t = 1000 + 6*86400 + 604801 = 1,123,201)
-    let reset_timestamp = 1000 + 6 * 86,400 + 7 * 86,400 + 1;
+    let reset_timestamp = 1000 + 6 * 86_400 + 7 * 86_400 + 1;
     env.ledger().set_timestamp(reset_timestamp);
 
     // Critical is invoked after >= 7 days of inactivity since last critical calc -> triggers reset & reinit
