@@ -14,6 +14,9 @@ mod tests;
 #[cfg(test)]
 mod fuzz_tests;
 
+#[cfg(test)]
+mod storage_footprint_tests;
+
 pub mod audit_state;
 pub mod config;
 pub mod config_bundle;
