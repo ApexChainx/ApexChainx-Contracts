@@ -13,6 +13,15 @@ Use this section to tell people about which versions of your project are current
 
 This security policy applies to all smart contracts and related software within the ApexChainx-Contracts repository.
 
+## Dependency Updates
+
+Dependency updates that may introduce security or compatibility impacts
+should use the **Dependency Security Review** issue template before
+opening a pull request.
+
+This helps maintainers evaluate security, compatibility, licensing,
+and supply-chain risks before changes are merged.
+
 ## Reporting a Vulnerability
 
 We take the security of our smart contracts seriously. If you believe you have found a security vulnerability in our contracts, please report it to us as described below.
