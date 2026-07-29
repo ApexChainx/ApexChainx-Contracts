@@ -7284,4 +7284,151 @@ fn test_historical_parity_golden_results() {
     let schema = client.get_result_schema();
     assert_eq!(schema.schema_version, 1, "Result schema version changed — check migration notes");
     assert_eq!(schema.deprecated_symbols.len(), 0, "Unexpected deprecated symbols in v1");
+// #264 – Failure catalog drift guard
+// ============================================================
+//
+// `error_responses.rs` provides a `is_*` predicate for every `SLAError`
+// variant so backend consumers never have to match on the enum directly.
+// The match below binds each variant to its predicate with no wildcard
+// (`_`) arm, so it only compiles while the two stay in lockstep:
+//   - a new `SLAError` variant with no arm here => non-exhaustive match,
+//     compile error.
+//   - a helper renamed or removed from `error_responses.rs` => unresolved
+//     name, compile error.
+// Either kind of drift fails the build, which fails the contract test
+// suite, before the loop body's own assertions ever run.
+#[test]
+fn test_failure_catalog_matches_error_helpers() {
+    let all_variants = [
+        SLAError::AlreadyInitialized,
+        SLAError::NotInitialized,
+        SLAError::Unauthorized,
+        SLAError::ConfigNotFound,
+        SLAError::VersionMismatch,
+        SLAError::ContractPaused,
+        SLAError::NoPendingTransfer,
+        SLAError::InvalidThreshold,
+        SLAError::InvalidPenalty,
+        SLAError::InvalidReward,
+        SLAError::InvalidSeverity,
+        SLAError::RetentionLimitOutOfRange,
+        SLAError::DuplicateOutageInput,
+        SLAError::InvalidPenaltyAmount,
+        SLAError::InvalidRewardAmount,
+        SLAError::ConfigFrozen,
+        SLAError::InvalidInput,
+        SLAError::SeverityNotInSet,
+        SLAError::OutageRecalcLimit,
+    ];
+
+    for err in all_variants {
+        let recognized = match err {
+            SLAError::AlreadyInitialized => error_responses::is_already_initialized(&err),
+            SLAError::NotInitialized => error_responses::is_not_initialized(&err),
+            SLAError::Unauthorized => error_responses::is_unauthorized(&err),
+            SLAError::ConfigNotFound => error_responses::is_config_not_found(&err),
+            SLAError::VersionMismatch => error_responses::is_version_mismatch(&err),
+            SLAError::ContractPaused => error_responses::is_contract_paused(&err),
+            SLAError::NoPendingTransfer => error_responses::is_no_pending_transfer(&err),
+            SLAError::InvalidThreshold => error_responses::is_invalid_threshold(&err),
+            SLAError::InvalidPenalty => error_responses::is_invalid_penalty(&err),
+            SLAError::InvalidReward => error_responses::is_invalid_reward(&err),
+            SLAError::InvalidSeverity => error_responses::is_invalid_severity(&err),
+            SLAError::RetentionLimitOutOfRange => {
+                error_responses::is_retention_limit_out_of_range(&err)
+            }
+            SLAError::DuplicateOutageInput => error_responses::is_duplicate_outage_input(&err),
+            SLAError::InvalidPenaltyAmount => error_responses::is_invalid_penalty_amount(&err),
+            SLAError::InvalidRewardAmount => error_responses::is_invalid_reward_amount(&err),
+            SLAError::ConfigFrozen => error_responses::is_config_frozen(&err),
+            SLAError::InvalidInput => error_responses::is_invalid_input(&err),
+            SLAError::SeverityNotInSet => error_responses::is_severity_not_in_set(&err),
+            SLAError::OutageRecalcLimit => error_responses::is_outage_recalc_limit(&err),
+        };
+        assert!(
+            recognized,
+            "error_responses helper for {:?} did not recognize its own variant",
+            err
+        );
+    }
 }
+
+#[test]
+fn test_failure_catalog_helpers_are_mutually_exclusive() {
+    // Each predicate must recognize exactly its own variant and reject all
+    // others, so a copy-pasted helper body (e.g. two helpers both matching
+    // the same variant) is caught even though the exhaustiveness check above
+    // would not see it.
+    let all_variants = [
+        SLAError::AlreadyInitialized,
+        SLAError::NotInitialized,
+        SLAError::Unauthorized,
+        SLAError::ConfigNotFound,
+        SLAError::VersionMismatch,
+        SLAError::ContractPaused,
+        SLAError::NoPendingTransfer,
+        SLAError::InvalidThreshold,
+        SLAError::InvalidPenalty,
+        SLAError::InvalidReward,
+        SLAError::InvalidSeverity,
+        SLAError::RetentionLimitOutOfRange,
+        SLAError::DuplicateOutageInput,
+        SLAError::InvalidPenaltyAmount,
+        SLAError::InvalidRewardAmount,
+        SLAError::ConfigFrozen,
+        SLAError::InvalidInput,
+        SLAError::SeverityNotInSet,
+        SLAError::OutageRecalcLimit,
+    ];
+
+    let predicates: [(&str, fn(&SLAError) -> bool); 19] = [
+        ("is_already_initialized", error_responses::is_already_initialized),
+        ("is_not_initialized", error_responses::is_not_initialized),
+        ("is_unauthorized", error_responses::is_unauthorized),
+        ("is_config_not_found", error_responses::is_config_not_found),
+        ("is_version_mismatch", error_responses::is_version_mismatch),
+        ("is_contract_paused", error_responses::is_contract_paused),
+        ("is_no_pending_transfer", error_responses::is_no_pending_transfer),
+        ("is_invalid_threshold", error_responses::is_invalid_threshold),
+        ("is_invalid_penalty", error_responses::is_invalid_penalty),
+        ("is_invalid_reward", error_responses::is_invalid_reward),
+        ("is_invalid_severity", error_responses::is_invalid_severity),
+        (
+            "is_retention_limit_out_of_range",
+            error_responses::is_retention_limit_out_of_range,
+        ),
+        ("is_duplicate_outage_input", error_responses::is_duplicate_outage_input),
+        ("is_invalid_penalty_amount", error_responses::is_invalid_penalty_amount),
+        ("is_invalid_reward_amount", error_responses::is_invalid_reward_amount),
+        ("is_config_frozen", error_responses::is_config_frozen),
+        ("is_invalid_input", error_responses::is_invalid_input),
+        ("is_severity_not_in_set", error_responses::is_severity_not_in_set),
+        ("is_outage_recalc_limit", error_responses::is_outage_recalc_limit),
+    ];
+
+    assert_eq!(
+        predicates.len(),
+        all_variants.len(),
+        "number of error_responses predicates must match number of SLAError variants"
+    );
+
+    for (variant_idx, err) in all_variants.iter().enumerate() {
+        let matches: alloc::vec::Vec<&str> = predicates
+            .iter()
+            .filter(|(_, predicate)| predicate(err))
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(
+            matches.len(),
+            1,
+            "expected exactly one predicate to match {:?} at index {}, got {:?}",
+            err,
+            variant_idx,
+            matches
+        );
+        assert_eq!(
+            matches[0], predicates[variant_idx].0,
+            "predicate matching {:?} was not the expected helper",
+            err
+        );
+    }}
