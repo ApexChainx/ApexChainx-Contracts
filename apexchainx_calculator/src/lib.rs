@@ -106,6 +106,21 @@ pub(crate) const RESULT_SCHEMA_VERSION: u32 = 1;
 /// Configurable down to 1 via set_retention_limit().
 pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
 
+/// Anti-spam cap on how many retained history entries a single `outage_id` may
+/// occupy.
+///
+/// `calculate_sla` is idempotent while the config hash is unchanged, so the only
+/// way one outage can accumulate entries is a config change between submissions
+/// (each change opens a new "generation" for that outage). Left uncapped, an
+/// operator that resubmits the same outage after every config update can evict
+/// every other outage from the retained window, so this bounds a single outage's
+/// share of it.
+///
+/// Counted from the history scan `calculate_sla` already performs: no extra
+/// storage key, no migration, and no dependency on call ordering. Admin pruning
+/// (`prune_history` / `prune_history_by_age`) frees headroom again.
+pub(crate) const MAX_RECALCS_PER_OUTAGE: u32 = 16;
+
 /// Optional configurable retention limit override. (SC-013)
 /// When set, overrides MAX_HISTORY_SIZE for history trimming.
 pub(crate) const RETENTION_LIMIT_KEY: Symbol = symbol_short!("RETLIM");
@@ -297,6 +312,8 @@ pub enum SLAError {
     InvalidInput = 17,
     /// Custom severity referenced but not registered. (#93)
     SeverityNotInSet = 18,
+    /// Outage already occupies MAX_RECALCS_PER_OUTAGE retained history entries.
+    OutageRecalcLimit = 19,
 }
 
 // -----------------------------------------------------------------------
@@ -1323,7 +1340,7 @@ impl SLACalculatorContract {
 
         // Emit in numeric order for deterministic consumption
         // All descriptions must be <= 32 bytes (Soroban Symbol constraint)
-        let entries: [(u32, &str, &str); 18] = [
+        let entries: [(u32, &str, &str); 19] = [
             (1, "AlreadyInitialized", "Contract already initialized"),
             (2, "NotInitialized", "Contract not yet initialized"),
             (3, "Unauthorized", "Caller lacks required role"),
@@ -1342,6 +1359,7 @@ impl SLACalculatorContract {
             (16, "ConfigFrozen", "Configuration is frozen"),
             (17, "InvalidInput", "Invalid input parameter"),
             (18, "SeverityNotInSet", "Custom severity not registered"),
+            (19, "OutageRecalcLimit", "Outage recalc limit reached"),
         ];
 
         for (code, label, description) in entries {
@@ -1644,6 +1662,27 @@ impl SLACalculatorContract {
     // SLA calculation (operator only)                                #28
     // -------------------------------------------------------------------
 
+    /// Records an SLA decision for `outage_id`. Operator only.
+    ///
+    /// # Repeated submissions for the same outage_id
+    ///
+    /// Anti-spam policy, applied in this order:
+    ///
+    /// 1. **Replay** — an unchanged config hash with identical inputs returns the
+    ///    stored result and writes nothing at all: no history entry, no stats, no
+    ///    telemetry, no events. Retrying a call whose response was lost is
+    ///    therefore free of state drift, however many times it is repeated.
+    /// 2. **Conflict** — an unchanged config hash with a different MTTR or
+    ///    threshold is rejected with `DuplicateOutageInput`, so a stored decision
+    ///    can never be silently restated.
+    /// 3. **Recalculation** — a changed config hash opens a new generation for the
+    ///    outage, capped at `MAX_RECALCS_PER_OUTAGE` retained entries. Beyond that
+    ///    the call is rejected with `OutageRecalcLimit`, bounding how much of the
+    ///    retained window one outage can occupy. Admin pruning frees headroom.
+    ///
+    /// Telemetry is recorded only once the calculation is certain to be stored, so
+    /// neither a replay nor a rejected submission can inflate the per-severity
+    /// counters behind `get_severity_telemetry`.
     pub fn calculate_sla(
         env: Env,
         caller: Address, // #28 – operator must identify themselves
@@ -1664,18 +1703,20 @@ impl SLACalculatorContract {
             config_version_hash,
             env.ledger().timestamp(),
         )?;
-        let met = result.status != symbol_short!("viol");
-        Self::record_severity_telemetry(&env, &severity, met);
         let mut history: Vec<SLAResult> = env
             .storage()
             .instance()
             .get(&HISTORY_KEY)
             .unwrap_or_else(|| Vec::new(&env));
 
+        // The scan that finds the newest entry for this outage also counts how
+        // many retained entries the outage already owns (anti-spam accounting).
         let mut existing: Option<SLAResult> = None;
+        let mut stored_for_outage: u32 = 0;
         for i in 0..history.len() {
             let entry = history.get(i).unwrap();
             if entry.outage_id == outage_id {
+                stored_for_outage += 1;
                 existing = Some(entry);
             }
         }
@@ -1686,10 +1727,20 @@ impl SLACalculatorContract {
                 if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
                     return Err(SLAError::DuplicateOutageInput);
                 }
+                // Replay: return the stored decision without touching state.
                 return Ok(prev);
             }
-            // Config changed: treat as a fresh calculation rather than a conflict.
+            // Config changed: treat as a fresh calculation rather than a conflict,
+            // but never let one outage grow past the anti-spam cap.
+            if stored_for_outage >= MAX_RECALCS_PER_OUTAGE {
+                return Err(SLAError::OutageRecalcLimit);
+            }
         }
+
+        // Past this point the result is guaranteed to be stored, so telemetry can
+        // no longer be inflated by replays or by rejected submissions.
+        let met = result.status != symbol_short!("viol");
+        Self::record_severity_telemetry(&env, &severity, met);
 
         history.push_back(result.clone());
 

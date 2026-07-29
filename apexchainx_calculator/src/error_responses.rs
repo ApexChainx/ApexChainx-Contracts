@@ -67,3 +67,7 @@ pub fn is_config_frozen(err: &SLAError) -> bool {
 pub fn is_invalid_input(err: &SLAError) -> bool {
     matches!(err, SLAError::InvalidInput)
 }
+
+pub fn is_outage_recalc_limit(err: &SLAError) -> bool {
+    matches!(err, SLAError::OutageRecalcLimit)
+}
