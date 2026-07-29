@@ -19,6 +19,7 @@ pub mod config;
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
+pub mod contract_info;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
 pub mod calculation;
@@ -1459,6 +1460,17 @@ impl SLACalculatorContract {
             supported_severities: severities,
             features,
         })
+    }
+
+    /// #191 – Returns the comprehensive, versioned contract-info object.
+    ///
+    /// This is the recommended startup handshake for backend consumers.
+    /// It supersedes `get_contract_metadata()` (#60) and
+    /// `get_version_info()` (SC-W5-029) by combining all identity,
+    /// version posture, feature set, and operational status into a single
+    /// typed, versioned response.
+    pub fn get_contract_info(env: Env) -> Result<contract_info::ContractInfo, SLAError> {
+        contract_info::get_contract_info(&env)
     }
 
     // -------------------------------------------------------------------
