@@ -7222,3 +7222,66 @@ fn test_healthcheck_does_not_require_auth() {
     let hc = client.healthcheck();
     assert!(hc.ready);
 }
+
+// ============================================================
+// #282 – Historical Parity Checker
+// ============================================================
+// Validates that current contract behaviour matches known golden results.
+// Used as a release regression gate: if these assertions fail, the contract
+// has diverged from its historical behaviour baseline.
+
+#[test]
+fn test_historical_parity_golden_results() {
+    let (_env, client, actors) = setup();
+
+    // Golden result set: known-good outputs for specific inputs.
+    // These must NEVER change between releases — if they do, it's a regression.
+    struct Golden<'a> {
+        outage_id: &'a str,
+        severity: &'a str,
+        mttr: u32,
+        expected_status: &'a str,
+        expected_amount: i128,
+        expected_rating: &'a str,
+    }
+
+    let golden = [
+        Golden { outage_id: "HP001", severity: "critical", mttr: 5,  expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
+        Golden { outage_id: "HP002", severity: "critical", mttr: 15, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
+        Golden { outage_id: "HP003", severity: "critical", mttr: 20, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
+        Golden { outage_id: "HP004", severity: "high",     mttr: 10, expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
+        Golden { outage_id: "HP005", severity: "high",     mttr: 30, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
+        Golden { outage_id: "HP006", severity: "high",     mttr: 40, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
+        Golden { outage_id: "HP007", severity: "medium",   mttr: 20, expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
+        Golden { outage_id: "HP008", severity: "medium",   mttr: 60, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
+        Golden { outage_id: "HP009", severity: "medium",   mttr: 80, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
+        Golden { outage_id: "HP010", severity: "low",      mttr: 40, expected_status: "met",  expected_amount: 1200, expected_rating: "top" },
+        Golden { outage_id: "HP011", severity: "low",      mttr: 120,expected_status: "met",  expected_amount: 600,  expected_rating: "good" },
+        Golden { outage_id: "HP012", severity: "low",      mttr: 150,expected_status: "viol", expected_amount: -300, expected_rating: "poor" },
+    ];
+
+    for g in golden.iter() {
+        let oid = Symbol::new(&_env, g.outage_id);
+        let sev = Symbol::new(&_env, g.severity);
+
+        // Use view to avoid mutating state and to verify that the view path
+        // also produces the same golden results.
+        let view = client.calculate_sla_view(&oid, &sev, &g.mttr);
+        assert_eq!(view.status, Symbol::new(&_env, g.expected_status),
+            "Golden mismatch: {} {} mttr={} — status", g.outage_id, g.severity, g.mttr);
+        assert_eq!(view.amount, g.expected_amount,
+            "Golden mismatch: {} {} mttr={} — amount", g.outage_id, g.severity, g.mttr);
+        assert_eq!(view.rating, Symbol::new(&_env, g.expected_rating),
+            "Golden mismatch: {} {} mttr={} — rating", g.outage_id, g.severity, g.mttr);
+    }
+
+    // Also validate that the config snapshot is historically stable
+    let snapshot = client.get_config_snapshot();
+    assert_eq!(snapshot.version, symbol_short!("v1"), "Config snapshot version changed");
+    assert_eq!(snapshot.entries.len(), 4, "Config snapshot entry count changed");
+
+    // Validate result schema stability
+    let schema = client.get_result_schema();
+    assert_eq!(schema.schema_version, 1, "Result schema version changed — check migration notes");
+    assert_eq!(schema.deprecated_symbols.len(), 0, "Unexpected deprecated symbols in v1");
+}

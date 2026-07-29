@@ -496,6 +496,45 @@ Your contributions make ApexChainx better for everyone. We appreciate your time 
 
 ---
 
+## Contract Maintenance Policies
+
+All contributors and reviewers must follow the maintenance policies documented in
+[`docs/CONTRACT_MAINTENANCE_POLICY.md`](docs/CONTRACT_MAINTENANCE_POLICY.md).
+This covers:
+
+- **[SC-500] `#[contracttype]` Compatibility Note Policy** (#279) — every public
+  contract type change must include a compatibility note in the PR.
+- **[SC-501] Response-Shape Stability Policy** (#283) — every `#[contracttype]`
+  return type is assigned a stability tier (Stable, Versioned, Experimental).
+- **[SC-502] Version Negotiation Protocol Note** (#284) — safe vs. breaking
+  changes to `get_version_info()`.
+- **[SC-503] API Archetype Note** (#285) — three function archetypes: Read-Only,
+  Mutating (Operator), Privileged (Admin).
+- **[SC-504] Event Payload Size Check** (#286) — payload size assertions required
+  for every event change.
+- **[SC-505] Event Drift Review Note** (#287) — checklist for event name/payload
+  changes.
+- **[SC-506] History Write Audit Check** (#288) — FIFO ordering, pruning, and
+  idempotency invariants.
+- **[SC-507] Telemetry Counters Policy** (#289) — additive-only counter fields,
+  saturation handling.
+- **[SC-508] Role-Change Incident Review Note** (#290) — admin/operator handoff
+  safety decision table.
+
+### Release Summary Generator (#280)
+
+Run `npx tsx tooling/release-summary.ts` to generate a maintainer-friendly
+release summary from the `[Unreleased]` section of `CHANGELOG.md`. Use `--json`
+for CI or `--check` for format validation.
+
+### Devcontainer Setup (#281)
+
+A `.devcontainer/` setup is provided for GitHub Codespaces and VS Code Dev
+Containers. The devcontainer includes Rust, the `wasm32-unknown-unknown` target,
+`just`, and Node.js. Run `just bootstrap` to set up your local environment.
+
+---
+
 ## SC-098: Security Review Checklist for Privileged Changes
 
 Use this checklist when reviewing PRs that touch governance, config, or storage.

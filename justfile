@@ -19,6 +19,14 @@ wasm_target := "wasm32-unknown-unknown"
 default:
     @just --list
 
+# ----------------------------------------------------------- bootstrap ------
+
+# Bootstrap the dev environment — install toolchain, targets, and tools.
+bootstrap:
+    @echo "🔧 Bootstrapping ApexChainx development environment..."
+    rustup target add wasm32-unknown-unknown
+    @echo "✅ Bootstrap complete. Run 'just ci' to verify."
+
 # ---------------------------------------------------------------- test ------
 
 # Run the library test suite.            [CI: E2E Tests]
