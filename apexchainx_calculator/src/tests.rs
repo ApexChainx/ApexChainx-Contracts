@@ -7024,9 +7024,15 @@ fn test_economic_exposure_returns_all_severities() {
     let (_env, client, _actors) = setup();
     let exposure = client.get_economic_exposure();
     assert_eq!(exposure.breakdown.len(), 4);
-    assert_eq!(exposure.breakdown.get(0).unwrap().severity, symbol_short!("critical"));
+    assert_eq!(
+        exposure.breakdown.get(0).unwrap().severity,
+        symbol_short!("critical")
+    );
     assert_eq!(exposure.breakdown.get(1).unwrap().severity, symbol_short!("high"));
-    assert_eq!(exposure.breakdown.get(2).unwrap().severity, symbol_short!("medium"));
+    assert_eq!(
+        exposure.breakdown.get(2).unwrap().severity,
+        symbol_short!("medium")
+    );
     assert_eq!(exposure.breakdown.get(3).unwrap().severity, symbol_short!("low"));
 }
 
@@ -7040,14 +7046,14 @@ fn test_economic_exposure_max_reward_matches_top_tier() {
     // Default configs: critical/high/medium → reward_base 750, low → 600
     // Top-tier (200 %): 750 * 200 / 100 = 1500; 600 * 200 / 100 = 1200
     let critical = exposure.breakdown.get(0).unwrap();
-    let high     = exposure.breakdown.get(1).unwrap();
-    let medium   = exposure.breakdown.get(2).unwrap();
-    let low      = exposure.breakdown.get(3).unwrap();
+    let high = exposure.breakdown.get(1).unwrap();
+    let medium = exposure.breakdown.get(2).unwrap();
+    let low = exposure.breakdown.get(3).unwrap();
 
     assert_eq!(critical.max_reward, 1500);
-    assert_eq!(high.max_reward,     1500);
-    assert_eq!(medium.max_reward,   1500);
-    assert_eq!(low.max_reward,      1200);
+    assert_eq!(high.max_reward, 1500);
+    assert_eq!(medium.max_reward, 1500);
+    assert_eq!(low.max_reward, 1200);
 }
 
 /// (c) `penalty_per_minute` for each severity matches the configured rate.
@@ -7058,14 +7064,14 @@ fn test_economic_exposure_penalty_rate_matches_config() {
 
     // Default penalty_per_minute: critical=100, high=50, medium=25, low=10
     let critical = exposure.breakdown.get(0).unwrap();
-    let high     = exposure.breakdown.get(1).unwrap();
-    let medium   = exposure.breakdown.get(2).unwrap();
-    let low      = exposure.breakdown.get(3).unwrap();
+    let high = exposure.breakdown.get(1).unwrap();
+    let medium = exposure.breakdown.get(2).unwrap();
+    let low = exposure.breakdown.get(3).unwrap();
 
     assert_eq!(critical.penalty_per_minute, 100);
-    assert_eq!(high.penalty_per_minute,      50);
-    assert_eq!(medium.penalty_per_minute,    25);
-    assert_eq!(low.penalty_per_minute,       10);
+    assert_eq!(high.penalty_per_minute, 50);
+    assert_eq!(medium.penalty_per_minute, 25);
+    assert_eq!(low.penalty_per_minute, 10);
 }
 
 /// (d) Aggregate `total_max_reward` equals the sum of per-severity max rewards.
@@ -7075,11 +7081,7 @@ fn test_economic_exposure_total_max_reward_is_sum_of_breakdown() {
     let exposure = client.get_economic_exposure();
 
     // Default: 1500 + 1500 + 1500 + 1200 = 5700
-    let expected_total: i128 = exposure
-        .breakdown
-        .iter()
-        .map(|e| e.max_reward)
-        .sum();
+    let expected_total: i128 = exposure.breakdown.iter().map(|e| e.max_reward).sum();
     assert_eq!(exposure.total_max_reward, expected_total);
     assert_eq!(exposure.total_max_reward, 5700);
 }
@@ -7092,11 +7094,7 @@ fn test_economic_exposure_total_penalty_per_minute_is_sum_of_breakdown() {
     let exposure = client.get_economic_exposure();
 
     // Default: 100 + 50 + 25 + 10 = 185
-    let expected_total: i128 = exposure
-        .breakdown
-        .iter()
-        .map(|e| e.penalty_per_minute)
-        .sum();
+    let expected_total: i128 = exposure.breakdown.iter().map(|e| e.penalty_per_minute).sum();
     assert_eq!(exposure.total_penalty_per_minute, expected_total);
     assert_eq!(exposure.total_penalty_per_minute, 185);
 }
@@ -7112,7 +7110,7 @@ fn test_economic_exposure_reflects_config_change() {
     let exposure = client.get_economic_exposure();
     let critical = exposure.breakdown.get(0).unwrap();
 
-    assert_eq!(critical.max_reward,        2000);
+    assert_eq!(critical.max_reward, 2000);
     assert_eq!(critical.penalty_per_minute, 200);
 
     // Totals must also update: was 5700 reward, now (2000 + 1500 + 1500 + 1200) = 6200
@@ -7140,8 +7138,18 @@ fn test_economic_exposure_independent_of_history() {
 
     // Run a couple of calculations to populate history
     env.mock_all_auths();
-    client.calculate_sla(&actors.operator, &symbol_short!("out001"), &symbol_short!("critical"), &5);
-    client.calculate_sla(&actors.operator, &symbol_short!("out002"), &symbol_short!("high"), &40);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("out001"),
+        &symbol_short!("critical"),
+        &5,
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("out002"),
+        &symbol_short!("high"),
+        &40,
+    );
 
     let exposure_before = client.get_economic_exposure();
 
@@ -7208,7 +7216,7 @@ fn test_healthcheck_is_deterministic() {
 
 #[test]
 fn test_healthcheck_does_not_mutate_state() {
-    let (_env, client, actors) = setup();
+    let (_env, client, _actors) = setup();
     let stats_before = client.get_stats();
     let _hc = client.healthcheck();
     let stats_after = client.get_stats();
@@ -7232,7 +7240,7 @@ fn test_healthcheck_does_not_require_auth() {
 
 #[test]
 fn test_historical_parity_golden_results() {
-    let (_env, client, actors) = setup();
+    let (_env, client, _actors) = setup();
 
     // Golden result set: known-good outputs for specific inputs.
     // These must NEVER change between releases — if they do, it's a regression.
@@ -7246,18 +7254,102 @@ fn test_historical_parity_golden_results() {
     }
 
     let golden = [
-        Golden { outage_id: "HP001", severity: "critical", mttr: 5,  expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
-        Golden { outage_id: "HP002", severity: "critical", mttr: 15, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
-        Golden { outage_id: "HP003", severity: "critical", mttr: 20, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
-        Golden { outage_id: "HP004", severity: "high",     mttr: 10, expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
-        Golden { outage_id: "HP005", severity: "high",     mttr: 30, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
-        Golden { outage_id: "HP006", severity: "high",     mttr: 40, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
-        Golden { outage_id: "HP007", severity: "medium",   mttr: 20, expected_status: "met",  expected_amount: 1500, expected_rating: "top" },
-        Golden { outage_id: "HP008", severity: "medium",   mttr: 60, expected_status: "met",  expected_amount: 750,  expected_rating: "good" },
-        Golden { outage_id: "HP009", severity: "medium",   mttr: 80, expected_status: "viol", expected_amount: -500, expected_rating: "poor" },
-        Golden { outage_id: "HP010", severity: "low",      mttr: 40, expected_status: "met",  expected_amount: 1200, expected_rating: "top" },
-        Golden { outage_id: "HP011", severity: "low",      mttr: 120,expected_status: "met",  expected_amount: 600,  expected_rating: "good" },
-        Golden { outage_id: "HP012", severity: "low",      mttr: 150,expected_status: "viol", expected_amount: -300, expected_rating: "poor" },
+        Golden {
+            outage_id: "HP001",
+            severity: "critical",
+            mttr: 5,
+            expected_status: "met",
+            expected_amount: 1500,
+            expected_rating: "top",
+        },
+        Golden {
+            outage_id: "HP002",
+            severity: "critical",
+            mttr: 15,
+            expected_status: "met",
+            expected_amount: 750,
+            expected_rating: "good",
+        },
+        Golden {
+            outage_id: "HP003",
+            severity: "critical",
+            mttr: 20,
+            expected_status: "viol",
+            expected_amount: -500,
+            expected_rating: "poor",
+        },
+        Golden {
+            outage_id: "HP004",
+            severity: "high",
+            mttr: 10,
+            expected_status: "met",
+            expected_amount: 1500,
+            expected_rating: "top",
+        },
+        Golden {
+            outage_id: "HP005",
+            severity: "high",
+            mttr: 30,
+            expected_status: "met",
+            expected_amount: 750,
+            expected_rating: "good",
+        },
+        Golden {
+            outage_id: "HP006",
+            severity: "high",
+            mttr: 40,
+            expected_status: "viol",
+            expected_amount: -500,
+            expected_rating: "poor",
+        },
+        Golden {
+            outage_id: "HP007",
+            severity: "medium",
+            mttr: 20,
+            expected_status: "met",
+            expected_amount: 1500,
+            expected_rating: "top",
+        },
+        Golden {
+            outage_id: "HP008",
+            severity: "medium",
+            mttr: 60,
+            expected_status: "met",
+            expected_amount: 750,
+            expected_rating: "good",
+        },
+        Golden {
+            outage_id: "HP009",
+            severity: "medium",
+            mttr: 80,
+            expected_status: "viol",
+            expected_amount: -500,
+            expected_rating: "poor",
+        },
+        Golden {
+            outage_id: "HP010",
+            severity: "low",
+            mttr: 40,
+            expected_status: "met",
+            expected_amount: 1200,
+            expected_rating: "top",
+        },
+        Golden {
+            outage_id: "HP011",
+            severity: "low",
+            mttr: 120,
+            expected_status: "met",
+            expected_amount: 600,
+            expected_rating: "good",
+        },
+        Golden {
+            outage_id: "HP012",
+            severity: "low",
+            mttr: 150,
+            expected_status: "viol",
+            expected_amount: -300,
+            expected_rating: "poor",
+        },
     ];
 
     for g in golden.iter() {
@@ -7267,21 +7359,47 @@ fn test_historical_parity_golden_results() {
         // Use view to avoid mutating state and to verify that the view path
         // also produces the same golden results.
         let view = client.calculate_sla_view(&oid, &sev, &g.mttr);
-        assert_eq!(view.status, Symbol::new(&_env, g.expected_status),
-            "Golden mismatch: {} {} mttr={} — status", g.outage_id, g.severity, g.mttr);
-        assert_eq!(view.amount, g.expected_amount,
-            "Golden mismatch: {} {} mttr={} — amount", g.outage_id, g.severity, g.mttr);
-        assert_eq!(view.rating, Symbol::new(&_env, g.expected_rating),
-            "Golden mismatch: {} {} mttr={} — rating", g.outage_id, g.severity, g.mttr);
+        assert_eq!(
+            view.status,
+            Symbol::new(&_env, g.expected_status),
+            "Golden mismatch: {} {} mttr={} — status",
+            g.outage_id,
+            g.severity,
+            g.mttr
+        );
+        assert_eq!(
+            view.amount, g.expected_amount,
+            "Golden mismatch: {} {} mttr={} — amount",
+            g.outage_id, g.severity, g.mttr
+        );
+        assert_eq!(
+            view.rating,
+            Symbol::new(&_env, g.expected_rating),
+            "Golden mismatch: {} {} mttr={} — rating",
+            g.outage_id,
+            g.severity,
+            g.mttr
+        );
     }
 
     // Also validate that the config snapshot is historically stable
     let snapshot = client.get_config_snapshot();
-    assert_eq!(snapshot.version, symbol_short!("v1"), "Config snapshot version changed");
+    assert_eq!(
+        snapshot.version,
+        symbol_short!("v1"),
+        "Config snapshot version changed"
+    );
     assert_eq!(snapshot.entries.len(), 4, "Config snapshot entry count changed");
 
     // Validate result schema stability
     let schema = client.get_result_schema();
-    assert_eq!(schema.schema_version, 1, "Result schema version changed — check migration notes");
-    assert_eq!(schema.deprecated_symbols.len(), 0, "Unexpected deprecated symbols in v1");
+    assert_eq!(
+        schema.schema_version, 1,
+        "Result schema version changed — check migration notes"
+    );
+    assert_eq!(
+        schema.deprecated_symbols.len(),
+        0,
+        "Unexpected deprecated symbols in v1"
+    );
 }

@@ -1,8 +1,8 @@
 use soroban_sdk::{Address, Env, String};
 
 use crate::{
-    SLAError, PauseInfo,
-    PAUSED_KEY, PAUSE_INFO_KEY, MAX_REASON_LEN, EVENT_VERSION, EVENT_PAUSED, EVENT_UNPAUSED,
+    PauseInfo, SLAError, EVENT_PAUSED, EVENT_UNPAUSED, EVENT_VERSION, MAX_REASON_LEN, PAUSED_KEY,
+    PAUSE_INFO_KEY,
 };
 
 pub fn pause(env: &Env, caller: &Address, reason: String) -> Result<(), SLAError> {

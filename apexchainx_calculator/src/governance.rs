@@ -1,16 +1,12 @@
 use soroban_sdk::{Address, Env};
 
 use crate::{
-    SLAError, ADMIN_KEY, PENDING_ADMIN_KEY, PENDING_OP_KEY, OPERATOR_KEY, EVENT_VERSION,
-    EVENT_ADMIN_PROP, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_REN, EVENT_OP_PROP,
-    EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_SET,
+    SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN, EVENT_OP_ACC,
+    EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY,
+    PENDING_OP_KEY,
 };
 
-pub fn propose_admin(
-    env: &Env,
-    caller: &Address,
-    new_admin: &Address,
-) -> Result<(), SLAError> {
+pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
@@ -56,11 +52,7 @@ pub fn get_pending_admin(env: &Env) -> Result<Option<Address>, SLAError> {
     Ok(env.storage().instance().get(&PENDING_ADMIN_KEY))
 }
 
-pub fn propose_operator(
-    env: &Env,
-    caller: &Address,
-    new_operator: &Address,
-) -> Result<(), SLAError> {
+pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&PENDING_OP_KEY, new_operator);
@@ -116,11 +108,7 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
     Ok(())
 }
 
-pub fn set_operator(
-    env: &Env,
-    caller: &Address,
-    new_operator: &Address,
-) -> Result<(), SLAError> {
+pub fn set_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
     env.storage().instance().set(&OPERATOR_KEY, new_operator);
