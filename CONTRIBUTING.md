@@ -353,6 +353,7 @@ impl SLAContract {
 - [ ] `cargo check --target wasm32-unknown-unknown --lib` passes (no-std check)
 - [ ] New public functions are added to the result schema or documented
 - [ ] Any breaking change to `SLAResult` increments `RESULT_SCHEMA_VERSION`
+- [ ] Any new, removed, or renamed storage key satisfies the [Storage Key Migration Checklist](docs/STORAGE_KEY_MIGRATION_CHECKLIST.md) (SC-509)
 
 ### PR Description Template
 
@@ -520,6 +521,13 @@ This covers:
   saturation handling.
 - **[SC-508] Role-Change Incident Review Note** (#290) — admin/operator handoff
   safety decision table.
+
+### Storage Key Migration
+
+When adding, removing, or renaming any `*_KEY` constant in
+`apexchainx_calculator/src/lib.rs`, work through the
+**[SC-509] [Storage Key Migration Checklist](docs/STORAGE_KEY_MIGRATION_CHECKLIST.md)**
+(#266) and include your answers in the PR description.
 
 ### Release Summary Generator (#280)
 

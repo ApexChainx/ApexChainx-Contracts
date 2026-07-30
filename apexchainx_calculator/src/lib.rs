@@ -44,6 +44,9 @@ use crate::config_bundle::ConfigBundle;
 //   - Stable across contract upgrades (new versions add new keys)
 //   - Within the 9-character Symbol limit for Soroban
 //
+// Adding, removing, or renaming a key? Work through the checklist first:
+//   docs/STORAGE_KEY_MIGRATION_CHECKLIST.md  (SC-509)
+//
 // References: Issue numbers track the original feature requirements.
 
 /// Admin address — set during initialize, governs config and roles.

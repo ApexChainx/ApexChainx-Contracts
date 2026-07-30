@@ -15,6 +15,7 @@
 - [SC-506: History Write Audit Check](#sc-506-history-write-audit-check)
 - [SC-507: Telemetry Counters Policy](#sc-507-telemetry-counters-policy)
 - [SC-508: Role-Change Incident Review Note](#sc-508-role-change-incident-review-note)
+- [SC-509: Storage Key Migration Readiness](#sc-509-storage-key-migration-readiness)
 
 ---
 
@@ -396,6 +397,45 @@ Admin Renouncement:
 
 ---
 
+---
+
+## SC-509: Storage Key Migration Readiness
+
+### Policy
+
+Any PR that adds, removes, or renames a `const *_KEY: Symbol` in
+`apexchainx_calculator/src/lib.rs` MUST satisfy the
+[Storage Key Migration Checklist](STORAGE_KEY_MIGRATION_CHECKLIST.md)
+before merging.
+
+Storage keys are permanent on-chain identifiers. A key that is added without
+a corresponding migration path leaves upgraded deployments in an undefined
+state until `migrate()` is called — and an absent `migrate()` arm means the
+key is silently missing, leading to unexpected errors or wrong defaults.
+
+### When This Applies
+
+| Change | Checklist Required |
+|--------|--------------------|
+| New `const *_KEY` added | ✅ Yes |
+| Existing key removed | ✅ Yes |
+| Symbol string of a key changed | ✅ Yes (treat as remove + add) |
+| Doc comment only | ❌ No |
+
+### Enforcement
+
+The PR checklist in `CONTRIBUTING.md` includes a checkbox for storage key
+migration. Reviewers MUST reject PRs that touch the storage key block without
+a completed migration checklist note in the PR description.
+
+### Related
+
+- [Storage Key Migration Checklist](STORAGE_KEY_MIGRATION_CHECKLIST.md)
+- [Reserved Keys Policy](RESERVED_KEYS_POLICY.md)
+- [SC-506: History Write Audit Check](#sc-506-history-write-audit-check)
+
+---
+
 ## Summary: Issue Cross-Reference
 
 | Issue | Policy Section |
@@ -409,4 +449,5 @@ Admin Renouncement:
 | #288 | SC-506: History Write Audit Check |
 | #289 | SC-507: Telemetry Counters Policy |
 | #290 | SC-508: Role-Change Incident Review Note |
+| #266 | SC-509: Storage Key Migration Readiness |
 
