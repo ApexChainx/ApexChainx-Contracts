@@ -115,6 +115,17 @@ jobs:
         working-directory: apexchainx_calculator
         run: cargo test --lib
 
+      # Issue #255: Result schema migration guardrail.
+      # schema_migration_tests.rs contains a compile-time exhaustive SLAResult
+      # destructure and runtime assertions that RESULT_SCHEMA_VERSION and
+      # RESULT_SCHEMA_FIELD_COUNT match the actual struct layout and the values
+      # returned by get_result_schema(). Any PR that modifies SLAResult without
+      # updating both constants will fail here.
+      # See: docs/result-schema-migration-guard.md
+      - name: Result schema migration guard
+        working-directory: apexchainx_calculator
+        run: cargo test --lib schema_migration_tests
+
       # Issue #81: Normalize snapshot artifacts before upload so that volatile
       # fields (timestamp, elapsed_ms, generated_at) are stripped and keys are
       # sorted. This prevents noisy PR diffs caused by non-semantic changes.

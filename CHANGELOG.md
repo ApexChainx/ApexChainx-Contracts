@@ -10,6 +10,10 @@
 
 ### Added
 - `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
+- `RESULT_SCHEMA_FIELD_COUNT` constant — compile-time sentinel recording the number of named fields in `SLAResult`; must be updated alongside `RESULT_SCHEMA_VERSION` when the result layout changes (#255)
+- `SLAResultSchema::result_field_count` — exposes `RESULT_SCHEMA_FIELD_COUNT` to backend consumers via `get_result_schema()` so they can detect layout drift at runtime (#255)
+- `schema_migration_tests.rs` — CI-backed guardrail tests for `get_result_schema()`: exhaustive `SLAResult` destructure (compile-time gate), field count sentinel, symbol stability, deprecated-symbols invariant, and `get_config_bundle` consistency (closes #255)
+- `docs/result-schema-migration-guard.md` — documentation for the result schema migration process, describing the two-level guardrail, step-by-step change process, and backend consumer guidance (closes #255)
 - `tooling/release-summary.ts` — release summary generator for maintainers (#280)
 - `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js (#281)
 - `just bootstrap` target — one-command local environment setup (#281)

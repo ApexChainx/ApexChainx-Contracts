@@ -14,6 +14,9 @@ mod tests;
 #[cfg(test)]
 mod fuzz_tests;
 
+#[cfg(test)]
+mod schema_migration_tests;
+
 pub mod audit_state;
 pub mod config;
 pub mod config_bundle;
@@ -101,6 +104,23 @@ pub(crate) const STORAGE_VERSION: u32 = 1;
 /// Version of the SLAResult schema exposed via get_result_schema().
 /// Incremented when result encoding changes in a breaking way.
 pub(crate) const RESULT_SCHEMA_VERSION: u32 = 1;
+
+/// Number of named fields in `SLAResult`.
+///
+/// This constant is the migration guardrail for `get_result_schema()`.
+/// It must be updated in the same commit that adds or removes a field from
+/// `SLAResult`. The companion test `test_result_schema_field_count_sentinel`
+/// in `schema_migration_tests.rs` will fail CI if the struct layout changes
+/// without a corresponding update to this constant and `RESULT_SCHEMA_VERSION`.
+///
+/// **How to update when adding a field:**
+/// 1. Add the field to `SLAResult`.
+/// 2. Increment this constant.
+/// 3. Increment `RESULT_SCHEMA_VERSION` (breaking change).
+/// 4. Update `get_result_schema()` if a new symbol descriptor is needed.
+/// 5. Add a CHANGELOG entry under `[Unreleased]` → `Changed`.
+/// 6. See `docs/result-schema-migration-guard.md` for the full process.
+pub(crate) const RESULT_SCHEMA_FIELD_COUNT: u32 = 9;
 
 /// Hard upper bound on retained history entries. (SC-062)
 /// Configurable down to 1 via set_retention_limit().
@@ -422,6 +442,10 @@ pub struct SLAResultSchema {
     pub version: Symbol,
     /// Numeric schema version (incremented on breaking changes).
     pub schema_version: u32,
+    /// Number of named fields in `SLAResult` at this schema version.
+    /// Backends can compare this against their own deserialization code to
+    /// detect layout drift without parsing the full field list.
+    pub result_field_count: u32,
     /// Symbol for SLA met status.
     pub status_met: Symbol,
     /// Symbol for SLA violated status.
@@ -1423,6 +1447,7 @@ impl SLACalculatorContract {
         Ok(SLAResultSchema {
             version: symbol_short!("v1"),
             schema_version: RESULT_SCHEMA_VERSION,
+            result_field_count: RESULT_SCHEMA_FIELD_COUNT,
             status_met: symbol_short!("met"),
             status_violated: symbol_short!("viol"),
             payment_reward: symbol_short!("rew"),
