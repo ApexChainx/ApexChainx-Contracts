@@ -155,6 +155,33 @@ jobs:
         working-directory: apexchainx_calculator
         run: cargo test --lib fuzz_tests::
 
+  release-tests:
+    name: Release Tests (#90)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/target
+          key: release-test-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            release-test-${{ runner.os }}-cargo-
+
+      - name: Run tests with --release (#90)
+        working-directory: apexchainx_calculator
+        run: cargo test --release --lib
+
 
   provenance-hashes:
     name: Provenance & Hashes

@@ -9,6 +9,10 @@
 ## [Unreleased]
 
 ### Added
+- CI release-tests job — runs `cargo test --release --lib` to catch release-mode-only regressions (#90)
+- `api_stability` module — maintainer-facing stability scoring for contract types, error codes, event symbols, and storage keys (#225)
+- Concurrency policy tests for `calculate_sla` — verifies deterministic idempotency, contradictory-input rejection, config-change reset, and anti-spam recalc limit (#221)
+- Retryable vs terminal error classification harness — maps every `SLAError` variant to retryable or terminal category with stability assertions (#227)
 - `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
 - `tooling/release-summary.ts` — release summary generator for maintainers (#280)
 - `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js (#281)

@@ -15,6 +15,7 @@ mod tests;
 mod fuzz_tests;
 
 pub mod audit_state;
+pub mod api_stability;
 pub mod config;
 pub mod config_bundle;
 pub mod config_freeze;
