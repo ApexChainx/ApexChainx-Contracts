@@ -56,19 +56,23 @@ export interface ReplayResult {
 const CRATE_DIR = "apexchainx_calculator";
 const WASM_TARGET = "wasm32-unknown-unknown";
 
+const DEFAULT_TIMEOUT_MS = 600_000; // 10 minutes per step
+const MAX_BUFFER = 10 * 1024 * 1024; // 10 MB for verbose cargo output
+
 const opts: ExecSyncOptions = {
   stdio: "pipe",
   cwd: process.cwd(),
-  timeout: 120_000, // 2 minutes per step
+  timeout: DEFAULT_TIMEOUT_MS,
+  maxBuffer: MAX_BUFFER,
 };
 
 // ---------------------------------------------------------------------------
 // Step runner
 // ---------------------------------------------------------------------------
 
-export function runStep(step: string, command: string, cwd?: string): StepResult {
+export function runStep(step: string, command: string, cwd?: string, timeoutMs?: number): StepResult {
   const start = Date.now();
-  const stepOpts: ExecSyncOptions = { ...opts };
+  const stepOpts: ExecSyncOptions = { ...opts, timeout: timeoutMs ?? DEFAULT_TIMEOUT_MS };
   if (cwd) stepOpts.cwd = path.resolve(process.cwd(), cwd);
 
   process.stdout.write(`  ⏳ ${step}... `);
