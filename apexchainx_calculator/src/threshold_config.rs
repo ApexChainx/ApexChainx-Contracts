@@ -2,9 +2,21 @@
 //!
 //! This module tests edge cases around threshold configuration and SLA
 //! calculation results. It verifies that extreme threshold values (zero,
-//! near-zero) produce correct SLA outcomes.
+//! near-zero) produce the correct contract behaviour: zero-threshold
+//! configurations are rejected at validation time, and the minimum valid
+//! threshold (1 minute) creates a razor-thin boundary for SLA outcomes.
 //!
 //! # Test Scenarios
+//!
+//! - `test_zero_threshold_rejected_by_validation`: `set_config` with
+//!   `threshold_minutes = 0` must be rejected with `InvalidThreshold`
+//!   (error code 8). This is the primary guard against a zero-threshold
+//!   ever reaching storage — a zero value would make the `performance_ratio`
+//!   calculation in `compute_result` divide by zero.
+//!
+//! - `test_zero_threshold_cannot_enter_storage`: Confirms the stored
+//!   configuration is unchanged after a rejected zero-threshold call,
+//!   asserting the no-partial-state-change guarantee.
 //!
 //! - `test_near_zero_threshold_one_minute`: A 1-minute threshold creates a
 //!   razor-thin boundary where MTTR of 1 minute meets the SLA but MTTR of
@@ -14,7 +26,7 @@
 mod threshold_tests {
     use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
-    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use crate::{SLACalculatorContract, SLACalculatorContractClient, SLAError};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
         env.mock_all_auths();
@@ -55,24 +67,61 @@ mod threshold_tests {
         );
     }
 
+    /// `set_config` with `threshold_minutes = 0` must be rejected with
+    /// `InvalidThreshold` (error code 8).
+    ///
+    /// A zero threshold is unsafe: `compute_result` divides by
+    /// `threshold_minutes` when computing the performance ratio for reward
+    /// tier selection. The `validate_config` guard ensures this value can
+    /// never reach on-chain storage, so this test pins that contract.
+    ///
+    /// Replaces the former `test_zero_threshold_always_violated` which
+    /// incorrectly assumed `set_config` would succeed with threshold = 0.
     #[test]
-    fn test_zero_threshold_always_violated() {
+    fn test_zero_threshold_rejected_by_validation() {
         let env = Env::default();
-        let (admin, operator, client) = setup(&env);
-        client.set_config(
+        let (admin, _operator, client) = setup(&env);
+
+        let result = client.try_set_config(
             &admin,
             &symbol_short!("low"),
             &0,
             &10,
-            &100,
+            &600,
         );
-        let result = client.calculate_sla(
-            &operator,
-            &symbol_short!("OUT1"),
+
+        assert_eq!(
+            result,
+            Err(Ok(SLAError::InvalidThreshold)),
+            "set_config with threshold_minutes=0 must return InvalidThreshold (code 8)"
+        );
+    }
+
+    /// After a rejected zero-threshold call the stored config must be
+    /// unchanged, confirming the no-partial-state-change guarantee.
+    #[test]
+    fn test_zero_threshold_cannot_enter_storage() {
+        let env = Env::default();
+        let (admin, _operator, client) = setup(&env);
+
+        // Record the default low config before the attempted write.
+        let before = client.get_config(&symbol_short!("low"));
+
+        // Attempt the invalid write.
+        let _ = client.try_set_config(
+            &admin,
             &symbol_short!("low"),
-            &1,
+            &0,
+            &10,
+            &600,
         );
-        assert_eq!(result.status, symbol_short!("viol"));
+
+        // The stored config must be identical to what it was before.
+        let after = client.get_config(&symbol_short!("low"));
+        assert_eq!(
+            before, after,
+            "stored config must be unchanged after a rejected zero-threshold set_config"
+        );
     }
 
     #[test]

@@ -8,6 +8,18 @@
 
 ## [Unreleased]
 
+### Fixed
+- Replaced stale `test_zero_threshold_always_violated` test in `threshold_config.rs`
+  with two correct tests that verify `set_config` rejects `threshold_minutes = 0`
+  with `InvalidThreshold` (code 8). The previous test incorrectly assumed a
+  zero-threshold write would succeed and then tested calculation behaviour on an
+  impossible stored state.
+- Hardened `validate_cross_severity_penalty_ordering` in `lib.rs` to use
+  `.ok_or(SLAError::InvalidSeverity)?` instead of `.unwrap()` when indexing
+  into the canonical severity list. The function is now panic-free: if the
+  internal severity list invariant is ever broken the call surfaces a
+  deterministic `InvalidSeverity` error rather than an unrecoverable host trap.
+
 ### Added
 - `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
 - `tooling/release-summary.ts` — release summary generator for maintainers (#280)

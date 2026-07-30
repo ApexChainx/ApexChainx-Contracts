@@ -2153,8 +2153,16 @@ impl SLACalculatorContract {
 
         // Check against the next-lower severity (if any):
         //   this severity's penalty >= next-lower severity's penalty
+        //
+        // `canonical_severities` always returns exactly 4 entries, so
+        // `index + 1` is within bounds whenever the condition holds. The
+        // `ok_or` guard makes that assumption explicit and converts an
+        // unexpected out-of-bounds condition into a deterministic error
+        // rather than a panic.
         if index + 1 < severities.len() {
-            let lower_sev = severities.get(index + 1).unwrap();
+            let lower_sev = severities
+                .get(index + 1)
+                .ok_or(SLAError::InvalidSeverity)?;
             if let Some(lower_cfg) = configs.get(lower_sev.clone()) {
                 if new_penalty < lower_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);
@@ -2166,8 +2174,14 @@ impl SLACalculatorContract {
         // the three higher tiers. Low (index 3) is exempt from this check
         // because its per-severity cap (100) intentionally exceeds medium's
         // minimum (10), making a strict `low <= medium` rule impossible.
+        //
+        // Same defensive `ok_or` pattern: the bounds check above guarantees
+        // `index - 1` is valid for index in 1..=2, but the explicit error
+        // conversion prevents a silent panic if that invariant is ever broken.
         if index >= 1 && index <= 2 {
-            let higher_sev = severities.get(index - 1).unwrap();
+            let higher_sev = severities
+                .get(index - 1)
+                .ok_or(SLAError::InvalidSeverity)?;
             if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
                 if new_penalty > higher_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);

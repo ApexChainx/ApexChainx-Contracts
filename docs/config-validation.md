@@ -241,3 +241,5 @@ set_config(admin, high, 30, 25, 750);         // → InvalidPenalty (high 25 < m
 | Success events | Successful config updates emit versioned `cfg_upd` events |
 | Failure behavior | Failed validations do not emit events or consume extra gas |
 | Determinism | Same invalid inputs always produce same error codes |
+| Zero-threshold safety | `threshold_minutes = 0` is rejected with `InvalidThreshold` (code 8) before reaching storage. This prevents a division in `compute_result`'s performance-ratio calculation from ever operating on a zero denominator |
+| Cross-severity hardening | `validate_cross_severity_penalty_ordering` uses safe `.ok_or(InvalidSeverity)` lookups on the canonical severity list rather than panicking `.unwrap()` calls, so any unexpected invariant violation surfaces as a deterministic error instead of an unrecoverable host trap |
