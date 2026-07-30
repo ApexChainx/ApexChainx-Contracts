@@ -617,4 +617,130 @@ just corrupted indexed data and broken settlement reconciliation.
 
 ---
 
+## SC-100: Storage-Key & Event-Topic Namespace Collision Pre-Merge Checklist
+
+Use this checklist **before merging any PR** that introduces new storage keys
+or event topic constants. Namespace collisions between storage keys or between
+event topics are easy to introduce during development but difficult to diagnose
+after deployment, especially when multiple contributors work on the same crate.
+
+This checklist complements the automated collision-detection tests already in
+the test suite (`test_storage_key_namespace_no_collisions` in `lib.rs` and
+`test_event_names_are_distinct` in `event_schema.rs`). Manual human review is
+still required because tests only cover the final state of a single branch —
+they cannot catch collisions that arise during merge conflict resolution or
+when two PRs independently introduce overlapping names.
+
+### Reference: Current Storage Key Namespace (`apexchainx_calculator/src/lib.rs`)
+
+All storage keys use 9-character-or-shorter `Symbol` constants defined with
+`symbol_short!()`. The following are the currently registered keys:
+
+| Constant | Symbol Value | Purpose |
+|----------|-------------|---------|
+| `ADMIN_KEY` | `"ADMIN"` | Admin address |
+| `OPERATOR_KEY` | `"OPERATOR"` | Operator address |
+| `PENDING_ADMIN_KEY` | `"PADMIN"` | Pending admin for two-step transfer |
+| `PENDING_OP_KEY` | `"POP"` | Pending operator for two-step handoff |
+| `CONFIG_KEY` | `"CONFIG"` | Per-severity SLA configuration map |
+| `CUSTOM_CONFIG_KEY` | `"CUSTCFG"` | Admin-defined custom severity configs |
+| `PAUSED_KEY` | `"PAUSED"` | Pause-state boolean flag |
+| `PAUSE_INFO_KEY` | `"PAUSEINF"` | Pause metadata (reason, timestamp, caller) |
+| `STATS_KEY` | `"STATS"` | Cumulative SLA statistics |
+| `SEVERITY_CALC_COUNTS_KEY` | `"CALCCNT"` | Per-severity weekly calculation counter |
+| `SEVERITY_VIOL_COUNTS_KEY` | `"VIOLCNT"` | Per-severity weekly violation counter |
+| `LAST_CALCULATION_LEDGER_KEY` | `"CALCLDG"` | Per-severity last calculation ledger |
+| `LAST_VIOLATION_LEDGER_KEY` | `"VIOLLDG"` | Per-severity last violation ledger |
+| `HISTORY_KEY` | `"HIST"` | Ordered list of historical SLA results |
+| `STORAGE_VERSION_KEY` | `"VER"` | Current on-chain storage schema version |
+| `RETENTION_LIMIT_KEY` | `"RETLIM"` | Configurable retention limit override |
+| `LAST_CFG_UPDATE_KEY` | (from config_metadata) | Ledger sequence of last config update |
+
+### Reference: Current Event Topic Namespace (`apexchainx_calculator/src/event_schema.rs`)
+
+All events follow a standardised 3-topic layout:
+`topic[0]` = event name (Symbol), `topic[1]` = version (`"v1"`),
+`topic[2]` = event-specific context.
+
+The following event name constants are currently defined:
+
+| Constant | Symbol Value | Payload Context |
+|----------|-------------|----------------|
+| `EVENT_SLA_CALC` | `"sla_calc"` | severity Symbol |
+| `EVENT_SETTLE_INTENT` | `"set_int"` | severity Symbol |
+| `EVENT_CONFIG_UPD` | `"cfg_upd"` | severity Symbol |
+| `EVENT_PAUSED` | `"paused"` | caller Address |
+| `EVENT_UNPAUSED` | `"unpause"` | caller Address |
+| `EVENT_OP_SET` | `"op_set"` | caller Address |
+| `EVENT_PRUNED` | `"pruned"` | caller Address |
+| `EVENT_PRUNED_AGE` | `"pruned_a"` | caller Address |
+| `EVENT_ADMIN_PROP` | `"adm_prop"` | caller Address |
+| `EVENT_ADMIN_ACC` | `"adm_acc"` | caller Address |
+| `EVENT_ADMIN_CAN` | `"adm_can"` | caller Address |
+| `EVENT_ADMIN_REN` | `"adm_ren"` | caller Address |
+| `EVENT_OP_PROP` | `"op_prop"` | caller Address |
+| `EVENT_OP_ACC` | `"op_acc"` | caller Address |
+| `EVENT_OP_CAN` | `"op_can"` | caller Address |
+| `EVENT_CONFIG_FREEZE` | `"cfg_frz"` | caller Address |
+| `EVENT_CONFIG_UNFREEZE` | `"cfg_unfrz"` | caller Address |
+| `EVENT_STATS_SAT` | `"stats_sat"` | counter_name Symbol |
+| `EVENT_MIGRATE_DONE` | `"migrate_done"` | caller Address |
+
+### Pre-Merge Checklist
+
+#### Storage-Key Collision Check
+
+- [ ] Every new storage key constant uses `symbol_short!()` with a unique
+      9-character-or-shorter Symbol value.
+- [ ] The new Symbol value does **not** collide with any existing key in the
+      table above or in any sub-module of the crate (search the entire crate
+      with `grep -rn "symbol_short" apexchainx_calculator/src/`).
+- [ ] The new key is added to the storage-keys namespace block in
+      `apexchainx_calculator/src/lib.rs` (lines ~48-130), not scattered across
+      sub-modules with inline `symbol_short!()` calls.
+- [ ] The new key has a meaningful Rust constant name with the `_KEY` suffix
+      convention (e.g. `MY_NEW_KEY`).
+- [ ] The `test_storage_key_namespace_no_collisions` test in `lib.rs` passes.
+- [ ] A merge-conflict scenario has been considered: if another open PR adds
+      a key with the same Symbol value, this PR will need coordination with
+      that contributor before merging.
+
+#### Event-Topic Collision Check
+
+- [ ] Every new event constant uses `symbol_short!()` with a unique
+      9-character-or-shorter Symbol value.
+- [ ] The new Symbol value does **not** collide with any existing event name
+      in the table above.
+- [ ] The new constant is added to `event_schema.rs` (not scattered in-line
+      across other modules), with a doc comment explaining its purpose.
+- [ ] The new constant is appended to the `names` array in the
+      `test_event_names_are_distinct` test in `event_schema.rs`.
+- [ ] The event schema doc comment in `event_schema.rs` includes the new event
+      with its topic layout and payload schema documented.
+- [ ] At least one emission site is included in the same PR.
+- [ ] The 3-topic layout (`topic[0]=name, topic[1]=version, topic[2]=context`)
+      is preserved for the new event.
+- [ ] `cargo test` passes (the collision tests are part of the test suite).
+
+#### Cross-Module Check
+
+- [ ] The new Symbol value has been checked against **both** the storage-key
+      AND event-topic namespaces. (Storage keys and event topics share the
+      Soroban Symbol namespace — a collision between a storage key and an
+      event name would not cause a compile error but would create confusing
+      observability data.)
+- [ ] The PR description explicitly calls out any new storage keys or event
+      topics being introduced, with their Symbol values.
+- [ ] If the PR adds both a new storage key AND a new event topic, the Symbol
+      values are verified to be different from each other.
+
+### Related
+
+- [docs/RESERVED_KEYS_POLICY.md](docs/RESERVED_KEYS_POLICY.md) — Reserved key prefix conventions
+- [docs/EVENT_TOPIC_COMPATIBILITY.md](docs/EVENT_TOPIC_COMPATIBILITY.md) — Event topic compatibility policy
+- [SC-099: Event-Topic & Payload Schema Contributor Safety Checklist](#sc-099-event-topic--payload-schema-contributor-safety-checklist) — Broader event schema safety
+- [SC-098: Security Review Checklist for Privileged Changes](#sc-098-security-review-checklist-for-privileged-changes) — Security review for privileged fn changes
+
+---
+
 **Happy coding! 🚀**
