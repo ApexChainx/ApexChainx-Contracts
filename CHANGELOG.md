@@ -10,8 +10,11 @@
 
 ### Added
 - `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
+- `docs/EVENT_DRIFT_CHECKLIST.md` — standalone quick-reference event drift review checklist for everyday maintainer use (#287)
 - `tooling/release-summary.ts` — release summary generator for maintainers (#280)
-- `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js (#281)
+- `scripts/release-replay.ts` — minimal release candidate validation command for fast pre-release checks (#270)
+- `just release-replay` and `just release-replay-full` targets — fast and full release validation (#270)
+- `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js, including setup README (#281)
 - `just bootstrap` target — one-command local environment setup (#281)
 - Historical parity checker test (`test_historical_parity_golden_results`) — validates current contract behavior against known golden results for release regression detection (#282)
 - `get_config_version_hash` — deterministic hash of the current config snapshot for backend parity validation

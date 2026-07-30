@@ -513,7 +513,7 @@ This covers:
 - **[SC-504] Event Payload Size Check** (#286) — payload size assertions required
   for every event change.
 - **[SC-505] Event Drift Review Note** (#287) — checklist for event name/payload
-  changes.
+  changes. See also the [quick-reference checklist](docs/EVENT_DRIFT_CHECKLIST.md).
 - **[SC-506] History Write Audit Check** (#288) — FIFO ordering, pruning, and
   idempotency invariants.
 - **[SC-507] Telemetry Counters Policy** (#289) — additive-only counter fields,
@@ -531,7 +531,11 @@ for CI or `--check` for format validation.
 
 A `.devcontainer/` setup is provided for GitHub Codespaces and VS Code Dev
 Containers. The devcontainer includes Rust, the `wasm32-unknown-unknown` target,
-`just`, and Node.js. Run `just bootstrap` to set up your local environment.
+`just`, and Node.js. On first launch the devcontainer runs `just bootstrap`
+automatically. Run `just ci` to verify your environment matches CI.
+
+See [`.devcontainer/README.md`](.devcontainer/README.md) for detailed setup
+instructions.
 
 ---
 

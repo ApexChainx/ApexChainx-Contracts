@@ -90,7 +90,18 @@ hash: wasm-release
         shasum -a 256 "$wasm" | awk '{print $1 "  {{crate}}.wasm"}'
     fi
 
-# --------------------------------------------------------------- tooling -----
+# ----------------------------------------------------------- release ------
+
+# Minimal release candidate validation (fast).  [CI: Release Replay]
+# Runs format, clippy, no-std, core tests, topic-stability, and WASM build.
+# Use release-replay-full for fuzz + full test suite.
+release-replay:
+    npx --yes tsx scripts/release-replay.ts
+
+release-replay-full:
+    npx --yes tsx scripts/release-replay.ts --full
+
+# --------------------------------------------------------------- tooling ------
 
 # Generate a ship-review note from CHANGELOG.md.
 # Pass a version tag to summarise a released block: just release-summary 0.3.0
