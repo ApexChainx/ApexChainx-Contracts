@@ -31,6 +31,8 @@
 //! - topic[2]: severity Symbol
 //! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
 //!   reward_base: i128)
+//! - repeated writes preserve invocation order; see the regression policy in
+//!   `docs/PROJECT_CONTEXT.md`
 //!
 //! ## paused (`paused`)
 //! Emitted when the contract is paused.
@@ -164,6 +166,11 @@
 //!
 //! Backends MUST check `deprecated_symbols` at startup and log warnings for
 //! any deprecated symbols they still rely on.
+//!
+//! # Review Checklist
+//!
+//! When adding or modifying events, refer to both the SC-099 Event-Topic Schema
+//! Checklist and the SC-100 Public Method Review Checklist in `CONTRIBUTING.md`.
 
 #![allow(dead_code)]
 

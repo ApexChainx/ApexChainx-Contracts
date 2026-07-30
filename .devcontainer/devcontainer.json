@@ -28,7 +28,7 @@
       }
     }
   },
-  "postCreateCommand": "rustup target add wasm32-unknown-unknown && cargo install just && just --list",
+  "postCreateCommand": "cargo install just && just bootstrap && just --list",
   "remoteUser": "vscode",
   "containerEnv": {
     "CARGO_TERM_COLOR": "always",

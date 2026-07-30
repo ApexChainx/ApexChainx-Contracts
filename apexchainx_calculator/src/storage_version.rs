@@ -12,6 +12,19 @@
 //! 3. `get_migration_state()` reports `needs_migration: true`
 //! 4. Admin calls `migrate()` — storage is transformed and version is bumped
 //! 5. `get_migration_state()` reports `needs_migration: false`
+//!
+//! # Shape-Change Checklist
+//!
+//! Any PR that increments `STORAGE_VERSION`, adds or renames storage keys, or
+//! introduces a new `migrate()` path **must** be reviewed against:
+//!
+//! `docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md` — Section 1 (Storage Schema Changes)
+//!
+//! Key gates from that checklist:
+//! - New keys documented in `docs/RESERVED_KEYS_POLICY.md`
+//! - `initialize()` stamps the new version constant
+//! - Migration is idempotent and covered by a before/after snapshot test
+//! - `CHANGELOG.md` records the version number that changed
 
 use soroban_sdk::{symbol_short, Env, Symbol};
 

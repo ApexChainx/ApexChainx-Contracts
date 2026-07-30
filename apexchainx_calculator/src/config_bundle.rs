@@ -38,6 +38,7 @@ use crate::{SLAConfigSnapshot, SLAResultSchema};
 /// SDK client boundary intact. `Clone`, `Debug`, `Eq`, and `PartialEq` are
 /// derived to match the conventions used by every other `#[contracttype]`
 /// struct in this contract (e.g. `SLAResult`, `VersionInfo`).
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ConfigBundle {

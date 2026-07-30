@@ -1,10 +1,17 @@
+//! SLA calculation history storage, pruning, and pagination.
+//!
+//! This module manages the on-chain history of SLA calculation results,
+//! supporting full retrieval, retention-limited pruning, age-based pruning,
+//! paginated access, and per-outage lookup.
+
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
-    SLAError, SLAResult,
-    HISTORY_KEY, RETENTION_LIMIT_KEY, MAX_HISTORY_SIZE, EVENT_VERSION, EVENT_PRUNED, EVENT_PRUNED_AGE,
+    SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_VERSION, HISTORY_KEY, MAX_HISTORY_SIZE,
+    RETENTION_LIMIT_KEY,
 };
 
+/// Returns the full SLA calculation history.
 pub fn get_history(env: &Env) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     Ok(env
@@ -14,6 +21,8 @@ pub fn get_history(env: &Env) -> Result<Vec<SLAResult>, SLAError> {
         .unwrap_or_else(|| Vec::new(env)))
 }
 
+/// Prunes history to retain only the most recent `keep_latest` entries.
+/// Admin only. Emits a `pruned` event.
 pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
@@ -34,13 +43,17 @@ pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<()
         }
 
         env.storage().instance().set(&HISTORY_KEY, &new_history);
-        env.events()
-            .publish((EVENT_PRUNED, EVENT_VERSION, caller.clone()), (remove_count, keep_latest));
+        env.events().publish(
+            (EVENT_PRUNED, EVENT_VERSION, caller.clone()),
+            (remove_count, keep_latest),
+        );
     }
 
     Ok(())
 }
 
+/// Prunes history entries older than `min_age_seconds`.
+/// Admin only. Emits a `pruned_a` event.
 pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
@@ -76,6 +89,7 @@ pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -
     Ok(())
 }
 
+/// Returns a paginated slice of the SLA history.
 pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let history: Vec<SLAResult> = env
@@ -95,6 +109,7 @@ pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLARes
     Ok(page)
 }
 
+/// Returns all history entries for a specific outage ID.
 pub fn get_history_by_outage(env: &Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let history: Vec<SLAResult> = env
@@ -112,6 +127,7 @@ pub fn get_history_by_outage(env: &Env, outage_id: Symbol) -> Result<Vec<SLAResu
     Ok(matches)
 }
 
+/// Returns the most recent history entry for a given outage ID, if any.
 pub fn get_latest_by_outage(env: &Env, outage_id: Symbol) -> Result<Option<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let history: Vec<SLAResult> = env
@@ -129,6 +145,7 @@ pub fn get_latest_by_outage(env: &Env, outage_id: Symbol) -> Result<Option<SLARe
     Ok(latest)
 }
 
+/// Returns the number of configured severity levels.
 pub fn get_config_count(env: &Env) -> Result<u32, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let configs: soroban_sdk::Map<Symbol, crate::SLAConfig> = env
@@ -139,6 +156,7 @@ pub fn get_config_count(env: &Env) -> Result<u32, SLAError> {
     Ok(configs.len())
 }
 
+/// Sets the retention limit for history entries. Admin only.
 pub fn set_retention_limit(env: &Env, caller: &Address, limit: u32) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
@@ -149,6 +167,7 @@ pub fn set_retention_limit(env: &Env, caller: &Address, limit: u32) -> Result<()
     Ok(())
 }
 
+/// Returns the current retention limit (defaults to MAX_HISTORY_SIZE).
 pub fn get_retention_limit(env: &Env) -> Result<u32, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     Ok(env

@@ -1,0 +1,255 @@
+{
+  "baseline_version": 1,
+  "description": "Canonical parity baseline for ApexChainx SLA calculator. Each entry records a locked-in historical golden vector. The Rust parity checker (parity_tests.rs) must pass against every entry before a release is cut. Update this file, the inline PARITY_VECTORS table in parity_tests.rs, and CHANGELOG when a deliberate calculation change is made.",
+  "schema": {
+    "case_id": "Unique identifier for this test vector",
+    "severity": "Severity level label (informational; config fields carry the actual parameters)",
+    "config": {
+      "threshold_minutes": "Maximum allowed MTTR before SLA is considered violated",
+      "penalty_per_minute": "Penalty amount charged per minute of overtime (positive integer stored as i128)",
+      "reward_base": "Base reward amount for meeting SLA targets (positive integer stored as i128)"
+    },
+    "input": {
+      "mttr_minutes": "Measured time to repair in minutes"
+    },
+    "expected": {
+      "status": "met | viol",
+      "payment_type": "rew | pen",
+      "rating": "top | excel | good | poor",
+      "amount": "Signed integer: positive = reward, negative = penalty"
+    }
+  },
+  "reward_multiplier_boundaries": {
+    "description": "Multiplier applied to reward_base; determined by ratio = (mttr * 100) / threshold",
+    "top": "ratio < 50 → multiplier 200 → reward = reward_base * 200 / 100",
+    "excel": "50 ≤ ratio < 75 → multiplier 150 → reward = reward_base * 150 / 100",
+    "good": "ratio ≥ 75 → multiplier 100 → reward = reward_base * 100 / 100",
+    "viol": "mttr > threshold → amount = -((mttr - threshold) * penalty_per_minute)"
+  },
+  "vectors": [
+    {
+      "case_id": "critical_mttr_0_top",
+      "severity": "critical",
+      "config": { "threshold_minutes": 15, "penalty_per_minute": 100, "reward_base": 750 },
+      "input": { "mttr_minutes": 0 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "top", "amount": 1500 }
+    },
+    {
+      "case_id": "critical_mttr_7_top",
+      "severity": "critical",
+      "config": { "threshold_minutes": 15, "penalty_per_minute": 100, "reward_base": 750 },
+      "input": { "mttr_minutes": 7 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "top", "amount": 1500 }
+    },
+    {
+      "case_id": "critical_mttr_8_excel",
+      "severity": "critical",
+      "config": { "threshold_minutes": 15, "penalty_per_minute": 100, "reward_base": 750 },
+      "input": { "mttr_minutes": 8 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "excel", "amount": 1125 }
+    },
+    {
+      "case_id": "critical_mttr_11_excel",
+      "severity": "critical",
+      "config": { "threshold_minutes": 15, "penalty_per_minute": 100, "reward_base": 750 },
+      "input": { "mttr_minutes": 11 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "excel", "amount": 1125 }
+    },
+    {
+      "case_id": "critical_mttr_12_good",
+      "severity": "critical",
+      "config": { "threshold_minutes": 15, "penalty_per_minute": 100, "reward_base": 750 },
+      "input": { "mttr_minutes": 12 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "good", "amount": 750 }
+    },
+    {
+      "case_id": "critical_mttr_15_exact",
+      "severity": "critical",
+      "config": { "threshold_minutes": 15, "penalty_per_minute": 100, "reward_base": 750 },
+      "input": { "mttr_minutes": 15 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "good", "amount": 750 }
+    },
+    {
+      "case_id": "critical_mttr_16_viol",
+      "severity": "critical",
+      "config": { "threshold_minutes": 15, "penalty_per_minute": 100, "reward_base": 750 },
+      "input": { "mttr_minutes": 16 },
+      "expected": { "status": "viol", "payment_type": "pen", "rating": "poor", "amount": -100 }
+    },
+    {
+      "case_id": "critical_mttr_30_viol",
+      "severity": "critical",
+      "config": { "threshold_minutes": 15, "penalty_per_minute": 100, "reward_base": 750 },
+      "input": { "mttr_minutes": 30 },
+      "expected": { "status": "viol", "payment_type": "pen", "rating": "poor", "amount": -1500 }
+    },
+    {
+      "case_id": "high_mttr_0_top",
+      "severity": "high",
+      "config": { "threshold_minutes": 30, "penalty_per_minute": 50, "reward_base": 750 },
+      "input": { "mttr_minutes": 0 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "top", "amount": 1500 }
+    },
+    {
+      "case_id": "high_mttr_14_top",
+      "severity": "high",
+      "config": { "threshold_minutes": 30, "penalty_per_minute": 50, "reward_base": 750 },
+      "input": { "mttr_minutes": 14 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "top", "amount": 1500 }
+    },
+    {
+      "case_id": "high_mttr_15_excel",
+      "severity": "high",
+      "config": { "threshold_minutes": 30, "penalty_per_minute": 50, "reward_base": 750 },
+      "input": { "mttr_minutes": 15 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "excel", "amount": 1125 }
+    },
+    {
+      "case_id": "high_mttr_22_excel",
+      "severity": "high",
+      "config": { "threshold_minutes": 30, "penalty_per_minute": 50, "reward_base": 750 },
+      "input": { "mttr_minutes": 22 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "excel", "amount": 1125 }
+    },
+    {
+      "case_id": "high_mttr_23_good",
+      "severity": "high",
+      "config": { "threshold_minutes": 30, "penalty_per_minute": 50, "reward_base": 750 },
+      "input": { "mttr_minutes": 23 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "good", "amount": 750 }
+    },
+    {
+      "case_id": "high_mttr_30_exact",
+      "severity": "high",
+      "config": { "threshold_minutes": 30, "penalty_per_minute": 50, "reward_base": 750 },
+      "input": { "mttr_minutes": 30 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "good", "amount": 750 }
+    },
+    {
+      "case_id": "high_mttr_31_viol",
+      "severity": "high",
+      "config": { "threshold_minutes": 30, "penalty_per_minute": 50, "reward_base": 750 },
+      "input": { "mttr_minutes": 31 },
+      "expected": { "status": "viol", "payment_type": "pen", "rating": "poor", "amount": -50 }
+    },
+    {
+      "case_id": "high_mttr_60_viol",
+      "severity": "high",
+      "config": { "threshold_minutes": 30, "penalty_per_minute": 50, "reward_base": 750 },
+      "input": { "mttr_minutes": 60 },
+      "expected": { "status": "viol", "payment_type": "pen", "rating": "poor", "amount": -1500 }
+    },
+    {
+      "case_id": "medium_mttr_0_top",
+      "severity": "medium",
+      "config": { "threshold_minutes": 60, "penalty_per_minute": 25, "reward_base": 750 },
+      "input": { "mttr_minutes": 0 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "top", "amount": 1500 }
+    },
+    {
+      "case_id": "medium_mttr_29_top",
+      "severity": "medium",
+      "config": { "threshold_minutes": 60, "penalty_per_minute": 25, "reward_base": 750 },
+      "input": { "mttr_minutes": 29 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "top", "amount": 1500 }
+    },
+    {
+      "case_id": "medium_mttr_30_excel",
+      "severity": "medium",
+      "config": { "threshold_minutes": 60, "penalty_per_minute": 25, "reward_base": 750 },
+      "input": { "mttr_minutes": 30 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "excel", "amount": 1125 }
+    },
+    {
+      "case_id": "medium_mttr_44_excel",
+      "severity": "medium",
+      "config": { "threshold_minutes": 60, "penalty_per_minute": 25, "reward_base": 750 },
+      "input": { "mttr_minutes": 44 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "excel", "amount": 1125 }
+    },
+    {
+      "case_id": "medium_mttr_45_good",
+      "severity": "medium",
+      "config": { "threshold_minutes": 60, "penalty_per_minute": 25, "reward_base": 750 },
+      "input": { "mttr_minutes": 45 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "good", "amount": 750 }
+    },
+    {
+      "case_id": "medium_mttr_60_exact",
+      "severity": "medium",
+      "config": { "threshold_minutes": 60, "penalty_per_minute": 25, "reward_base": 750 },
+      "input": { "mttr_minutes": 60 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "good", "amount": 750 }
+    },
+    {
+      "case_id": "medium_mttr_61_viol",
+      "severity": "medium",
+      "config": { "threshold_minutes": 60, "penalty_per_minute": 25, "reward_base": 750 },
+      "input": { "mttr_minutes": 61 },
+      "expected": { "status": "viol", "payment_type": "pen", "rating": "poor", "amount": -25 }
+    },
+    {
+      "case_id": "medium_mttr_120_viol",
+      "severity": "medium",
+      "config": { "threshold_minutes": 60, "penalty_per_minute": 25, "reward_base": 750 },
+      "input": { "mttr_minutes": 120 },
+      "expected": { "status": "viol", "payment_type": "pen", "rating": "poor", "amount": -1500 }
+    },
+    {
+      "case_id": "low_mttr_0_top",
+      "severity": "low",
+      "config": { "threshold_minutes": 120, "penalty_per_minute": 10, "reward_base": 600 },
+      "input": { "mttr_minutes": 0 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "top", "amount": 1200 }
+    },
+    {
+      "case_id": "low_mttr_59_top",
+      "severity": "low",
+      "config": { "threshold_minutes": 120, "penalty_per_minute": 10, "reward_base": 600 },
+      "input": { "mttr_minutes": 59 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "top", "amount": 1200 }
+    },
+    {
+      "case_id": "low_mttr_60_excel",
+      "severity": "low",
+      "config": { "threshold_minutes": 120, "penalty_per_minute": 10, "reward_base": 600 },
+      "input": { "mttr_minutes": 60 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "excel", "amount": 900 }
+    },
+    {
+      "case_id": "low_mttr_89_excel",
+      "severity": "low",
+      "config": { "threshold_minutes": 120, "penalty_per_minute": 10, "reward_base": 600 },
+      "input": { "mttr_minutes": 89 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "excel", "amount": 900 }
+    },
+    {
+      "case_id": "low_mttr_90_good",
+      "severity": "low",
+      "config": { "threshold_minutes": 120, "penalty_per_minute": 10, "reward_base": 600 },
+      "input": { "mttr_minutes": 90 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "good", "amount": 600 }
+    },
+    {
+      "case_id": "low_mttr_120_exact",
+      "severity": "low",
+      "config": { "threshold_minutes": 120, "penalty_per_minute": 10, "reward_base": 600 },
+      "input": { "mttr_minutes": 120 },
+      "expected": { "status": "met", "payment_type": "rew", "rating": "good", "amount": 600 }
+    },
+    {
+      "case_id": "low_mttr_121_viol",
+      "severity": "low",
+      "config": { "threshold_minutes": 120, "penalty_per_minute": 10, "reward_base": 600 },
+      "input": { "mttr_minutes": 121 },
+      "expected": { "status": "viol", "payment_type": "pen", "rating": "poor", "amount": -10 }
+    },
+    {
+      "case_id": "low_mttr_240_viol",
+      "severity": "low",
+      "config": { "threshold_minutes": 120, "penalty_per_minute": 10, "reward_base": 600 },
+      "input": { "mttr_minutes": 240 },
+      "expected": { "status": "viol", "payment_type": "pen", "rating": "poor", "amount": -1200 }
+    }
+  ]
+}

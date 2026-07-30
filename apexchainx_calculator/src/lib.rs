@@ -1,10 +1,20 @@
+//! ApexChainx SLA Calculator — Soroban smart contract for deterministic
+//! SLA calculation, secure payment escrow, and multi-party settlement on the
+//! Stellar network.
+//!
+//! This crate implements the core SLA calculator contract with configurable
+//! severity levels, role-based access control, pause/unpause lifecycle,
+//! cumulative statistics, event emission for backend indexing, and storage
+//! version migration.
 #![no_std]
+#![warn(missing_docs)]
 extern crate alloc;
 
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, String, Symbol, Vec,
 };
 
+#[allow(missing_docs)]
 #[contract]
 pub struct SLACalculatorContract;
 
@@ -16,15 +26,20 @@ mod fuzz_tests;
 
 #[cfg(test)]
 mod schema_migration_tests;
+/// Parity checker: compares current `compute_result` against the locked-in
+/// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
+/// Run with `cargo test --lib parity_tests::` or `just parity-check`.
+#[cfg(test)]
+mod parity_tests;
 
 pub mod audit_state;
+pub mod calculation;
 pub mod config;
 pub mod config_bundle;
 pub mod config_freeze;
 pub mod config_metadata;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
-pub mod calculation;
 pub mod error_responses;
 pub mod event_correlation;
 mod event_schema;
@@ -48,6 +63,13 @@ use crate::config_bundle::ConfigBundle;
 //   - Within the 9-character Symbol limit for Soroban
 //
 // References: Issue numbers track the original feature requirements.
+//
+// MAINTENANCE: When you add a new storage key constant here (or re-export
+// one via `pub use`), you MUST also add it to the collision regression test:
+//   apexchainx_calculator/src/tests.rs
+//   → test_storage_key_namespace_symbols_are_distinct
+// That test is the sole enforcement mechanism for namespace uniqueness.
+// A missing entry is a silent aliasing bug waiting to happen.
 
 /// Admin address — set during initialize, governs config and roles.
 pub(crate) const ADMIN_KEY: Symbol = symbol_short!("ADMIN");
@@ -95,6 +117,10 @@ pub(crate) const LAST_VIOLATION_LEDGER_KEY: Symbol = symbol_short!("VIOLLDG");
 pub(crate) const HISTORY_KEY: Symbol = symbol_short!("HIST");
 
 /// Current on-chain storage schema version number.
+// INVARIANT: Once written, the value at STORAGE_VERSION_KEY must only be
+// incremented by migrate(). All other read paths treat this key as read-only.
+// No two storage keys may share the same Symbol value — this key is stable
+// across all contract versions and may never be repurposed.
 pub(crate) const STORAGE_VERSION_KEY: Symbol = symbol_short!("VER");
 
 /// The storage schema version this contract binary expects.
@@ -220,59 +246,120 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // -----------------------------------------------------------------------
 
 /// Emitted on successful SLA calculation. Primary event for backend consumers.
+///
+/// Compatibility decision: appending new fields to the end of the payload tuple
+/// is NOT breaking. Field reordering, removal, or type changes require bumping
+/// EVENT_VERSION from "v1" to "v2". See event_schema.rs for the full payload
+/// schema and the SC-099 checklist in CONTRIBUTING.md for the review process.
 pub(crate) const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
 
 /// Emitted alongside sla_calc for settlement intent reconciliation.
+///
+/// Compatibility decision: settlement intent fields are ordered by settlement
+/// priority (id, status, payment, amount, hash, timestamp). Field additions
+/// go at the end; any reorder or removal requires a version bump.
 pub(crate) const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 
 /// Emitted when configuration is updated via set_config.
+///
+/// Compatibility decision: payload is (threshold_minutes, penalty_per_minute,
+/// reward_base) — the full config triple. Appending fields is safe; reordering
+/// or removing fields requires a version bump.
 pub(crate) const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
 
 /// Emitted when the contract is paused by admin. (#27)
+///
+/// Compatibility decision: payload is `(true,)`. Empty-tuple expansion is
+/// additive and safe; changing the boolean to a different type requires a
+/// version bump.
 pub(crate) const EVENT_PAUSED: Symbol = symbol_short!("paused");
 
 /// Emitted when the contract is unpaused by admin. (#27)
+///
+/// Compatibility decision: payload is `(false,)`. Same rules as EVENT_PAUSED.
 pub(crate) const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
 
 /// Emitted when the operator address is changed. (#28)
+///
+/// Compatibility decision: payload is `(new_operator: Address,)`. Appending
+/// additional fields is safe; changing the address field type requires a
+/// version bump.
 pub(crate) const EVENT_OP_SET: Symbol = symbol_short!("op_set");
 
 /// Emitted after a prune_history call removes entries.
+///
+/// Compatibility decision: payload is `(removed_count: u32, kept_count: u32)`.
+/// Appending fields is safe; reordering or type changes require a version bump.
 pub(crate) const EVENT_PRUNED: Symbol = symbol_short!("pruned");
 
 /// Emitted after a prune_history_by_age call removes entries. (SC-063)
+///
+/// Compatibility decision: same shape as EVENT_PRUNED — intentional parallel.
+/// Field additions are safe; any structural change requires a version bump.
 pub(crate) const EVENT_PRUNED_AGE: Symbol = symbol_short!("pruned_a");
 
 /// Emitted when a new admin is proposed. (#63)
+///
+/// Compatibility decision: payload is `(new_admin: Address,)`. Additive field
+/// appends are safe; type or order changes require a version bump.
 pub(crate) const EVENT_ADMIN_PROP: Symbol = symbol_short!("adm_prop");
 
 /// Emitted when a pending admin proposal is accepted. (#63)
+///
+/// Compatibility decision: payload is intentionally empty `()`. If a payload
+/// is ever added, EVENT_VERSION must be bumped.
 pub(crate) const EVENT_ADMIN_ACC: Symbol = symbol_short!("adm_acc");
 
 /// Emitted when a pending admin proposal is cancelled. (SC-024)
+///
+/// Compatibility decision: payload is intentionally empty `()`. Same rules as
+/// EVENT_ADMIN_ACC.
 pub(crate) const EVENT_ADMIN_CAN: Symbol = symbol_short!("adm_can");
 
 /// Emitted when the admin permanently renounces their role. (#65)
+///
+/// Compatibility decision: payload is intentionally empty `()`. Renounce is
+/// irreversible; the empty payload signals the transition without extra data.
 pub(crate) const EVENT_ADMIN_REN: Symbol = symbol_short!("adm_ren");
 
 /// Emitted when a new operator is proposed. (#64)
+///
+/// Compatibility decision: payload is `(new_operator: Address,)`. Same rules
+/// as EVENT_ADMIN_PROP.
 pub(crate) const EVENT_OP_PROP: Symbol = symbol_short!("op_prop");
 
 /// Emitted when a pending operator proposal is accepted. (#64)
+///
+/// Compatibility decision: payload is intentionally empty `()`. Same rules as
+/// EVENT_ADMIN_ACC.
 pub(crate) const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 
 /// Emitted when a pending operator proposal is cancelled. (SC-024)
+///
+/// Compatibility decision: payload is intentionally empty `()`. Same rules as
+/// EVENT_ADMIN_CAN.
 pub(crate) const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
 
 /// Emitted when the configuration is frozen by admin.
+///
+/// Compatibility decision: payload is intentionally empty `()`. The freeze
+/// event carries no payload because the caller address is in topic[2].
 pub(crate) const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 
 /// Emitted when the configuration is unfrozen by admin.
+///
+/// Compatibility decision: payload is intentionally empty `()`. Same rules as
+/// EVENT_CONFIG_FREEZE.
 pub(crate) const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 
 /// Emitted when a running-stats counter saturates during increment_stats.
 /// Signals backend indexers that the on-chain total capped and now
 /// under-reports true economic exposure. (SC-W5-047)
+///
+/// Compatibility decision: payload is `(field: Symbol, previous_value: i128,
+/// attempted_increment: i128)`. This is a diagnostic-only event; appending
+/// fields is safe, but existing fields must not be reordered or re-typed
+/// without a version bump, as backend alerting pipelines parse this shape.
 pub(crate) const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
 
 /// Canonical event version symbol used by all events.
@@ -289,9 +376,14 @@ pub(crate) const EVENT_VERSION: Symbol = symbol_short!("v1");
 //
 // Error codes are stable: once assigned, a code is never reused.
 // New codes are appended to the end of the enum.
+//
+// For the formal failure taxonomy (categories, severity, consumer impact,
+// and recovery strategies for every error code), see
+// [`docs/FAILURE_TAXONOMY.md`](../docs/FAILURE_TAXONOMY.md).
 // -----------------------------------------------------------------------
 
 /// Contract has already been initialized — cannot initialize twice.
+#[allow(missing_docs)]
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -375,6 +467,7 @@ pub enum SLAError {
 
 /// Configuration parameters for a single severity level.
 /// Each severity (critical, high, medium, low) has its own SLAConfig.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAConfig {
@@ -388,6 +481,7 @@ pub struct SLAConfig {
 
 /// Complete result of an SLA calculation, returned by calculate_sla
 /// and calculate_sla_view.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAResult {
@@ -412,6 +506,7 @@ pub struct SLAResult {
 }
 
 /// A single severity-to-config mapping entry in a config snapshot.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAConfigEntry {
@@ -423,6 +518,7 @@ pub struct SLAConfigEntry {
 
 /// Ordered snapshot of all severity configurations, suitable for backend
 /// consumption. Entries are in canonical severity order.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAConfigSnapshot {
@@ -435,6 +531,7 @@ pub struct SLAConfigSnapshot {
 /// Describes the result encoding schema for backend consumers.
 /// Backends use this to interpret SLA result symbols without
 /// hard-coding symbol values.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAResultSchema {
@@ -467,9 +564,13 @@ pub struct SLAResultSchema {
     /// Deprecated symbols that are still emitted for backward compatibility.
     /// Each entry is (deprecated_symbol, replacement_symbol, deprecated_at_schema_version).
     pub deprecated_symbols: Vec<DeprecatedSymbol>,
+    /// #239 – Deprecated severity alias mappings for historical result interpretation.
+    /// Backends use this to translate old severity symbols to current ones.
+    pub severity_aliases: Vec<SeverityAliasMapping>,
 }
 
 /// A deprecated symbol mapping that is still emitted for backward compatibility.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeprecatedSymbol {
@@ -483,7 +584,27 @@ pub struct DeprecatedSymbol {
     pub removal_version: Option<u32>,
 }
 
+/// #239 – A deprecated severity alias mapping for historical result interpretation.
+///
+/// When a severity alias is renamed (e.g., "critical" → "crit"), historical SLAResult
+/// entries retain the old severity symbol. This struct allows backends to translate
+/// old severity symbols to current ones when querying historical data.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SeverityAliasMapping {
+    /// The deprecated severity symbol still present in historical results.
+    pub old_severity: Symbol,
+    /// The replacement severity symbol that supersedes it.
+    pub new_severity: Symbol,
+    /// The schema version at which this deprecation was introduced.
+    pub deprecated_at: u32,
+    /// The schema version at which the old severity was removed from active config.
+    /// None indicates the severity is still valid (coexistence phase).
+    pub removal_version: Option<u32>,
+}
+
 /// #60 – Single introspection call for backend clients.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ContractMetadata {
@@ -495,6 +616,7 @@ pub struct ContractMetadata {
 }
 
 /// #29 – Cumulative on-chain SLA performance metrics.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SLAStats {
@@ -514,6 +636,7 @@ pub struct SLAStats {
 /// The total penalty for one event grows linearly: `overtime_minutes *
 /// penalty_per_minute`. There is no contract-level cap on overtime, so the
 /// dashboard must apply its own horizon when projecting worst-case exposure.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeverityExposure {
@@ -541,6 +664,7 @@ pub struct SeverityExposure {
 ///
 /// `breakdown` contains one entry per canonical severity in canonical order
 /// (critical → high → medium → low).
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EconomicExposure {
@@ -553,6 +677,7 @@ pub struct EconomicExposure {
 }
 
 /// #101 – Per-severity weekly violation-rate telemetry snapshot.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SeverityTelemetry {
@@ -563,6 +688,7 @@ pub struct SeverityTelemetry {
 }
 
 /// #66 – Pause metadata stored when the contract is paused.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PauseInfo {
@@ -590,6 +716,75 @@ pub struct ConfigUpdateInfo {
 /// to confirm the storage version matches expectations before resuming operations.
 /// If `needs_migration` is true, the admin must call `migrate` before the contract
 /// will accept versioned calls.
+///
+/// # Consumption Guide (Backend / Operator Tooling)
+///
+/// ## Startup Handshake Flow
+///
+/// 1. **Call `get_migration_state()`** immediately after establishing a connection
+///    to the contract (e.g. at backend startup, after a reconnect).
+/// 2. **Inspect `needs_migration`:**
+///    - `false` → the contract is on the expected version. Proceed with normal
+///      operations. No action needed.
+///    - `true`  → the contract storage version differs from what this binary
+///      expects. **Do not** issue operational transactions (`calculate_sla`,
+///      `set_config`, `pause`, etc.) — they will fail with `VersionMismatch`.
+/// 3. **If `needs_migration` is `true`, compare the versions:**
+///    - If `stored_version < expected_version` → the contract is behind.
+///      An admin must invoke `migrate()` to upgrade the storage layout.
+///    - If `stored_version > expected_version` → the contract is ahead.
+///      The backend binary is outdated and must be upgraded first.
+/// 4. **Poll after migration:** Re-call `get_migration_state()` after `migrate()`
+///    completes to confirm `needs_migration` is now `false`.
+///
+/// ## Operator Tooling Integration
+///
+/// - **Monitoring alerts:** Set up a health-check loop that calls
+///   `get_migration_state()` every N blocks. Alert if `needs_migration` flips to
+///   `true` unexpectedly (indicates an unauthorised upgrade or state corruption).
+/// - **Deployment pipelines:** Add a pre-deployment step that reads the current
+///   `stored_version` from the live contract and compares it against the
+///   `expected_version` of the binary being deployed. Block the deployment if
+///   `needs_migration` would be `true` after upgrade.
+/// - **Canary checks:** Before rolling out a new backend version to all
+///   instances, have a canary instance call `get_migration_state()` against a
+///   staging contract that has been upgraded. Verify `needs_migration` is
+///   `false` before promoting the release.
+///
+/// ## Error Handling
+///
+/// - `NotInitialized` is returned if the contract has never been initialized
+///   (no `STORAGE_VERSION_KEY` present). This is a permanent error — the
+///   contract must be initialized before any operations are possible.
+/// - `get_migration_state()` intentionally **bypasses** `check_version()` so it
+///   remains callable even when the contract is in a pre-migration state.
+///
+/// ## Example: Backend Startup Sequence
+///
+/// ```ignore
+/// // Pseudocode — adapt to your language/runtime
+/// let state = contract.get_migration_state();
+/// if state.needs_migration {
+///     if state.stored_version < state.expected_version {
+///         log.warn("Contract needs upgrade. Calling migrate()...");
+///         admin_wallet.invoke(contract.migrate());
+///         // Re-check after migration
+///         state = contract.get_migration_state();
+///         if state.needs_migration {
+///             throw new Error("Migration did not resolve version mismatch");
+///         }
+///     } else {
+///         throw new Error(
+///             "Backend is outdated. Expected version " +
+///             state.expected_version + " but contract is at " +
+///             state.stored_version);
+///     }
+/// }
+/// log.info("Contract is ready. Storage version: " + state.stored_version);
+/// ```
+///
+/// See [`docs/MIGRATION_STATE_CONSUMPTION.md`] for the full consumption guide
+/// with diagrams, troubleshooting, and operator runbook.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StorageVersionInfo {
@@ -648,6 +843,38 @@ pub struct HealthcheckResult {
     pub status: Symbol,
 }
 
+/// #261 – Contract state fingerprint for release review and upgrade planning.
+///
+/// Provides a compact, deterministic snapshot of the contract's live state by
+/// combining storage version, configuration hash, pause state, and migration
+/// posture into a single reviewable summary. This is safe to call on a live
+/// contract without mutating state.
+///
+/// Backend consumers can call this before and after upgrades or during incident
+/// response to quickly audit the contract's current posture without issuing
+/// separate queries for each field.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ContractStateFingerprint {
+    /// Human-readable contract name for log correlation.
+    pub contract_name: Symbol,
+    /// Storage schema version stamped in contract storage.
+    pub storage_version: u32,
+    /// Result schema version for SLAResult field layout.
+    pub result_schema_version: u32,
+    /// Deterministic hash of the current configuration snapshot.
+    /// Changes whenever set_config is called with different values.
+    pub config_version_hash: u64,
+    /// True when the contract is currently paused.
+    pub is_paused: bool,
+    /// True when stored storage version differs from the binary's expected version.
+    pub needs_migration: bool,
+    /// True when the configuration is frozen (admin cannot call set_config).
+    pub is_config_frozen: bool,
+    /// Ledger timestamp when this fingerprint was captured (seconds).
+    pub captured_at: u64,
+}
+
 /// SC-W5-029 – Combined version negotiation response for backend startup handshake.
 ///
 /// Backend consumers call `get_version_info` once at startup (or after an upgrade)
@@ -677,6 +904,11 @@ pub struct VersionInfo {
 // -----------------------------------------------------------------------
 // Contract implementation
 // -----------------------------------------------------------------------
+//
+// CONTRIBUTOR NOTICE:
+// Any new public methods or modifications to existing ones must be reviewed
+// against the SC-100 Public Method Review Checklist in CONTRIBUTING.md.
+// This ensures event schema, versioning, and migration rules are upheld.
 #[contractimpl]
 impl SLACalculatorContract {
     // -------------------------------------------------------------------
@@ -921,7 +1153,8 @@ impl SLACalculatorContract {
     // Role queries
     // -------------------------------------------------------------------
 
-    pub fn get_admin(env: Env) -> Result<Address, SLAError> {
+    /// Returns the current admin address.
+pub fn get_admin(env: Env) -> Result<Address, SLAError> {
         Self::check_version(&env)?;
         env.storage()
             .instance()
@@ -1164,7 +1397,8 @@ impl SLACalculatorContract {
     // Config management (admin only)                                 #28
     // -------------------------------------------------------------------
 
-    pub fn set_config(
+    /// Updates the configuration for a canonical severity level. Admin only.
+pub fn set_config(
         env: Env,
         caller: Address,
         severity: Symbol,
@@ -1181,11 +1415,7 @@ impl SLACalculatorContract {
 
         // #92 – Cross-severity penalty ordering: enforce severity progression
         // so higher-severity penalties are never lower than lower-severity ones.
-        Self::validate_cross_severity_penalty_ordering(
-            &env,
-            &severity,
-            penalty_per_minute,
-        )?;
+        Self::validate_cross_severity_penalty_ordering(&env, &severity, penalty_per_minute)?;
 
         let mut configs: Map<Symbol, SLAConfig> = env
             .storage()
@@ -1216,7 +1446,8 @@ impl SLACalculatorContract {
         Ok(())
     }
 
-    pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
+    /// Returns the configuration for the given severity.
+pub fn get_config(env: Env, severity: Symbol) -> Result<SLAConfig, SLAError> {
         Self::check_version(&env)?;
         Self::load_config(&env, &severity)
     }
@@ -1334,7 +1565,8 @@ impl SLACalculatorContract {
         })
     }
 
-    pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
+    /// Lists all configured severity-to-config mappings.
+pub fn list_configs(env: Env) -> Result<Map<Symbol, SLAConfig>, SLAError> {
         Self::check_version(&env)?;
         env.storage()
             .instance()
@@ -1442,7 +1674,8 @@ impl SLACalculatorContract {
         })
     }
 
-    pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
+    /// Returns the result schema descriptor for backend symbol mapping.
+pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
         Self::check_version(&env)?;
         Ok(SLAResultSchema {
             version: symbol_short!("v1"),
@@ -1458,6 +1691,7 @@ impl SLACalculatorContract {
             rating_poor: symbol_short!("poor"),
             includes_config_version_hash: true,
             deprecated_symbols: Vec::new(&env),
+            severity_aliases: Vec::new(&env),
         })
     }
 
@@ -1480,7 +1714,8 @@ impl SLACalculatorContract {
         Ok(Some(ConfigBundle { snapshot, schema }))
     }
 
-    pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
+    /// Returns the full audit state including roles, config, stats, and history.
+pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
         Self::check_version(&env)?;
 
         let admin = Self::get_admin(env.clone())?;
@@ -2172,14 +2407,21 @@ impl SLACalculatorContract {
             .get(&CONFIG_KEY)
             .ok_or(SLAError::NotInitialized)?;
 
-        let index = Self::canonical_severity_index(updated_severity)
-            .ok_or(SLAError::InvalidSeverity)?;
+        let index = Self::canonical_severity_index(updated_severity).ok_or(SLAError::InvalidSeverity)?;
         let severities = Self::canonical_severities(env);
 
         // Check against the next-lower severity (if any):
         //   this severity's penalty >= next-lower severity's penalty
+        //
+        // `canonical_severities` always returns exactly 4 entries, so
+        // `index + 1` is within bounds whenever the condition holds. The
+        // `ok_or` guard makes that assumption explicit and converts an
+        // unexpected out-of-bounds condition into a deterministic error
+        // rather than a panic.
         if index + 1 < severities.len() {
-            let lower_sev = severities.get(index + 1).unwrap();
+            let lower_sev = severities
+                .get(index + 1)
+                .ok_or(SLAError::InvalidSeverity)?;
             if let Some(lower_cfg) = configs.get(lower_sev.clone()) {
                 if new_penalty < lower_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);
@@ -2191,9 +2433,16 @@ impl SLACalculatorContract {
         // the three higher tiers. Low (index 3) is exempt from this check
         // because its per-severity cap (100) intentionally exceeds medium's
         // minimum (10), making a strict `low <= medium` rule impossible.
+        //
+        // Same defensive `ok_or` pattern: the bounds check above guarantees
+        // `index - 1` is valid for index in 1..=2, but the explicit error
+        // conversion prevents a silent panic if that invariant is ever broken.
         if index >= 1 && index <= 2 {
-            let higher_sev = severities.get(index - 1).unwrap();
-            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
+            let higher_sev = severities
+                .get(index - 1)
+                .ok_or(SLAError::InvalidSeverity)?;
+        if (1..=2).contains(&index) {
+            let higher_sev = severities.get(index - 1).unwrap();            if let Some(higher_cfg) = configs.get(higher_sev.clone()) {
                 if new_penalty > higher_cfg.penalty_per_minute {
                     return Err(SLAError::InvalidPenalty);
                 }
@@ -2642,6 +2891,33 @@ impl SLACalculatorContract {
     /// the storage version matches expectations. If `needs_migration` is true,
     /// the admin must call `migrate` before versioned endpoints will respond.
     ///
+    /// # Startup Handshake Protocol
+    ///
+    /// 1. Call `get_migration_state()` at backend startup or after reconnect.
+    /// 2. Check `needs_migration`:
+    ///    - `false` → contract is ready. Proceed with normal operations.
+    ///    - `true`  → Do NOT issue operational transactions until migration
+    ///      is resolved. They will fail with `VersionMismatch`.
+    /// 3. If `stored_version < expected_version` → admin must call `migrate()`.
+    ///    If `stored_version > expected_version` → backend binary is outdated.
+    /// 4. Re-check after migration to confirm `needs_migration` is `false`.
+    ///
+    /// # Operator Monitoring
+    ///
+    /// - **Health-check loop:** Poll every N blocks. Alert if
+    ///   `needs_migration` flips to `true` unexpectedly.
+    /// - **Pre-deployment gate:** Compare `stored_version` of live contract
+    ///   against `expected_version` of binary being deployed. Block if
+    ///   migration would be required.
+    /// - **Canary verification:** Before rolling out a new backend version,
+    ///   have a canary instance verify against a staging contract.
+    ///
+    /// See [`docs/MIGRATION_STATE_CONSUMPTION.md`](../docs/MIGRATION_STATE_CONSUMPTION.md)
+    /// for the full consumption guide with diagrams, troubleshooting, and
+    /// operator runbook.
+    ///
+    /// # Design
+    ///
     /// This function intentionally bypasses `check_version` so it remains
     /// callable even when the contract is in a pre-migration state.
     pub fn get_migration_state(env: Env) -> Result<StorageVersionInfo, SLAError> {
@@ -2709,5 +2985,88 @@ impl SLACalculatorContract {
             contract_name: symbol_short!("sla_calc"),
             status,
         }
+    }
+
+    // -------------------------------------------------------------------
+    // #261 – Contract state fingerprint for release review and upgrade planning
+    // -------------------------------------------------------------------
+
+    /// Returns a compact, deterministic snapshot of the contract's live state.
+    ///
+    /// Combines storage version, configuration hash, pause state, configuration
+    /// freeze state, and migration posture into a single fingerprint object.
+    /// This is a read-only view that does **not** require authentication,
+    /// does **not** mutate state, and does **not** emit events.
+    ///
+    /// # Use Cases
+    ///
+    /// - **Pre-upgrade audit**: capture the fingerprint before deploying a new
+    ///   contract version, then compare it against the post-upgrade fingerprint
+    ///   to verify only expected state changed.
+    /// - **Incident response**: quickly surface the contract's posture during an
+    ///   incident without issuing separate queries for version, config, pause, etc.
+    /// - **Backend health checks**: backends can cache this fingerprint and poll
+    ///   it periodically to detect unexpected state drift (e.g., an admin paused
+    ///   the contract or froze the config without notifying the backend).
+    ///
+    /// # Returns
+    ///
+    /// A `ContractStateFingerprint` containing:
+    /// - `contract_name`: fixed to "sla_calc"
+    /// - `storage_version`: the version currently stamped in storage
+    /// - `result_schema_version`: the `SLAResult` schema version this binary expects
+    /// - `config_version_hash`: deterministic hash of the current config snapshot
+    /// - `is_paused`: true when the contract is paused
+    /// - `needs_migration`: true when `storage_version != STORAGE_VERSION`
+    /// - `is_config_frozen`: true when the config is frozen
+    /// - `captured_at`: ledger timestamp when this fingerprint was captured (seconds)
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotInitialized` if the contract has never been initialized (no
+    /// `STORAGE_VERSION_KEY` present). All other contract states return a valid
+    /// fingerprint, including pre-migration and paused states.
+    ///
+    /// # Safety
+    ///
+    /// This function intentionally bypasses `check_version` so it remains callable
+    /// even when the contract is in a pre-migration state (`needs_migration == true`).
+    /// The fingerprint itself reports the migration state, so backends can decide
+    /// whether to proceed or wait for `migrate()` to complete.
+    pub fn get_contract_state_fingerprint(env: Env) -> Result<ContractStateFingerprint, SLAError> {
+        // Read storage version — this is the only field that can cause NotInitialized.
+        let stored_version: u32 = env
+            .storage()
+            .instance()
+            .get(&STORAGE_VERSION_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+
+        // Compute needs_migration without requiring check_version to pass.
+        let needs_migration = stored_version != STORAGE_VERSION;
+
+        // Config version hash computation is safe even in pre-migration state
+        // because load_config works across all initialized states.
+        let config_version_hash = match Self::compute_config_version_hash(&env) {
+            Ok(hash) => hash,
+            Err(_) => 0u64, // If config is unreadable, use sentinel 0
+        };
+
+        // Pause and freeze state default to false if keys are absent.
+        let is_paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
+        let is_config_frozen: bool = config_freeze::is_config_frozen(&env);
+
+        // Capture the current ledger timestamp.
+        let captured_at = env.ledger().timestamp();
+
+        Ok(ContractStateFingerprint {
+            contract_name: symbol_short!("sla_calc"),
+            storage_version: stored_version,
+            result_schema_version: RESULT_SCHEMA_VERSION,
+            config_version_hash,
+            is_paused,
+            needs_migration,
+            is_config_frozen,
+            captured_at,
+        })
     }
 }

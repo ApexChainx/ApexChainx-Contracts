@@ -146,6 +146,17 @@ Before modifying `version_negotiation.rs`:
 - [ ] Does the updated `VersionInfo` still satisfy the backend startup handshake contract?
 - [ ] Have you updated `docs/CODEX_CONTEXT.md` if the handshake flow changed?
 
+### Multi-Contract Negotiation Protocol
+
+The rules above cover the single-contract `VersionInfo` response shape. Changes
+to the cross-contract negotiation protocol in
+[`apexchainx_calculator/src/version_negotiation.rs`](../apexchainx_calculator/src/version_negotiation.rs)
+— `VersionNegotiationInfo`, `NegotiationOutcome`,
+`negotiate_contract_versions()`, `PROTOCOL_VERSION`, or
+`MIN_COMPATIBLE_PROTOCOL` — additionally require the compatibility constraints
+and review checklists in
+[`docs/VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md`](VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md).
+
 ---
 
 ## SC-503: Contract API Archetype Note

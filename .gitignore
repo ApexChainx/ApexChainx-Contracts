@@ -10,7 +10,12 @@ apexchainx_calculator/fuzz/artifacts/
 
 
 # Soroban
-test_snapshots/
+# Exclude volatile CI-generated snapshots but keep the committed parity baseline.
+# Note: git negation cannot un-exclude files inside an excluded directory, so we
+# exclude individual subdirectories/patterns rather than the whole test_snapshots/ tree.
+apexchainx_calculator/test_snapshots/tests/*.snap
+apexchainx_calculator/test_snapshots/tests/*.json.tmp
+# Keep parity_baseline.json tracked (no rule excludes it).
 *.wasm
 
 # IDE
@@ -29,6 +34,9 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.temp
+
+# Node tooling
+node_modules/
 
 # Environment secrets
 .env
