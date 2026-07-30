@@ -50,6 +50,19 @@ a new stored generation for that outage, capped at 16 retained entries
 (`OutageRecalcLimit`) so one outage cannot crowd others out of the retention
 window. Admin pruning frees that headroom again.
 
+### Can I add custom severity levels beyond critical/high/medium/low?
+
+**Yes.** The admin can register arbitrary severity names via
+`set_custom_severity()` (admin-only). Custom severities are stored in a
+separate `CUSTOM_CONFIG_KEY` map and validated against the same general bounds
+(1–1440 min threshold, 1–10000 penalty, 1–100000 reward, and
+`penalty × 1.5 < reward`). They work identically in `calculate_sla` and
+`calculate_sla_view`, but are excluded from the canonical config version hash
+and snapshot. Use `get_custom_config_snapshot()` to inspect them and
+`remove_custom_severity()` to unregister. See
+[docs/config-validation.md](docs/config-validation.md#custom-severity-configuration-setcustomseverity)
+for budget estimates and compatibility details.
+
 ### Is the contract upgradeable?
 
 No. The contract is not natively upgradeable. Upgrades require deploying a new

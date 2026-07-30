@@ -882,6 +882,29 @@ fn test_set_config_budget_is_reasonable() {
 }
 
 #[test]
+fn test_set_custom_severity_budget_is_reasonable() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let before = env.budget().cpu_instruction_cost();
+    client.set_custom_severity(&admin, &symbol_short!("warning"), &90, &5, &200);
+    let after = env.budget().cpu_instruction_cost();
+
+    assert!(
+        after - before < 150_000,
+        "set_custom_severity too expensive: {} instructions",
+        after - before
+    );
+}
+
+#[test]
 fn test_pause_budget_is_reasonable() {
     let env = Env::default();
     env.mock_all_auths();
