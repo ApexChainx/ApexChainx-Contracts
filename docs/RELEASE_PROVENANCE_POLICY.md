@@ -41,6 +41,16 @@ sha256sum -c artifacts/apexchainx_calculator.wasm.sha256
 2. **Atomic Commits**: Snapshot updates must be checked in alongside the code change that altered contract output or state structure.
 3. **No Drift in CI**: Pull requests with uncommitted or non-reproducible snapshot changes will fail the CI `snapshot-check` job.
 
+### Contributor Workflow
+
+Use the `justfile` recipes for snapshot management:
+
+- `just normalize-snapshots` — Normalize existing snapshots in place
+- `just regenerate-snapshots` — Run tests then normalize (full regeneration)
+- `just verify-snapshots` — Verify snapshots are normalized (dry-run check)
+
+Before committing snapshot changes, run `just verify-snapshots` to ensure they match the normalized POSIX standard.
+
 ---
 
 ## 4. Compliance Checklist for Release PRs
