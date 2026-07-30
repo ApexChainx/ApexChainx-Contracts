@@ -6,6 +6,12 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::Events as _;
 use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::{Env, Symbol, TryIntoVal};
+use crate::metrics::retention_stats::HistoryRetentionMetrics;
+use crate::config_bundle::ConfigBundle;
+use crate::version_negotiation::{VersionNegotiationInfo, NegotiationOutcome, VersionMismatchDetail, VersionNegotiationResult};
+use crate::audit_state::AuditState;
+use crate::event::CalculationExecutedEventV1;
+use crate::cross_contract_safety::CompensationAction;
 
 // ============================================================
 // Test helpers
@@ -7235,6 +7241,397 @@ fn test_healthcheck_does_not_require_auth() {
 // #282 – Historical Parity Checker
 // ============================================================
 // Validates that current contract behaviour matches known golden results.
+// ============================================================
+// Issue #240 – Serialization compatibility for all #[contracttype] structures
+// ============================================================
+
+#[test]
+fn test_240_all_contracttype_structures_round_trip_serialization() {
+    let env = Env::default();
+
+    // Test SLAConfig
+    let sla_config = SLAConfig {
+        threshold_minutes: 30,
+        penalty_per_minute: 100,
+        reward_base: 750,
+    };
+    let scval_config = sla_config.clone().try_into_val(&env).unwrap();
+    let restored_config: SLAConfig = scval_config.try_into_val(&env).unwrap();
+    assert_eq!(sla_config, restored_config, "SLAConfig round-trip failed");
+
+    // Test SLAResult
+    let sla_result = SLAResult {
+        outage_id: symbol_short!("test"),
+        status: symbol_short!("met"),
+        mttr_minutes: 15,
+        threshold_minutes: 30,
+        amount: 1500,
+        payment_type: symbol_short!("rew"),
+        rating: symbol_short!("top"),
+        config_version_hash: 12345,
+        recorded_at: 1700000000,
+    };
+    let scval_result = sla_result.clone().try_into_val(&env).unwrap();
+    let restored_result: SLAResult = scval_result.try_into_val(&env).unwrap();
+    assert_eq!(sla_result, restored_result, "SLAResult round-trip failed");
+
+    // Test SLAConfigEntry
+    let config_entry = SLAConfigEntry {
+        severity: symbol_short!("critical"),
+        config: SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 750,
+        },
+    };
+    let scval_entry = config_entry.clone().try_into_val(&env).unwrap();
+    let restored_entry: SLAConfigEntry = scval_entry.try_into_val(&env).unwrap();
+    assert_eq!(config_entry, restored_entry, "SLAConfigEntry round-trip failed");
+
+    // Test SLAConfigSnapshot
+    let mut entries = Vec::new(&env);
+    entries.push_back(SLAConfigEntry {
+        severity: symbol_short!("critical"),
+        config: SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 750,
+        },
+    });
+    let config_snapshot = SLAConfigSnapshot {
+        version: symbol_short!("v1"),
+        entries,
+    };
+    let scval_snapshot = config_snapshot.clone().try_into_val(&env).unwrap();
+    let restored_snapshot: SLAConfigSnapshot = scval_snapshot.try_into_val(&env).unwrap();
+    assert_eq!(config_snapshot, restored_snapshot, "SLAConfigSnapshot round-trip failed");
+
+    // Test SLAResultSchema
+    let mut deprecated_symbols = Vec::new(&env);
+    let mut severity_aliases = Vec::new(&env);
+    let result_schema = SLAResultSchema {
+        version: symbol_short!("v1"),
+        schema_version: 1,
+        status_met: symbol_short!("met"),
+        status_violated: symbol_short!("viol"),
+        payment_reward: symbol_short!("rew"),
+        payment_penalty: symbol_short!("pen"),
+        rating_exceptional: symbol_short!("top"),
+        rating_excellent: symbol_short!("excel"),
+        rating_good: symbol_short!("good"),
+        rating_poor: symbol_short!("poor"),
+        includes_config_version_hash: true,
+        deprecated_symbols,
+        severity_aliases,
+    };
+    let scval_schema = result_schema.clone().try_into_val(&env).unwrap();
+    let restored_schema: SLAResultSchema = scval_schema.try_into_val(&env).unwrap();
+    assert_eq!(result_schema, restored_schema, "SLAResultSchema round-trip failed");
+
+    // Test DeprecatedSymbol
+    let deprecated_symbol = DeprecatedSymbol {
+        old_symbol: symbol_short!("old"),
+        new_symbol: symbol_short!("new"),
+        deprecated_at: 1,
+        removal_version: Some(2),
+    };
+    let scval_deprecated = deprecated_symbol.clone().try_into_val(&env).unwrap();
+    let restored_deprecated: DeprecatedSymbol = scval_deprecated.try_into_val(&env).unwrap();
+    assert_eq!(deprecated_symbol, restored_deprecated, "DeprecatedSymbol round-trip failed");
+
+    // Test SeverityAliasMapping
+    let alias_mapping = SeverityAliasMapping {
+        old_severity: symbol_short!("critical"),
+        new_severity: symbol_short!("crit"),
+        deprecated_at: 2,
+        removal_version: None,
+    };
+    let scval_alias = alias_mapping.clone().try_into_val(&env).unwrap();
+    let restored_alias: SeverityAliasMapping = scval_alias.try_into_val(&env).unwrap();
+    assert_eq!(alias_mapping, restored_alias, "SeverityAliasMapping round-trip failed");
+
+    // Test ContractMetadata
+    let mut supported_severities = Vec::new(&env);
+    supported_severities.push_back(symbol_short!("critical"));
+    let metadata = ContractMetadata {
+        contract_name: symbol_short!("apexchainx_calculator"),
+        storage_version: 1,
+        result_schema_version: 1,
+        supported_severities,
+        features: Vec::new(&env),
+    };
+    let scval_metadata = metadata.clone().try_into_val(&env).unwrap();
+    let restored_metadata: ContractMetadata = scval_metadata.try_into_val(&env).unwrap();
+    assert_eq!(metadata, restored_metadata, "ContractMetadata round-trip failed");
+
+    // Test SLAStats
+    let stats = SLAStats {
+        total_calculations: 1000,
+        total_violations: 50,
+        total_rewards: 50000,
+        total_penalties: -2500,
+    };
+    let scval_stats = stats.clone().try_into_val(&env).unwrap();
+    let restored_stats: SLAStats = scval_stats.try_into_val(&env).unwrap();
+    assert_eq!(stats, restored_stats, "SLAStats round-trip failed");
+
+    // Test SeverityExposure
+    let severity_exposure = SeverityExposure {
+        severity: symbol_short!("critical"),
+        max_reward: 750,
+        max_penalty: -500,
+        threshold_minutes: 30,
+    };
+    let scval_exposure = severity_exposure.clone().try_into_val(&env).unwrap();
+    let restored_exposure: SeverityExposure = scval_exposure.try_into_val(&env).unwrap();
+    assert_eq!(severity_exposure, restored_exposure, "SeverityExposure round-trip failed");
+
+    // Test EconomicExposure
+    let mut breakdown = Vec::new(&env);
+    breakdown.push_back(SeverityExposure {
+        severity: symbol_short!("critical"),
+        max_reward: 750,
+        max_penalty: -500,
+        threshold_minutes: 30,
+    });
+    let economic_exposure = EconomicExposure {
+        max_total_reward: 750,
+        max_total_penalty: -500,
+        breakdown,
+    };
+    let scval_economic = economic_exposure.clone().try_into_val(&env).unwrap();
+    let restored_economic: EconomicExposure = scval_economic.try_into_val(&env).unwrap();
+    assert_eq!(economic_exposure, restored_economic, "EconomicExposure round-trip failed");
+
+    // Test SeverityTelemetry
+    let telemetry = SeverityTelemetry {
+        severity: symbol_short!("critical"),
+        violation_rate_bps: 500,
+    };
+    let scval_telemetry = telemetry.clone().try_into_val(&env).unwrap();
+    let restored_telemetry: SeverityTelemetry = scval_telemetry.try_into_val(&env).unwrap();
+    assert_eq!(telemetry, restored_telemetry, "SeverityTelemetry round-trip failed");
+
+    // Test PauseInfo
+    let pause_info = PauseInfo {
+        reason: String::from_str(&env, "test pause"),
+        paused_at: Some(1700000000),
+    };
+    let scval_pause = pause_info.clone().try_into_val(&env).unwrap();
+    let restored_pause: PauseInfo = scval_pause.try_into_val(&env).unwrap();
+    assert_eq!(pause_info, restored_pause, "PauseInfo round-trip failed");
+
+    // Test ConfigUpdateInfo
+    let update_info = ConfigUpdateInfo {
+        sequence: 12345,
+    };
+    let scval_update = update_info.clone().try_into_val(&env).unwrap();
+    let restored_update: ConfigUpdateInfo = scval_update.try_into_val(&env).unwrap();
+    assert_eq!(update_info, restored_update, "ConfigUpdateInfo round-trip failed");
+
+    // Test StorageVersionInfo
+    let version_info = StorageVersionInfo {
+        storage_version: 1,
+        result_schema_version: 1,
+        needs_migration: false,
+    };
+    let scval_version = version_info.clone().try_into_val(&env).unwrap();
+    let restored_version: StorageVersionInfo = scval_version.try_into_val(&env).unwrap();
+    assert_eq!(version_info, restored_version, "StorageVersionInfo round-trip failed");
+
+    // Test FailureCode
+    let failure_code = FailureCode {
+        code: 1,
+        label: symbol_short!("test_error"),
+        description: String::from_str(&env, "Test error description"),
+    };
+    let scval_failure = failure_code.clone().try_into_val(&env).unwrap();
+    let restored_failure: FailureCode = scval_failure.try_into_val(&env).unwrap();
+    assert_eq!(failure_code, restored_failure, "FailureCode round-trip failed");
+
+    // Test FailureSchema
+    let mut codes = Vec::new(&env);
+    codes.push_back(FailureCode {
+        code: 1,
+        label: symbol_short!("test_error"),
+        description: String::from_str(&env, "Test error description"),
+    });
+    let failure_schema = FailureSchema {
+        version: symbol_short!("v1"),
+        schema_version: 1,
+        codes,
+    };
+    let scval_failure_schema = failure_schema.clone().try_into_val(&env).unwrap();
+    let restored_failure_schema: FailureSchema = scval_failure_schema.try_into_val(&env).unwrap();
+    assert_eq!(failure_schema, restored_failure_schema, "FailureSchema round-trip failed");
+
+    // Test HealthcheckResult
+    let healthcheck = HealthcheckResult {
+        healthy: true,
+    };
+    let scval_healthcheck = healthcheck.clone().try_into_val(&env).unwrap();
+    let restored_healthcheck: HealthcheckResult = scval_healthcheck.try_into_val(&env).unwrap();
+    assert_eq!(healthcheck, restored_healthcheck, "HealthcheckResult round-trip failed");
+
+    // Test VersionInfo
+    let version_info = VersionInfo {
+        storage_version: 1,
+        result_schema_version: 1,
+        is_paused: false,
+    };
+    let scval_version_info = version_info.clone().try_into_val(&env).unwrap();
+    let restored_version_info: VersionInfo = scval_version_info.try_into_val(&env).unwrap();
+    assert_eq!(version_info, restored_version_info, "VersionInfo round-trip failed");
+
+    // Test HistoryRetentionMetrics
+    let retention_metrics = HistoryRetentionMetrics {
+        protocol_version: 1,
+        retention_limit: 1000,
+        retained_entries: 800,
+        pruned_entries: 200,
+        total_entries: 1000,
+        retention_ratio_bps: 8000,
+    };
+    let scval_retention = retention_metrics.clone().try_into_val(&env).unwrap();
+    let restored_retention: HistoryRetentionMetrics = scval_retention.try_into_val(&env).unwrap();
+    assert_eq!(retention_metrics, restored_retention, "HistoryRetentionMetrics round-trip failed");
+
+    // Test ConfigBundle
+    let mut entries = Vec::new(&env);
+    entries.push_back(SLAConfigEntry {
+        severity: symbol_short!("critical"),
+        config: SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 750,
+        },
+    });
+    let mut deprecated_symbols = Vec::new(&env);
+    let mut severity_aliases = Vec::new(&env);
+    let config_bundle = ConfigBundle {
+        snapshot: SLAConfigSnapshot {
+            version: symbol_short!("v1"),
+            entries,
+        },
+        schema: SLAResultSchema {
+            version: symbol_short!("v1"),
+            schema_version: 1,
+            status_met: symbol_short!("met"),
+            status_violated: symbol_short!("viol"),
+            payment_reward: symbol_short!("rew"),
+            payment_penalty: symbol_short!("pen"),
+            rating_exceptional: symbol_short!("top"),
+            rating_excellent: symbol_short!("excel"),
+            rating_good: symbol_short!("good"),
+            rating_poor: symbol_short!("poor"),
+            includes_config_version_hash: true,
+            deprecated_symbols,
+            severity_aliases,
+        },
+    };
+    let scval_bundle = config_bundle.clone().try_into_val(&env).unwrap();
+    let restored_bundle: ConfigBundle = scval_bundle.try_into_val(&env).unwrap();
+    assert_eq!(config_bundle, restored_bundle, "ConfigBundle round-trip failed");
+
+    // Test VersionNegotiationInfo
+    let version_info = VersionNegotiationInfo {
+        contract_name: String::from_str(&env, "test_contract"),
+        major: 1,
+        minor: 0,
+        patch: 0,
+    };
+    let scval_version_info = version_info.clone().try_into_val(&env).unwrap();
+    let restored_version_info: VersionNegotiationInfo = scval_version_info.try_into_val(&env).unwrap();
+    assert_eq!(version_info, restored_version_info, "VersionNegotiationInfo round-trip failed");
+
+    // Test NegotiationOutcome
+    let outcome = NegotiationOutcome::Compatible;
+    let scval_outcome = outcome.clone().try_into_val(&env).unwrap();
+    let restored_outcome: NegotiationOutcome = scval_outcome.try_into_val(&env).unwrap();
+    assert_eq!(outcome, restored_outcome, "NegotiationOutcome round-trip failed");
+
+    // Test VersionMismatchDetail
+    let mismatch_detail = VersionMismatchDetail {
+        contract_name: String::from_str(&env, "test_contract"),
+        current_version: String::from_str(&env, "1.0.0"),
+        required_min: String::from_str(&env, "1.1.0"),
+        required_max: String::from_str(&env, "2.0.0"),
+    };
+    let scval_mismatch = mismatch_detail.clone().try_into_val(&env).unwrap();
+    let restored_mismatch: VersionMismatchDetail = scval_mismatch.try_into_val(&env).unwrap();
+    assert_eq!(mismatch_detail, restored_mismatch, "VersionMismatchDetail round-trip failed");
+
+    // Test VersionNegotiationResult
+    let mut details = Vec::new(&env);
+    let negotiation_result = VersionNegotiationResult {
+        outcome: NegotiationOutcome::Compatible,
+        details,
+    };
+    let scval_negotiation = negotiation_result.clone().try_into_val(&env).unwrap();
+    let restored_negotiation: VersionNegotiationResult = scval_negotiation.try_into_val(&env).unwrap();
+    assert_eq!(negotiation_result, restored_negotiation, "VersionNegotiationResult round-trip failed");
+
+    // Test AuditState
+    let admin = Address::generate(&env);
+    let operator = Address::generate(&env);
+    let pending_operator = Some(Address::generate(&env));
+    let mut pause_info = Vec::new(&env);
+    pause_info.push_back(PauseInfo {
+        reason: String::from_str(&env, "test pause"),
+        paused_at: Some(1700000000),
+    });
+    let mut config_entries = Vec::new(&env);
+    config_entries.push_back(SLAConfigEntry {
+        severity: symbol_short!("critical"),
+        config: SLAConfig {
+            threshold_minutes: 30,
+            penalty_per_minute: 100,
+            reward_base: 750,
+        },
+    });
+    let audit_state = AuditState {
+        admin: admin.clone(),
+        operator: operator.clone(),
+        pending_operator,
+        paused: true,
+        pause_info,
+        config_snapshot: SLAConfigSnapshot {
+            version: symbol_short!("v1"),
+            entries: config_entries,
+        },
+        stats: SLAStats {
+            total_calculations: 1000,
+            total_violations: 50,
+            total_rewards: 50000,
+            total_penalties: -2500,
+        },
+    };
+    let scval_audit = audit_state.clone().try_into_val(&env).unwrap();
+    let restored_audit: AuditState = scval_audit.try_into_val(&env).unwrap();
+    assert_eq!(audit_state, restored_audit, "AuditState round-trip failed");
+
+    // Test CalculationExecutedEventV1
+    let event = CalculationExecutedEventV1 {
+        input_key: symbol_short!("test_key"),
+    };
+    let scval_event = event.clone().try_into_val(&env).unwrap();
+    let restored_event: CalculationExecutedEventV1 = scval_event.try_into_val(&env).unwrap();
+    assert_eq!(event, restored_event, "CalculationExecutedEventV1 round-trip failed");
+
+    // Test CompensationAction
+    let compensation = CompensationAction {
+        compensation_tag: symbol_short!("test_comp"),
+        args: Vec::new(&env),
+    };
+    let scval_compensation = compensation.clone().try_into_val(&env).unwrap();
+    let restored_compensation: CompensationAction = scval_compensation.try_into_val(&env).unwrap();
+    assert_eq!(compensation, restored_compensation, "CompensationAction round-trip failed");
+}
+
+// ============================================================
+// Historical Parity Golden Results
+// ============================================================
+
 // Used as a release regression gate: if these assertions fail, the contract
 // has diverged from its historical behaviour baseline.
 

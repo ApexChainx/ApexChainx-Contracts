@@ -15,6 +15,7 @@
 - [SC-506: History Write Audit Check](#sc-506-history-write-audit-check)
 - [SC-507: Telemetry Counters Policy](#sc-507-telemetry-counters-policy)
 - [SC-508: Role-Change Incident Review Note](#sc-508-role-change-incident-review-note)
+- [SC-509: Serialization Compatibility Test Requirement](#sc-509-serialization-compatibility-test-requirement)
 
 ---
 
@@ -396,6 +397,54 @@ Admin Renouncement:
 
 ---
 
+## SC-509: Serialization Compatibility Test Requirement
+
+### Policy
+
+Every `#[contracttype]` structure MUST pass a round-trip serialization test. This ensures that the type can be correctly serialized to Soroban's `ScVal` format and deserialized back without data loss or corruption.
+
+### Test Implementation
+
+The test `test_240_all_contracttype_structures_round_trip_serialization` in `tests.rs` validates all contract-level structures by:
+
+1. Creating a sample instance of each `#[contracttype]` struct
+2. Serializing it to `ScVal` using `try_into_val()`
+3. Deserializing it back using `try_into_val()`
+4. Asserting that the original and restored values are equal
+
+### When This Applies
+
+| Change Type | Requires Test Update | Reason |
+|-------------|---------------------|--------|
+| Adding a new `#[contracttype]` struct | ✅ Yes | Must add test case for new struct |
+| Adding a field to existing struct | ✅ Yes | Must update test to include new field |
+| Removing a field | ✅ Yes | Must update test to remove field |
+| Changing a field type | ✅ Yes | Must update test with new type |
+| Doc-comment only changes | ❌ No | No structural impact |
+
+### Enforcement
+
+The test runs as part of the standard `cargo test --lib` suite. If a `#[contracttype]` change breaks the round-trip test, the PR must either:
+
+1. Fix the serialization issue (e.g., ensure all fields implement required traits)
+2. Update the test to reflect the new structure
+
+### Adding New Contract Types
+
+When adding a new `#[contracttype]` struct:
+
+1. Add the struct definition with `#[contracttype]` and derives
+2. Add a test case in `test_240_all_contracttype_structures_round_trip_serialization`
+3. Ensure the struct implements `Clone`, `Debug`, `Eq`, and `PartialEq`
+4. Run `cargo test --lib test_240_all_contracttype_structures_round_trip_serialization` to verify
+
+### Related
+
+- [SC-500: `#[contracttype]` Compatibility Note Policy](#sc-500-contracttype-compatibility-note-policy)
+- [SC-501: Response-Shape Stability Policy](#sc-501-response-shape-stability-policy)
+
+---
+
 ## Summary: Issue Cross-Reference
 
 | Issue | Policy Section |
@@ -406,6 +455,7 @@ Admin Renouncement:
 | #285 | SC-503: Contract API Archetype Note |
 | #286 | SC-504: Event Payload Size Maintainership Check |
 | #287 | SC-505: Event Drift Review Note |
+| #240 | SC-509: Serialization Compatibility Test Requirement |
 | #288 | SC-506: History Write Audit Check |
 | #289 | SC-507: Telemetry Counters Policy |
 | #290 | SC-508: Role-Change Incident Review Note |
