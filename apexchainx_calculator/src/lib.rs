@@ -349,6 +349,18 @@ pub enum SLAError {
 // and deserialised by the Soroban SDK and exposed to backend consumers
 // through read-only views and event payloads.
 //
+// RESPONSE-SHAPE STABILITY POLICY
+// -------------------------------
+// All types below are governed by the response-shape stability policy
+// defined in docs/RESPONSE_SHAPE_STABILITY.md. In summary:
+//   - Fields are additive-only (append to the end, never reorder or remove)
+//   - Field types are immutable once deployed
+//   - Schema versioning is exposed via RESULT_SCHEMA_VERSION,
+//     get_result_schema(), get_failure_schema(), and get_version_info()
+//   - Breaking changes require a RESULT_SCHEMA_VERSION bump
+// Backend maintainers MUST read the full policy before upgrading.
+// -------------------------------
+//
 // All types derive Clone, Debug, and PartialEq for testability.
 // Types marked #[contracttype] are Soroban-contract-compatible.
 // -----------------------------------------------------------------------

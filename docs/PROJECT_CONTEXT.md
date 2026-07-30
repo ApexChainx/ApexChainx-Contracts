@@ -83,6 +83,7 @@ reference them until they appear in the repository.
 - Each new crate must expose a `get_result_schema()` equivalent for safe version pinning
 - Frontend never calls contracts directly — all invocations go through the backend
 - Backend indexers and operators should follow the [Observability Contract](OBSERVABILITY_CONTRACT.md) for health-signal monitoring and alerting guidance
+- All contract return types follow the [Response-Shape Stability Policy](RESPONSE_SHAPE_STABILITY.md) — see that document for schema versioning, additive-only field evolution, and deprecation protocol
 
 ### Contribution Guidelines for New Crates
 

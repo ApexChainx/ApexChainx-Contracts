@@ -37,7 +37,10 @@ frontend never interacts with contracts directly.
 ### How are contract upgrades handled?
 
 The contract includes a version negotiation protocol (`get_version_info()`) that
-allows backends to verify compatibility before deployment.
+allows backends to verify compatibility before deployment. Contract return types
+follow a documented [Response-Shape Stability Policy](docs/RESPONSE_SHAPE_STABILITY.md)
+— fields are additive-only, schema versions are exposed via `get_result_schema()`,
+and breaking changes require a `RESULT_SCHEMA_VERSION` bump.
 
 ### What stops an operator from spamming the same outage ID?
 
