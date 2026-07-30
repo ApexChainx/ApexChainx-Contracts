@@ -470,6 +470,55 @@ pub struct ContractMetadata {
     pub features: Vec<Symbol>,
 }
 
+// -----------------------------------------------------------------------
+// #244 – Public API descriptor for stable frontend/backend discovery
+// -----------------------------------------------------------------------
+
+/// Describes a single public contract method for runtime API discovery.
+///
+/// Backend and frontend consumers can use this to programmatically discover
+/// the contract's surface area without hard-coding method names, auth
+/// requirements, or event contracts.
+///
+/// # Stability
+///
+/// This struct is **append-only** — new fields may be added at the end in
+/// future versions. Removing or reordering fields is a breaking change that
+/// requires a `RESULT_SCHEMA_VERSION` bump.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublicApiMethod {
+    /// The name of the contract method (e.g. "initialize", "calculate_sla").
+    pub name: Symbol,
+    /// Whether the method mutates storage (`true`) or is read-only (`false`).
+    pub mutates: bool,
+    /// Auth role required: "admin", "operator", or "none".
+    pub auth: Symbol,
+    /// The primary event name emitted by this method, or `Symbol::new(env, "")` if none.
+    pub event: Symbol,
+}
+
+/// Contract-level public API descriptor returned by `get_public_api()`.
+///
+/// Enumerates all public methods with their mutability, auth requirements,
+/// and emitted events. Backend consumers can call this once at startup to
+/// validate that the deployed contract matches their expected API surface.
+///
+/// # Stability
+///
+/// This struct is **append-only** — new fields may be added at the end in
+/// future versions. The `version` field identifies the descriptor schema.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PublicApiDescriptor {
+    /// Schema version for the descriptor ("v1").
+    pub version: Symbol,
+    /// The contract name ("sla_calc").
+    pub contract_name: Symbol,
+    /// All public methods in alphabetical order.
+    pub methods: Vec<PublicApiMethod>,
+}
+
 /// #29 – Cumulative on-chain SLA performance metrics.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1518,6 +1567,148 @@ impl SLACalculatorContract {
             result_schema_version: RESULT_SCHEMA_VERSION,
             supported_severities: severities,
             features,
+        })
+    }
+
+    // -------------------------------------------------------------------
+    // #244 – Public API descriptor
+    // -------------------------------------------------------------------
+
+    /// Returns a stable, typed descriptor of the contract's public API surface.
+    ///
+    /// Backend and frontend consumers call this once at startup to
+    /// programmatically discover all public methods, their mutability, auth
+    /// requirements, and emitted events — without hard-coding method names.
+    ///
+    /// # Use Cases
+    ///
+    /// - **Backend startup validation:** verify the deployed contract exposes
+    ///   the expected set of methods before issuing operational transactions.
+    /// - **Frontend discovery:** dynamically build UI elements (admin panels,
+    ///   operator dashboards) based on the contract's actual API surface.
+    /// - **Integration testing:** compare the descriptor against a known-good
+    ///   snapshot to detect unintended API changes across upgrades.
+    /// - **SDK generation:** generate client-side bindings programmatically.
+    ///
+    /// # Returns
+    ///
+    /// A `PublicApiDescriptor` with:
+    /// - `version`: descriptor schema version ("v1")
+    /// - `contract_name`: fixed to "sla_calc"
+    /// - `methods`: list of `PublicApiMethod` entries, one per public function,
+    ///   sorted alphabetically by method name
+    ///
+    /// Each `PublicApiMethod` contains:
+    /// - `name`: the contract method name (e.g. "calculate_sla")
+    /// - `mutates`: `true` if the method modifies storage
+    /// - `auth`: auth role required — "admin", "operator", or "none"
+    /// - `event`: the primary event name emitted, or empty if none
+    ///
+    /// # Errors
+    ///
+    /// Returns `NotInitialized` if the contract has never been initialized.
+    ///
+    /// # Design
+    ///
+    /// This function intentionally bypasses `check_version` so it remains
+    /// callable even when the contract is in a pre-migration state — backends
+    /// must be able to discover the API before deciding whether to migrate.
+    pub fn get_public_api(env: Env) -> Result<PublicApiDescriptor, SLAError> {
+        // Require the contract to be initialized (must have a storage version)
+        let _stored: u32 = env
+            .storage()
+            .instance()
+            .get(&STORAGE_VERSION_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+
+        let mut methods = Vec::new(&env);
+
+        // Helper to create a PublicApiMethod entry
+        let method = |name: &str, mutates: bool, auth: &str, event: &str| -> PublicApiMethod {
+            PublicApiMethod {
+                name: Symbol::new(&env, name),
+                mutates,
+                auth: Symbol::new(&env, auth),
+                event: if event.is_empty() {
+                    Symbol::new(&env, "")
+                } else {
+                    Symbol::new(&env, event)
+                },
+            }
+        };
+
+        // All public methods added in alphabetical order for deterministic output.
+        // Lifecycle:
+        methods.push_back(method("accept_admin", true, "admin", "adm_acc"));
+        methods.push_back(method("accept_operator", true, "operator", "op_acc"));
+        // Calculation:
+        methods.push_back(method("calculate_sla", true, "operator", "sla_calc"));
+        methods.push_back(method("calculate_sla_view", false, "none", ""));
+        methods.push_back(method("cancel_admin_proposal", true, "admin", "adm_can"));
+        methods.push_back(method("cancel_operator_proposal", true, "admin", "op_can"));
+        // Config:
+        methods.push_back(method("freeze_config", true, "admin", "cfg_frz"));
+        methods.push_back(method("get_admin", false, "none", ""));
+        methods.push_back(method("get_config", false, "none", ""));
+        methods.push_back(method("get_config_bundle", false, "none", ""));
+        methods.push_back(method("get_config_count", false, "none", ""));
+        methods.push_back(method("get_config_snapshot", false, "none", ""));
+        methods.push_back(method("get_config_version_hash", false, "none", ""));
+        methods.push_back(method("get_contract_metadata", false, "none", ""));
+        methods.push_back(method("get_contract_state_fingerprint", false, "none", ""));
+        methods.push_back(method("get_custom_config_snapshot", false, "none", ""));
+        methods.push_back(method("get_custom_severity", false, "none", ""));
+        methods.push_back(method("get_economic_exposure", false, "none", ""));
+        methods.push_back(method("get_failure_schema", false, "none", ""));
+        methods.push_back(method("get_full_audit_state", false, "none", ""));
+        methods.push_back(method("get_history", false, "none", ""));
+        methods.push_back(method("get_history_by_outage", false, "none", ""));
+        methods.push_back(method("get_history_page", false, "none", ""));
+        methods.push_back(method("get_latest_by_outage", false, "none", ""));
+        methods.push_back(method("get_last_config_update", false, "none", ""));
+        methods.push_back(method("get_migration_state", false, "none", ""));
+        methods.push_back(method("get_operator", false, "none", ""));
+        methods.push_back(method("get_pause_info", false, "none", ""));
+        methods.push_back(method("get_pending_admin", false, "none", ""));
+        methods.push_back(method("get_pending_operator", false, "none", ""));
+        methods.push_back(method("get_public_api", false, "none", ""));
+        methods.push_back(method("get_result_schema", false, "none", ""));
+        methods.push_back(method("get_retention_limit", false, "none", ""));
+        methods.push_back(method("get_severity_telemetry", false, "none", ""));
+        methods.push_back(method("get_stats", false, "none", ""));
+        methods.push_back(method("get_storage_version", false, "none", ""));
+        methods.push_back(method("get_version_info", false, "none", ""));
+        // Health:
+        methods.push_back(method("healthcheck", false, "none", ""));
+        // Init:
+        methods.push_back(method("initialize", true, "admin", ""));
+        methods.push_back(method("is_config_frozen", false, "none", ""));
+        methods.push_back(method("is_paused", false, "none", ""));
+        // Config queries:
+        methods.push_back(method("list_configs", false, "none", ""));
+        // Migration:
+        methods.push_back(method("migrate", true, "admin", "migrate_done"));
+        // Pause:
+        methods.push_back(method("pause", true, "admin", "paused"));
+        methods.push_back(method("propose_admin", true, "admin", "adm_prop"));
+        methods.push_back(method("propose_operator", true, "admin", "op_prop"));
+        methods.push_back(method("prune_history", true, "admin", "pruned"));
+        methods.push_back(method("prune_history_by_age", true, "admin", "pruned_a"));
+        methods.push_back(method("remove_custom_severity", true, "admin", "cfg_upd"));
+        methods.push_back(method("renounce_admin", true, "admin", "adm_ren"));
+        methods.push_back(method("replay_calculate_sla", true, "operator", "sla_calc"));
+        // Setters:
+        methods.push_back(method("set_config", true, "admin", "cfg_upd"));
+        methods.push_back(method("set_custom_severity", true, "admin", "cfg_upd"));
+        methods.push_back(method("set_operator", true, "admin", "op_set"));
+        methods.push_back(method("set_retention_limit", true, "admin", ""));
+        methods.push_back(method("unfreeze_config", true, "admin", "cfg_unfrz"));
+        methods.push_back(method("unpause", true, "admin", "unpause"));
+
+        Ok(PublicApiDescriptor {
+            version: symbol_short!("v1"),
+            contract_name: symbol_short!("sla_calc"),
+            methods,
         })
     }
 

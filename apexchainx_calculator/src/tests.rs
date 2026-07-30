@@ -7285,3 +7285,116 @@ fn test_historical_parity_golden_results() {
     assert_eq!(schema.schema_version, 1, "Result schema version changed — check migration notes");
     assert_eq!(schema.deprecated_symbols.len(), 0, "Unexpected deprecated symbols in v1");
 }
+
+// ============================================================
+// #244 – Public API descriptor tests
+// ============================================================
+
+#[test]
+fn test_get_public_api_returns_versioned_descriptor() {
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+    assert_eq!(api.version, symbol_short!("v1"));
+    assert_eq!(api.contract_name, symbol_short!("sla_calc"));
+}
+
+#[test]
+fn test_get_public_api_includes_all_major_methods() {
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+
+    // Check that critical methods are present
+    let mut found_calculate_sla = false;
+    let mut found_get_public_api = false;
+    let mut found_initialize = false;
+    let mut found_get_config = false;
+    let mut found_healthcheck = false;
+    let mut found_migrate = false;
+
+    for i in 0..api.methods.len() {
+        let method = api.methods.get(i).unwrap();
+        if method.name == Symbol::new(&_env, "calculate_sla") {
+            found_calculate_sla = true;
+            assert!(method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "operator"));
+            assert_eq!(method.event, Symbol::new(&_env, "sla_calc"));
+        }
+        if method.name == Symbol::new(&_env, "get_public_api") {
+            found_get_public_api = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+            assert_eq!(method.event, Symbol::new(&_env, ""));
+        }
+        if method.name == Symbol::new(&_env, "initialize") {
+            found_initialize = true;
+            assert!(method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "admin"));
+        }
+        if method.name == Symbol::new(&_env, "get_config") {
+            found_get_config = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+        }
+        if method.name == Symbol::new(&_env, "healthcheck") {
+            found_healthcheck = true;
+            assert!(!method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "none"));
+        }
+        if method.name == Symbol::new(&_env, "migrate") {
+            found_migrate = true;
+            assert!(method.mutates);
+            assert_eq!(method.auth, Symbol::new(&_env, "admin"));
+            assert_eq!(method.event, Symbol::new(&_env, "migrate_done"));
+        }
+    }
+
+    assert!(found_calculate_sla, "calculate_sla not found in API descriptor");
+    assert!(found_get_public_api, "get_public_api not found in API descriptor");
+    assert!(found_initialize, "initialize not found in API descriptor");
+    assert!(found_get_config, "get_config not found in API descriptor");
+    assert!(found_healthcheck, "healthcheck not found in API descriptor");
+    assert!(found_migrate, "migrate not found in API descriptor");
+}
+
+#[test]
+fn test_get_public_api_method_count_is_stable() {
+    let (_env, client, _actors) = setup();
+    let api = client.get_public_api();
+    // 53 methods as of initial implementation
+    // This test catches accidental additions or removals
+    assert_eq!(api.methods.len(), 53, "Public API method count changed");
+}
+
+#[test]
+fn test_get_public_api_is_deterministic() {
+    let (_env, client, _actors) = setup();
+    let api1 = client.get_public_api();
+    let api2 = client.get_public_api();
+
+    assert_eq!(api1.version, api2.version);
+    assert_eq!(api1.contract_name, api2.contract_name);
+    assert_eq!(api1.methods.len(), api2.methods.len());
+
+    for i in 0..api1.methods.len() {
+        let m1 = api1.methods.get(i).unwrap();
+        let m2 = api2.methods.get(i).unwrap();
+        assert_eq!(m1.name, m2.name);
+        assert_eq!(m1.mutates, m2.mutates);
+        assert_eq!(m1.auth, m2.auth);
+        assert_eq!(m1.event, m2.event);
+    }
+}
+
+#[test]
+fn test_get_public_api_requires_initialization() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+
+    // Without initialization, get_public_api should return NotInitialized error
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.get_public_api();
+    }));
+    assert!(result.is_err(), "get_public_api should fail before initialization");
+}

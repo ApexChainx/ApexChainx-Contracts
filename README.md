@@ -66,6 +66,14 @@ This repository is the execution-layer side of the 3-repo architecture.
 | [apexchainx-fe](https://github.com/ApexChainx/apexchainx-fe) | Frontend application (React/TypeScript) |
 | [apexchainx-be](https://github.com/ApexChainx/apexchainx-be) | Backend API and contract bridge |
 
+## Contract API Discovery
+
+The contract exposes a `get_public_api()` function that returns a typed descriptor
+enumerating all public methods, their mutability, auth requirements, and emitted
+events. Backend and frontend consumers can call this at startup to
+programmatically discover the contract's surface area without hard-coding
+method names.
+
 ## Development Setup
 
 ### Quick Start with Dev Container (#281)
