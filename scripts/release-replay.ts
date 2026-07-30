@@ -31,7 +31,7 @@ import * as path from "path";
 // Types
 // ---------------------------------------------------------------------------
 
-interface StepResult {
+export interface StepResult {
   step: string;
   command: string;
   success: boolean;
@@ -39,7 +39,7 @@ interface StepResult {
   error?: string;
 }
 
-interface ReplayResult {
+export interface ReplayResult {
   passed: boolean;
   totalSteps: number;
   passedSteps: number;
@@ -66,7 +66,7 @@ const opts: ExecSyncOptions = {
 // Step runner
 // ---------------------------------------------------------------------------
 
-function runStep(step: string, command: string, cwd?: string): StepResult {
+export function runStep(step: string, command: string, cwd?: string): StepResult {
   const start = Date.now();
   const stepOpts: ExecSyncOptions = { ...opts };
   if (cwd) stepOpts.cwd = path.resolve(process.cwd(), cwd);
@@ -193,4 +193,8 @@ function main(): void {
   process.exit(result.passed ? 0 : 1);
 }
 
-main();
+// Run main() only when executed directly, not when imported for testing.
+const scriptPath = process.argv[1] ?? "";
+if (scriptPath.endsWith("release-replay.ts") || scriptPath.endsWith("release-replay.js")) {
+  main();
+}

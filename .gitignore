@@ -30,6 +30,9 @@ Thumbs.db
 *.tmp
 *.temp
 
+# Node tooling
+node_modules/
+
 # Environment secrets
 .env
 .env.*
