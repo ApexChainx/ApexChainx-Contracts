@@ -502,6 +502,9 @@ All contributors and reviewers must follow the maintenance policies documented i
 [`docs/CONTRACT_MAINTENANCE_POLICY.md`](docs/CONTRACT_MAINTENANCE_POLICY.md).
 This covers:
 
+- **[SC- Marker Policy](docs/SC_MARKER_POLICY.md)** — how to add, update, and
+  retire `SC-NNN` and `SC-W5-NNN` inline markers that link code to tracked issues.
+
 - **[SC-500] `#[contracttype]` Compatibility Note Policy** (#279) — every public
   contract type change must include a compatibility note in the PR.
 - **[SC-501] Response-Shape Stability Policy** (#283) — every `#[contracttype]`

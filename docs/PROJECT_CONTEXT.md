@@ -42,6 +42,15 @@ The ApexChainx platform is composed of three repositories:
 
 ---
 
+## SC- Marker Convention
+
+Throughout the contract crate, inline comments and doc comments carry `SC-NNN`
+and `SC-W5-NNN` markers that link code to the GitHub issues that motivated the
+design. The rules for adding, updating, and retiring these markers are in
+[`docs/SC_MARKER_POLICY.md`](SC_MARKER_POLICY.md).
+
+---
+
 ## SC-100: Future Contract Roadmap
 
 This section documents the planned evolution of `apexchainx-contracts` based on
