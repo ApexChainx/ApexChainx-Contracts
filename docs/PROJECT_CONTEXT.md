@@ -82,6 +82,7 @@ reference them until they appear in the repository.
 - New crates will be introduced incrementally
 - Each new crate must expose a `get_result_schema()` equivalent for safe version pinning
 - Frontend never calls contracts directly — all invocations go through the backend
+- Backend indexers and operators should follow the [Observability Contract](OBSERVABILITY_CONTRACT.md) for health-signal monitoring and alerting guidance
 
 ### Contribution Guidelines for New Crates
 

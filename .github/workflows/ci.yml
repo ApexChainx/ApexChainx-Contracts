@@ -31,6 +31,12 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
+      # Issue #207: Early no-std lint — scans Rust source for accidental `use
+      # std::` or `extern crate std` before the costly WASM compilation step.
+      # Runs fast (pure grep) and gives contributors a clear, file-level error.
+      - name: no_std compatibility lint (early gate)
+        run: ./scripts/check-no-std.sh
+
       # Issue #12: WASM no-std compliance check.
       # Compiles only the library crate for wasm32-unknown-unknown so that any
       # accidental `std` import surfaces here (before deployment) as a compile

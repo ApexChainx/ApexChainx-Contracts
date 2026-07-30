@@ -19,6 +19,14 @@ wasm_target := "wasm32-unknown-unknown"
 default:
     @just --list
 
+# ----------------------------------------------------------- bootstrap ------
+
+# Bootstrap the dev environment — install toolchain, targets, and tools.
+bootstrap:
+    @echo "🔧 Bootstrapping ApexChainx development environment..."
+    rustup target add wasm32-unknown-unknown
+    @echo "✅ Bootstrap complete. Run 'just ci' to verify."
+
 # ---------------------------------------------------------------- test ------
 
 # Run the library test suite.            [CI: E2E Tests]
@@ -81,6 +89,14 @@ hash: wasm-release
     else
         shasum -a 256 "$wasm" | awk '{print $1 "  {{crate}}.wasm"}'
     fi
+
+# --------------------------------------------------------------- tooling -----
+
+# Generate a ship-review note from CHANGELOG.md.
+# Pass a version tag to summarise a released block: just release-summary 0.3.0
+# Defaults to the [Unreleased] block when no argument is given.
+release-summary version="Unreleased":
+    npx --yes tsx tooling/releaseSummary.ts --version {{version}}
 
 # ----------------------------------------------------------------- all ------
 

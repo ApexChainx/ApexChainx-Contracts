@@ -300,7 +300,32 @@ pub enum SLAError {
     InvalidSeverity = 11,
     /// Retention limit must be between 1 and MAX_HISTORY_SIZE. (SC-013)
     RetentionLimitOutOfRange = 12,
-    /// Duplicate outage_id with conflicting inputs detected. (SC-W5-046)
+    /// Duplicate `outage_id` with conflicting inputs detected. (SC-W5-046)
+    ///
+    /// # Semantics
+    ///
+    /// `calculate_sla` enforces a deterministic duplicate-detection policy on
+    /// every call:
+    ///
+    /// | Condition | Behaviour |
+    /// |---|---|
+    /// | `outage_id` is **new** (never seen before) | Calculation proceeds normally; result appended to history |
+    /// | `outage_id` exists **and** the config version hash is **unchanged** **and** the inputs (`mttr_minutes`, `threshold_minutes`) **match** the previous entry exactly | **Idempotent** — returns the previously stored `SLAResult` without mutating state or emitting events |
+    /// | `outage_id` exists **and** the config version hash is **unchanged** **but** the inputs **differ** | **DuplicateOutageInput** error — the caller submitted contradictory data for the same outage under the same config |
+    /// | `outage_id` exists **and** the config version hash **changed** | Treated as a **fresh calculation** — the config update invalidates the previous entry, so the new result is appended to history |
+    ///
+    /// # Consumer guidance
+    ///
+    /// Backend callers that receive this error should:
+    /// 1. Check whether the submitted `mttr_minutes` or severity level was
+    ///    entered incorrectly (typo, stale measurement).
+    /// 2. If the previous calculation was incorrect, the admin must call
+    ///    `prune_history` to remove the conflicting entry before
+    ///    re-submitting with corrected values — or wait for a config
+    ///    update (which changes the version hash and allows a fresh entry).
+    /// 3. If the intent is genuinely to re-evaluate the same outage under
+    ///    the same config with different MTTR, the outage must receive a
+    ///    new unique `outage_id`.
     DuplicateOutageInput = 13,
     /// Computed penalty amount is invalid (e.g., overflowed to zero). (SC-W5-046)
     InvalidPenaltyAmount = 14,
@@ -580,6 +605,23 @@ pub struct FailureSchema {
     pub version: Symbol,
     /// All known failure codes in ascending order.
     pub codes: Vec<FailureCode>,
+}
+
+/// #218 – Read-only healthcheck result for backend startup readiness.
+///
+/// Backend consumers call `healthcheck` before any other operation to confirm
+/// the contract is in a safe state. Unlike `get_version_info` which also
+/// bypasses `check_version`, this endpoint returns a single boolean outcome
+/// for simple load-balancer probes.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HealthcheckResult {
+    /// True when the contract is initialised and on the current storage version.
+    pub ready: bool,
+    /// Human-readable contract name for log correlation.
+    pub contract_name: Symbol,
+    /// Human-readable status label: "ok", "not_initialized", "needs_migration".
+    pub status: Symbol,
 }
 
 /// SC-W5-029 – Combined version negotiation response for backend startup handshake.
@@ -1353,7 +1395,7 @@ impl SLACalculatorContract {
             (10, "InvalidReward", "Reward out of range"),
             (11, "InvalidSeverity", "Severity not supported"),
             (12, "RetentionLimitOutOfRange", "Retention limit out of range"),
-            (13, "DuplicateOutageInput", "Duplicate outage input"),
+            (13, "DuplicateOutageInput", "Conflicting duplicate outage_id"),
             (14, "InvalidPenaltyAmount", "Invalid penalty amount"),
             (15, "InvalidRewardAmount", "Invalid reward amount"),
             (16, "ConfigFrozen", "Configuration is frozen"),
@@ -1662,6 +1704,33 @@ impl SLACalculatorContract {
     // SLA calculation (operator only)                                #28
     // -------------------------------------------------------------------
 
+    /// Calculate the SLA outcome for an outage event.
+    ///
+    /// # Duplicate detection
+    ///
+    /// If `outage_id` was already submitted under the same config version hash,
+    /// the call is **idempotent** when the inputs match exactly (returns the
+    /// cached `SLAResult` without side-effects). When the inputs differ, the
+    /// call returns [`SLAError::DuplicateOutageInput`]. See that error's
+    /// documentation for the full duplicate-detection matrix.
+    ///
+    /// # Access control
+    ///
+    /// Only the current **operator** may call this function. The caller must
+    /// pass `require_auth()` before invoking.
+    ///
+    /// # Errors
+    ///
+    /// | Error | Condition |
+    /// |---|---|
+    /// | `NotInitialized` | Contract has not been initialized |
+    /// | `VersionMismatch` | Storage version does not match binary expectation |
+    /// | `ContractPaused` | Contract is currently paused |
+    /// | `Unauthorized` | Caller is not the operator |
+    /// | `ConfigNotFound` | No configuration exists for the requested severity |
+    /// | `DuplicateOutageInput` | Same `outage_id` submitted with conflicting inputs (see error docs) |
+    /// | `InvalidPenaltyAmount` | Penalty computation overflowed or produced a non-negative value |
+    /// | `InvalidRewardAmount` | Reward computation overflowed or produced a non-positive value |
     /// Records an SLA decision for `outage_id`. Operator only.
     ///
     /// # Repeated submissions for the same outage_id
@@ -2586,5 +2655,34 @@ impl SLACalculatorContract {
             is_paused,
             contract_name: symbol_short!("sla_calc"),
         })
+    }
+
+    // -------------------------------------------------------------------
+    // #218 – Read-only healthcheck path for backend startup readiness
+    // -------------------------------------------------------------------
+
+    /// Returns a simple healthcheck result for load-balancer probes.
+    ///
+    /// Does **not** require authentication, does **not** modify state, and
+    /// does **not** emit events. Returns `ready: true` when the contract is
+    /// initialised and on the expected storage version. Any other state
+    /// returns `ready: false` with a descriptive status label so operators
+    /// can diagnose the issue without decoding error codes.
+    ///
+    /// This function intentionally bypasses `check_version` (like
+    /// `get_version_info` and `get_migration_state`) so it remains callable
+    /// even when the contract is in a pre-migration or pre-init state.
+    pub fn healthcheck(env: Env) -> HealthcheckResult {
+        let stored_version: Option<u32> = env.storage().instance().get(&STORAGE_VERSION_KEY);
+        let (ready, status) = match stored_version {
+            None => (false, symbol_short!("noinit")),
+            Some(v) if v != STORAGE_VERSION => (false, symbol_short!("migrate")),
+            Some(_) => (true, symbol_short!("ok")),
+        };
+        HealthcheckResult {
+            ready,
+            contract_name: symbol_short!("sla_calc"),
+            status,
+        }
     }
 }
