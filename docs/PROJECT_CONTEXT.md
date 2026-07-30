@@ -97,6 +97,7 @@ or have broad blast radius (`prune_history`).
 > `list_`, `healthcheck`, `calculate_sla_view`, or `replay_calculate_sla` are
 > read-only and safe to call freely. `calculate_sla` requires the operator
 > role. Everything else requires the admin role.
+
 ## Telemetry & Weekly Reset Semantics
 
 The `apexchainx_calculator` contract maintains per-severity telemetry (`SeverityTelemetry`) tracking calculation counts, violation counts, and violation rates.
@@ -115,6 +116,7 @@ The `apexchainx_calculator` contract maintains per-severity telemetry (`Severity
    - `get_severity_telemetry()` reflects stored counters. Inactive lanes retain their last updated telemetry state until the next invocation in that lane triggers a lazy reset.
    - Replays and duplicate resubmissions with identical inputs/configs do NOT update or reset telemetry counters.
    - Off-chain monitoring systems or backend consumers desiring continuous 7-day rolling window analytics should aggregate on-chain `EVENT_SLA_CALC` events or poll `get_severity_telemetry()` periodically alongside contract calls.
+
 ## Contract Lifecycle
 
 The `apexchainx_calculator` contract has four independent state axes
@@ -135,12 +137,15 @@ Quick overview of the main lifecycle states:
 
 See [`CONTRACT_LIFECYCLE.md`](CONTRACT_LIFECYCLE.md) for Mermaid diagrams of
 each flow, the combined state matrix, and the full invariants table.
+
 ## SC- Marker Convention
 
 Throughout the contract crate, inline comments and doc comments carry `SC-NNN`
 and `SC-W5-NNN` markers that link code to the GitHub issues that motivated the
 design. The rules for adding, updating, and retiring these markers are in
 [`docs/SC_MARKER_POLICY.md`](SC_MARKER_POLICY.md).
+
+
 ---
 
 ## SC-100: Future Contract Roadmap
