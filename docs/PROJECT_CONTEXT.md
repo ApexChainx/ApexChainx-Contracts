@@ -84,6 +84,30 @@ reference them until they appear in the repository.
 - Frontend never calls contracts directly — all invocations go through the backend
 - Backend indexers and operators should follow the [Observability Contract](OBSERVABILITY_CONTRACT.md) for health-signal monitoring and alerting guidance
 
+### Config Event Ordering Regression Policy
+
+Every successful `set_config()` call appends exactly one `cfg_upd` event. Across
+repeated calls, events must remain in invocation order, including when severities
+are interleaved or the same severity is overwritten. Each event must describe
+the individual write that produced it:
+
+- topics are `(cfg_upd, v1, severity)`
+- payload fields remain `(threshold_minutes, penalty_per_minute, reward_base)`
+- payload values must not be reordered, deduplicated, coalesced, or replaced by
+  values from a later write
+- rejected calls emit no `cfg_upd` event and therefore add nothing to the stream
+
+Treat
+`test_repeated_set_config_events_preserve_call_and_payload_order` in
+`apexchainx_calculator/src/tests.rs` as the canonical repeated-write ordering
+test. The stable schema assertions
+`test_set_config_emits_versioned_config_event`,
+`test_cfg_upd_event_topic_count_is_three`, and
+`test_cfg_upd_event_payload_field_count_is_three` remain the source of truth for
+the event's topic and payload shapes. Any intentional change to these invariants
+requires updating the tests, this policy, and the versioning rules in
+`apexchainx_calculator/src/event_schema.rs`.
+
 ### Contribution Guidelines for New Crates
 
 1. **Open a tracking issue** before creating the crate directory

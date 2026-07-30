@@ -31,6 +31,8 @@
 //! - topic[2]: severity Symbol
 //! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
 //!   reward_base: i128)
+//! - repeated writes preserve invocation order; see the regression policy in
+//!   `docs/PROJECT_CONTEXT.md`
 //!
 //! ## paused (`paused`)
 //! Emitted when the contract is paused.

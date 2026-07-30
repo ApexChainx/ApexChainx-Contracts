@@ -1819,6 +1819,51 @@ fn test_repeated_config_updates_latest_wins() {
     assert_eq!(cfg.reward_base, 1200);
 }
 
+/// Canonical regression test for the `set_config` event stream.
+///
+/// Contributor policy is documented in `docs/PROJECT_CONTEXT.md`. Keep this
+/// assertion in call order: every successful write must append exactly one
+/// `cfg_upd` event whose topic severity and payload belong to that write.
+#[test]
+fn test_repeated_set_config_events_preserve_call_and_payload_order() {
+    let (env, client, actors) = setup();
+
+    client.set_config(&actors.admin, &symbol_short!("critical"), &10, &50, &500);
+    client.set_config(&actors.admin, &symbol_short!("high"), &20, &25, &400);
+    client.set_config(&actors.admin, &symbol_short!("critical"), &30, &100, &800);
+
+    let events = env.events().all();
+    let mut config_events = soroban_sdk::Vec::new(&env);
+    for event in events.iter() {
+        let (_, topics, _) = &event;
+        let event_name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if event_name == EVENT_CONFIG_UPD {
+            config_events.push_back(event);
+        }
+    }
+
+    assert_eq!(config_events.len(), 3);
+
+    let expected = [
+        (symbol_short!("critical"), (10u32, 50i128, 500i128)),
+        (symbol_short!("high"), (20u32, 25i128, 400i128)),
+        (symbol_short!("critical"), (30u32, 100i128, 800i128)),
+    ];
+
+    for (index, (expected_severity, expected_payload)) in expected.into_iter().enumerate() {
+        let (_, topics, data) = config_events.get(index as u32).unwrap();
+        let event_name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
+        let severity: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
+        let payload: (u32, i128, i128) = data.try_into_val(&env).unwrap();
+
+        assert_eq!(event_name, EVENT_CONFIG_UPD);
+        assert_eq!(version, EVENT_VERSION);
+        assert_eq!(severity, expected_severity);
+        assert_eq!(payload, expected_payload);
+    }
+}
+
 #[test]
 fn test_repeated_config_updates_do_not_corrupt_calculation() {
     let (_env, client, actors) = setup();
