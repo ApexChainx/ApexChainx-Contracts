@@ -1,14 +1,22 @@
+//! Core SLA calculation logic and stats tracking.
+//!
+//! This module contains the delegated implementation of `calculate_sla`,
+//! `calculate_sla_view`, stats management, and telemetry recording.
+
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::{
-    SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry,
-    STATS_KEY, HISTORY_KEY, RETENTION_LIMIT_KEY,
-    SEVERITY_CALC_COUNTS_KEY, SEVERITY_VIOL_COUNTS_KEY,
-    LAST_CALCULATION_LEDGER_KEY, LAST_VIOLATION_LEDGER_KEY,
-    PAUSED_KEY, MAX_HISTORY_SIZE,
-    EVENT_SLA_CALC, EVENT_SETTLE_INTENT, EVENT_VERSION, EVENT_STATS_SAT,
+    SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
+    EVENT_VERSION, HISTORY_KEY, LAST_CALCULATION_LEDGER_KEY, LAST_VIOLATION_LEDGER_KEY, MAX_HISTORY_SIZE,
+    MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY,
+    SEVERITY_VIOL_COUNTS_KEY, STATS_KEY,
 };
 
+/// Calculate the SLA outcome for an outage event (delegated implementation).
+///
+/// See [`crate::SLACalculatorContract::calculate_sla`] for the full API
+/// contract and [`crate::SLAError::DuplicateOutageInput`] for the
+/// duplicate-detection semantics.
 pub fn calculate_sla(
     env: &Env,
     caller: &Address,
@@ -29,18 +37,19 @@ pub fn calculate_sla(
         config_version_hash,
         env.ledger().timestamp(),
     )?;
-    let met = result.status != symbol_short!("viol");
-    record_severity_telemetry(env, &severity, met);
     let mut history: Vec<SLAResult> = env
         .storage()
         .instance()
         .get(&HISTORY_KEY)
         .unwrap_or_else(|| Vec::new(env));
 
+    // Anti-spam accounting — mirrors SLACalculatorContract::calculate_sla.
     let mut existing: Option<SLAResult> = None;
+    let mut stored_for_outage: u32 = 0;
     for i in 0..history.len() {
         let entry = history.get(i).unwrap();
         if entry.outage_id == outage_id {
+            stored_for_outage += 1;
             existing = Some(entry);
         }
     }
@@ -49,9 +58,18 @@ pub fn calculate_sla(
             if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
                 return Err(SLAError::DuplicateOutageInput);
             }
+            // Replay: return the stored decision without touching state.
             return Ok(prev);
         }
+        if stored_for_outage >= MAX_RECALCS_PER_OUTAGE {
+            return Err(SLAError::OutageRecalcLimit);
+        }
     }
+
+    // Only recorded once the result is certain to be stored, so replays and
+    // rejected submissions cannot inflate per-severity counters.
+    let met = result.status != symbol_short!("viol");
+    record_severity_telemetry(env, &severity, met);
 
     history.push_back(result.clone());
 
@@ -83,6 +101,8 @@ pub fn calculate_sla(
     Ok(result)
 }
 
+/// Recalculates SLA deterministically without mutating state or emitting events.
+/// Can be called by anyone for audit and verification purposes.
 pub fn calculate_sla_view(
     env: &Env,
     outage_id: Symbol,
@@ -101,6 +121,7 @@ pub fn calculate_sla_view(
     )
 }
 
+/// Returns the cumulative SLA performance statistics.
 pub fn get_stats(env: &Env) -> Result<SLAStats, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     env.storage()
@@ -109,6 +130,7 @@ pub fn get_stats(env: &Env) -> Result<SLAStats, SLAError> {
         .ok_or(SLAError::NotInitialized)
 }
 
+/// Returns per-severity weekly violation-rate telemetry.
 pub fn get_severity_telemetry(env: &Env) -> Result<Vec<SeverityTelemetry>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let mut telemetry = Vec::new(env);
@@ -144,6 +166,8 @@ fn require_not_paused(env: &Env) -> Result<(), SLAError> {
     Ok(())
 }
 
+/// Computes the SLA result (met/violated, reward/penalty, rating) from inputs.
+/// Pure function — no state reads or writes.
 pub fn compute_result(
     outage_id: Symbol,
     mttr_minutes: u32,
@@ -226,7 +250,19 @@ fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
     (packed & mask) | ((value as u128) << (index * 32))
 }
 
-pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
+/// Records per-severity calculation/violation counters for telemetry.
+/// Record severity telemetry for a calculation execution.
+///
+/// ### Telemetry Weekly Reset Semantics
+/// The telemetry system maintains per-severity rolling counters for calculations and violations.
+/// When recording a new entry for a severity lane, the contract checks if the elapsed time since the last
+/// calculation timestamp or last violation timestamp for that severity is greater than or equal to 7 days (604,800 seconds).
+///
+/// - **Lazy Reset Strategy**: Resets are non-blocking and lazy; counters are not automatically reset by background cron tasks.
+///   Instead, reset is triggered on the next `calculate_sla` invocation for that specific severity lane once 7 days have passed.
+/// - **Lane Isolation**: Reset is per-severity lane. Calculations or inactivity in one severity level do not reset telemetry for other severities.
+/// - **Reinitialization**: Upon reset, the lane's calculation and violation counters are cleared to 0 before the current invocation is recorded,
+///   reinitializing the count to 1 calculation (and 1 violation if the current calculation violated SLA).pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
     let index = crate::SLACalculatorContract::canonical_severity_index(severity).unwrap_or(0);
     let mut calculations = load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
     let mut violations = load_counts(env, &SEVERITY_VIOL_COUNTS_KEY);
@@ -250,11 +286,7 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
         count_lane(calculations, index).saturating_add(1),
     );
     if !met {
-        violations = set_count_lane(
-            violations,
-            index,
-            count_lane(violations, index).saturating_add(1),
-        );
+        violations = set_count_lane(violations, index, count_lane(violations, index).saturating_add(1));
     }
 
     let current_ledger = if now > u64::from(u32::MAX) {
@@ -281,6 +313,7 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
         .set(&LAST_VIOLATION_LEDGER_KEY, &last_violations);
 }
 
+/// Increments the cumulative SLA statistics, emitting `stats_sat` on overflow.
 pub fn increment_stats(env: &Env, met: bool, reward: i128, penalty: i128) {
     let mut stats: SLAStats = env.storage().instance().get(&STATS_KEY).unwrap_or(SLAStats {
         total_calculations: 0,
@@ -292,12 +325,7 @@ pub fn increment_stats(env: &Env, met: bool, reward: i128, penalty: i128) {
     match stats.total_calculations.checked_add(1) {
         Some(v) => stats.total_calculations = v,
         None => {
-            emit_stats_saturated(
-                env,
-                symbol_short!("totcalc"),
-                stats.total_calculations as i128,
-                1,
-            );
+            emit_stats_saturated(env, symbol_short!("totcalc"), stats.total_calculations as i128, 1);
             stats.total_calculations = u64::MAX;
         }
     }
@@ -314,12 +342,7 @@ pub fn increment_stats(env: &Env, met: bool, reward: i128, penalty: i128) {
         match stats.total_violations.checked_add(1) {
             Some(v) => stats.total_violations = v,
             None => {
-                emit_stats_saturated(
-                    env,
-                    symbol_short!("totviol"),
-                    stats.total_violations as i128,
-                    1,
-                );
+                emit_stats_saturated(env, symbol_short!("totviol"), stats.total_violations as i128, 1);
                 stats.total_violations = u64::MAX;
             }
         }

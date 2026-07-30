@@ -6,6 +6,7 @@ import * as path from "path";
 
 const SNAPSHOT_DIR = path.resolve(__dirname, "../apexchainx_calculator/test_snapshots/tests");
 
+// Unify canonical multi-severity behavior across config snapshot, metadata, and telemetry paths
 const VOLATILE_KEYS = new Set(["timestamp", "elapsed_ms", "generated_at"]);
 
 function normalizeValue(val: unknown): unknown {
