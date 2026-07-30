@@ -23,8 +23,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.94.1
         with:
@@ -108,8 +106,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
 
       - name: Run tests
         working-directory: apexchainx_calculator
@@ -175,7 +173,7 @@ jobs:
 
       - name: Generate hash
         run: |
-          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          WASM=apexchainx_calculator/target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
           if [ -f "$WASM" ]; then
             sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
             echo "Hash generated successfully"

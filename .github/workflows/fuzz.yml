@@ -69,8 +69,7 @@ jobs:
           cargo +nightly fuzz run ${{ matrix.target }} \
             -- \
             -max_total_time=${{ env.FUZZ_DURATION }} \
-            -artifact_prefix=fuzz/artifacts/${{ matrix.target }}/ \
-            -dict=fuzz/dictionaries/${{ matrix.target }}.dict 2>/dev/null || true
+            -artifact_prefix=fuzz/artifacts/${{ matrix.target }}/ 2>/dev/null || true
 
       - name: Generate summary
         if: always()
