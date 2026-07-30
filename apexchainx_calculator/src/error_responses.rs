@@ -68,6 +68,10 @@ pub fn is_invalid_input(err: &SLAError) -> bool {
     matches!(err, SLAError::InvalidInput)
 }
 
+pub fn is_severity_not_in_set(err: &SLAError) -> bool {
+    matches!(err, SLAError::SeverityNotInSet)
+}
+
 pub fn is_outage_recalc_limit(err: &SLAError) -> bool {
     matches!(err, SLAError::OutageRecalcLimit)
 }

@@ -9,6 +9,9 @@
 ## [Unreleased]
 
 ### Added
+- **[SC-509] SLAError Addition Workflow** (#253) — comprehensive contributor guide for adding, deprecating, or reviewing `SLAError` variants without breaking backend adapter logic. See `docs/sla-error-additions-guide.md`.
+- `error_responses::is_severity_not_in_set` — typed helper predicate for `SLAError::SeverityNotInSet` (#253)
+- `docs/sla-error-additions-guide.md` — step-by-step guide covering SLAError enum management, the typed helper layer, compatibility expectations, and testing requirements (#253)
 - `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
 - `tooling/release-summary.ts` — release summary generator for maintainers (#280)
 - `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js (#281)

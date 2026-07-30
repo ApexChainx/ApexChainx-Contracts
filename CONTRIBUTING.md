@@ -16,6 +16,7 @@ expertise help make this project better for everyone in the Stellar ecosystem.
 - [Testing Guidelines](#testing-guidelines)
 - [Documentation Guidelines](#documentation-guidelines)
 - [Security Guidelines](#security-guidelines)
+- [SLAError Addition Workflow](#slaerror-addition-workflow)
 - [Reporting Bugs](#reporting-bugs)
 - [Suggesting Features](#suggesting-features)
 - [Getting Help](#getting-help)
@@ -455,6 +456,34 @@ pytest --cov=app --cov-report=html
 - ❌ Never trust user input without validation
 - ❌ Never use unsafe code in smart contracts
 
+---
+
+## SLAError Addition Workflow
+
+Adding a new `SLAError` variant is a **contract interface change**, even when it
+appears to be an internal detail.  Backend consumers that depend on numeric error
+discriminants or call `get_failure_schema()` to build a lookup table must be able
+to adapt without silent failures.
+
+**Full guide:** [`docs/sla-error-additions-guide.md`](docs/sla-error-additions-guide.md)
+
+### Quick rules
+
+| Rule | Detail |
+|------|--------|
+| Append only | New variants go at the **end** of `SLAError`, never in the middle |
+| Stable discriminants | Once shipped, `FooError = N` means `N` maps to `FooError` forever — never renumber or remove |
+| Typed helper required | Every new variant needs a matching `is_<variant>` predicate in `error_responses.rs` |
+| Catalogue update required | `get_failure_schema()` must include an entry for every variant |
+| CHANGELOG required | Add an entry under `[Unreleased]` noting the new variant and discriminant |
+| Tests required | Unit test for the error path + predicate smoke test + catalogue count assertion |
+| Backend notification | If any existing label or discriminant changes, notify the `apexchainx-be` team |
+
+See the [full guide](docs/sla-error-additions-guide.md) for step-by-step
+instructions, deprecation protocol, and compatibility guarantees.
+
+---
+
 ## 🐛 Reporting Bugs
 
 | Field | Description | Required |
@@ -520,6 +549,9 @@ This covers:
   saturation handling.
 - **[SC-508] Role-Change Incident Review Note** (#290) — admin/operator handoff
   safety decision table.
+- **[SC-509] SLAError Addition Workflow** (#253) — step-by-step guide for adding,
+  deprecating, or reviewing `SLAError` variants without breaking backend adapter
+  logic. See [`docs/sla-error-additions-guide.md`](docs/sla-error-additions-guide.md).
 
 ### Release Summary Generator (#280)
 
