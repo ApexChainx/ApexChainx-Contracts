@@ -90,6 +90,17 @@ hash: wasm-release
         shasum -a 256 "$wasm" | awk '{print $1 "  {{crate}}.wasm"}'
     fi
 
+# ------------------------------------------------------- dependency-hygiene -----
+
+# Check for unused dependencies with cargo-machete.              [CI: Unused dependency gate]
+machete:
+    cargo install cargo-machete --locked 2>/dev/null; cd {{crate}} && cargo machete
+
+# Check for unused dependencies with cargo-udeps.                [CI: Unused dependency gate]
+# Requires nightly Rust — install with: rustup toolchain install nightly
+udeps:
+    cargo install cargo-udeps --locked 2>/dev/null; cd {{crate}} && cargo +nightly udeps --all-targets
+
 # --------------------------------------------------------------- tooling -----
 
 # Generate a ship-review note from CHANGELOG.md.
@@ -105,5 +116,5 @@ clean:
     cd {{crate}} && cargo clean
 
 # Everything CI gates on, in CI's order. Run before opening a PR.
-ci: fmt-check lint check no-std test fuzz wasm
+ci: fmt-check lint check no-std machete udeps test fuzz wasm
     @echo "✓ local CI equivalent passed"

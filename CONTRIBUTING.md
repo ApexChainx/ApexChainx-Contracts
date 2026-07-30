@@ -14,6 +14,7 @@ expertise help make this project better for everyone in the Stellar ecosystem.
 - [Code Style Guidelines](#code-style-guidelines)
 - [Pull Request Guidelines](#pull-request-guidelines)
 - [Testing Guidelines](#testing-guidelines)
+- [Dependency Hygiene](#-dependency-hygiene)
 - [Documentation Guidelines](#documentation-guidelines)
 - [Security Guidelines](#security-guidelines)
 - [Reporting Bugs](#reporting-bugs)
@@ -350,6 +351,8 @@ impl SLAContract {
 - [ ] `cargo test` passes
 - [ ] `cargo clippy -- -D warnings` produces no warnings
 - [ ] `cargo fmt -- --check` confirms formatting compliance
+- [ ] `cargo machete` passes (no unused dependencies in `Cargo.toml`)
+- [ ] `cargo +nightly udeps --all-targets` passes (no unused dependencies in code; requires nightly toolchain)
 - [ ] `cargo check --target wasm32-unknown-unknown --lib` passes (no-std check)
 - [ ] New public functions are added to the result schema or documented
 - [ ] Any breaking change to `SLAResult` increments `RESULT_SCHEMA_VERSION`
@@ -427,6 +430,62 @@ pytest
 pytest tests/test_payment_service.py
 pytest --cov=app --cov-report=html
 ```
+
+## 🧹 Dependency Hygiene
+
+The CI pipeline checks for unused dependencies to keep the codebase lean and
+maintainable. Drift from unused dependencies silently increases build times,
+attack surface, and maintenance burden.
+
+### Why It Matters
+
+- **`cargo machete`** detects dependencies declared in `Cargo.toml` that are no
+  longer imported anywhere in the crate. Removing them reduces compile time and
+  audit surface.
+- **`cargo udeps`** detects dependencies that are available in the workspace but
+  not actually used by the crate's code. This catches cases where a dependency
+  was added for an experiment and never cleaned up.
+
+Both checks are enforced in CI (see the **Unused dependency gate** step in
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml)). A PR that introduces
+unused dependencies will fail CI.
+
+### How to Run Locally
+
+```bash
+# Install the tools (one-time)
+cargo install cargo-machete --locked
+cargo install cargo-udeps --locked
+
+# Ensure the nightly toolchain is available (required by cargo-udeps)
+rustup toolchain install nightly
+
+# Check for unused dependencies
+cd apexchainx_calculator
+cargo machete
+cargo +nightly udeps --all-targets
+```
+
+Or use the `just` recipes (see [`justfile`](justfile)):
+
+```bash
+just machete
+just udeps
+```
+
+The full CI pipeline — including both hygiene checks — can be run with:
+
+```bash
+just ci
+```
+
+> **Tip:** Run `just machete` and `just udeps` before opening a PR to catch
+> dependency issues early. The [PR checklist](#before-submitting-checklist)
+> includes both checks under the *Smart Contract Specific* section.
+>
+> **Note:** `cargo-udeps` uses nightly-only compiler features, so it requires
+> the nightly Rust toolchain. The `just udeps` recipe handles this automatically
+> by invoking `cargo +nightly udeps`.
 
 ## 📚 Documentation Guidelines
 

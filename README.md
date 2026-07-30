@@ -96,5 +96,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
 - **[Release Artifact Provenance Policy](docs/RELEASE_PROVENANCE_POLICY.md)** — Guidelines for WASM output checksums and snapshot check-ins.
 - **[Release Summary Format](docs/RELEASE_SUMMARY_FORMAT.md)** — Structured ship-review note format for maintainer release triage. Generate one with `just release-summary` (or `just release-summary <version>`).
 - **Dependency auditing:** `cargo audit` runs on CI for every push
+- **Dependency hygiene:** `cargo machete` and `cargo udeps` prevent unused dependency drift — see [Dependency Hygiene in CONTRIBUTING.md](CONTRIBUTING.md#-dependency-hygiene) for details.
 - **WASM integrity:** Release artifacts include SHA-256 manifests
 - **Reproducible builds:** Local builds can be verified against CI-generated manifests
