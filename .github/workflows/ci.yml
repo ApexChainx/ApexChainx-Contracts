@@ -31,6 +31,12 @@ jobs:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
 
+      # Issue #207: Early no-std lint — scans Rust source for accidental `use
+      # std::` or `extern crate std` before the costly WASM compilation step.
+      # Runs fast (pure grep) and gives contributors a clear, file-level error.
+      - name: no_std compatibility lint (early gate)
+        run: ./scripts/check-no-std.sh
+
       # Issue #12: WASM no-std compliance check.
       # Compiles only the library crate for wasm32-unknown-unknown so that any
       # accidental `std` import surfaces here (before deployment) as a compile
@@ -150,6 +156,45 @@ jobs:
         run: cargo test --lib fuzz_tests::
 
 
+  parity-check:
+    name: Parity Check (canonical baseline)
+    runs-on: ubuntu-latest
+    # This job is a release gate: it verifies that the current compute_result
+    # implementation produces identical outputs to the locked-in historical
+    # golden vectors in test_snapshots/tests/parity_baseline.json.
+    # A failure here means a calculation regression has been introduced and
+    # must be reviewed before merging or cutting a release.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/target
+          key: parity-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            parity-${{ runner.os }}-cargo-
+
+      - name: Run parity checker against canonical baseline
+        working-directory: apexchainx_calculator
+        run: cargo test --lib parity_tests::
+
+      - name: Upload parity baseline as artifact (for release traceability)
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-baseline
+          path: apexchainx_calculator/test_snapshots/tests/parity_baseline.json
+          retention-days: 90
+
+
   provenance-hashes:
     name: Provenance & Hashes
     runs-on: ubuntu-latest
@@ -163,25 +208,19 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Build WASM release
-        working-directory: apexchainx_calculator
-        run: cargo build --target wasm32-unknown-unknown --release
+      - name: Install just
+        run: cargo install just
 
-      - name: Generate hash
-        run: |
-          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
-          if [ -f "$WASM" ]; then
-            sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
-            echo "Hash generated successfully"
-            cat provenance.sha256
-          else
-            echo "WASM file not found at $WASM"
-            exit 1
-          fi
+      - name: Generate and save hash
+        run: just hash-save
+
+      - name: Verify hash against committed file
+        run: just hash-verify
+        continue-on-error: true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pr-provenance-hash
-          path: provenance.sha256
+          path: artifacts/apexchainx_calculator.wasm.sha256
           retention-days: 30

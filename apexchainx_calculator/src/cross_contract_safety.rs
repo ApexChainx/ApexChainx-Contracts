@@ -71,6 +71,7 @@ pub struct SafeCallResult {
 /// we store a `compensation_tag` (a Symbol identifying the compensation
 /// logic) and the `args` that were originally passed so the caller can
 /// re-invoke with reversed semantics.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct CompensationAction {
@@ -212,12 +213,16 @@ impl CrossContractSafety {
 
 /// Symbol tags for compensation actions.
 pub const COMP_UNLOCK_FUNDS: Symbol = soroban_sdk::symbol_short!("unlck_fnd");
+/// Compensation tag for reversing a settlement operation.
 pub const COMP_REVERSE_SETTLE: Symbol = soroban_sdk::symbol_short!("rev_setle");
+/// Compensation tag for unpausing an escrow contract.
 pub const COMP_UNPAUSE_ESCROW: Symbol = soroban_sdk::symbol_short!("unp_escro");
 
 /// Standard function names expected on downstream contracts.
 pub const FN_LOCK_FUNDS: Symbol = soroban_sdk::symbol_short!("lock_fnds");
+/// Function name for releasing a payment.
 pub const FN_RELEASE_PAYMENT: Symbol = soroban_sdk::symbol_short!("rel_pay");
+/// Function name for cancelling a settlement.
 pub const FN_CANCEL_SETTLEMENT: Symbol = soroban_sdk::symbol_short!("can_setl");
 
 #[cfg(test)]

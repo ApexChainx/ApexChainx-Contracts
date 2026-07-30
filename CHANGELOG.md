@@ -8,7 +8,34 @@
 
 ## [Unreleased]
 
+### Changed
+- `test_storage_key_namespace_symbols_are_distinct` now covers all 17 on-chain storage key constants (previously omitted `SEVERITY_CALC_COUNTS_KEY`, `SEVERITY_VIOL_COUNTS_KEY`, `LAST_CALCULATION_LEDGER_KEY`, `LAST_VIOLATION_LEDGER_KEY`, and `LAST_CFG_UPDATE_KEY`). The assertion now includes the colliding indices in its error message for faster diagnosis. A maintenance comment listing every key and a pointer to this test was added to both the storage-key block in `lib.rs` and the test itself so future contributors know to update both locations when adding a new key.
+### Fixed
+- Replaced stale `test_zero_threshold_always_violated` test in `threshold_config.rs`
+  with two correct tests that verify `set_config` rejects `threshold_minutes = 0`
+  with `InvalidThreshold` (code 8). The previous test incorrectly assumed a
+  zero-threshold write would succeed and then tested calculation behaviour on an
+  impossible stored state.
+- Hardened `validate_cross_severity_penalty_ordering` in `lib.rs` to use
+  `.ok_or(SLAError::InvalidSeverity)?` instead of `.unwrap()` when indexing
+  into the canonical severity list. The function is now panic-free: if the
+  internal severity list invariant is ever broken the call surfaces a
+  deterministic `InvalidSeverity` error rather than an unrecoverable host trap.
 ### Added
+- `docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md` — release-readiness checklist for PRs that touch storage keys, `STORAGE_VERSION`, event topic constants, or event payload fields; cross-referenced from `CONTRIBUTING.md` as SC-100
+- **[SC-509] SLAError Addition Workflow** (#253) — comprehensive contributor guide for adding, deprecating, or reviewing `SLAError` variants without breaking backend adapter logic. See `docs/sla-error-additions-guide.md`.
+- `error_responses::is_severity_not_in_set` — typed helper predicate for `SLAError::SeverityNotInSet` (#253)
+- `docs/sla-error-additions-guide.md` — step-by-step guide covering SLAError enum management, the typed helper layer, compatibility expectations, and testing requirements (#253)- `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
+- `docs/CONTRACT_LIFECYCLE.md` — Mermaid state-transition diagrams for the `apexchainx_calculator` contract lifecycle: top-level lifecycle, pause/unpause, storage migration, config-freeze, admin transfer (two-step), and operator handoff flows; plus the combined orthogonal state matrix and invariants table (closes #256)- `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)- `tooling/release-summary.ts` — release summary generator for maintainers (#280)
+- `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js (#281)
+- `just bootstrap` target — session-safe, idempotent one-command local bootstrap for the Rust WASM contract workflow: verifies rustup, installs the pinned `1.94.1` toolchain with `rustfmt` + `clippy` components, adds `wasm32-unknown-unknown` target, and verifies `cargo` is on `PATH` (closes #257)
+- `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
+- `docs/EVENT_DRIFT_CHECKLIST.md` — standalone quick-reference event drift review checklist for everyday maintainer use (#287)
+- `tooling/release-summary.ts` — release summary generator for maintainers (#280)
+- `scripts/release-replay.ts` — minimal release candidate validation command for fast pre-release checks (#270)
+- `just release-replay` and `just release-replay-full` targets — fast and full release validation (#270)
+- `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js, including setup README (#281)
+- `just bootstrap` target — one-command local environment setup (#281)- Historical parity checker test (`test_historical_parity_golden_results`) — validates current contract behavior against known golden results for release regression detection (#282)
 - `get_config_version_hash` — deterministic hash of the current config snapshot for backend parity validation
 - `get_result_schema` — explicit schema descriptor for SLA result encoding (status, payment type, rating symbols)
 - `calculate_sla_view` — read-only simulation of SLA calculation without state mutation or auth requirement
@@ -37,6 +64,9 @@
 - Event Correlation IDs — cross-contract tracing via deterministic correlation IDs generated by `generate_correlation_id` from ledger sequence and formatted with `correlation_event_topics` (SC-W5-079)
 - Settlement Intent Event (`set_int`) — Published on every `calculate_sla` call alongside `sla_calc` event for backend reconciliation. It uses topics `(set_int, v1, severity)` and payload `(outage_id: Symbol, status: Symbol, payment_type: Symbol, amount: i128, config_version_hash: u64, recorded_at: u64)` (SC-W5-041)
 - `docs/AUDIT_TRAIL.md` — human-readable one-pager cataloguing every event topic, payload field, emission site, and backend recovery implication, sourced directly from `event_schema.rs` and the `EVENT_*` constants in `lib.rs` (closes #106)
+- `docs/PUBLIC_FUNCTION_DOC_POLICY.md` (SC-102) — repository-level policy enforcing doc comments on all public items with compile-time enforcement via `#![deny(missing_docs)]` (closes #214)
+- `docs/UPGRADE_REVIEW_CHECKLIST.md` (SC-103) — admin-facing checklist for safely reviewing contract upgrade proposals (closes #212)
+- `docs/SECURITY_REVIEW_TEMPLATE.md` (SC-104) — standardised security review template for new contract modules (closes #210)
 
 ### Changed
 - `pause` now requires a `reason: String` parameter, records pause metadata (reason, timestamp, initiator), and emits an event payload with the paused status (breaking)

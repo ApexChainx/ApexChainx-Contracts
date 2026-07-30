@@ -3,20 +3,33 @@ use soroban_sdk::{contracttype, Address, Vec};
 use crate::{PauseInfo, SLAConfigSnapshot, SLAResultSchema, SLAStats};
 
 /// Combined audit-state envelope for one-shot backend bootstrap reads (#107).
+///
+/// Groups all contract state (roles, config, stats, history, schema) into a
+/// single read for backend consumers.
+#[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AuditState {
+    /// Current admin address.
     pub admin: Address,
+    /// Current operator address.
     pub operator: Address,
+    /// Pending admin address (two-step transfer), if any.
     pub pending_admin: Option<Address>,
+    /// Pending operator address (two-step handoff), if any.
     pub pending_operator: Option<Address>,
+    /// Whether the contract is currently paused.
     pub paused: bool,
     /// Empty when unpaused, single-element when paused. A `Vec` stands in for
     /// `Option` because `#[contracttype]` cannot convert `Option<PauseInfo>`.
     pub pause_info: Vec<PauseInfo>,
+    /// Ordered snapshot of all severity configurations.
     pub config_snapshot: SLAConfigSnapshot,
+    /// Cumulative SLA performance statistics.
     pub stats: SLAStats,
+    /// Number of history entries currently stored on-chain.
     pub history_len: u32,
+    /// Result schema descriptor with symbol mappings.
     pub result_schema: SLAResultSchema,
 }
 
