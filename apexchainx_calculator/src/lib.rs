@@ -1639,8 +1639,11 @@ impl SLACalculatorContract {
 
         // All public methods added in alphabetical order for deterministic output.
         // Lifecycle:
-        methods.push_back(method("accept_admin", true, "admin", "adm_acc"));
-        methods.push_back(method("accept_operator", true, "operator", "op_acc"));
+        // Note: accept_admin/accept_operator are called by the proposed address
+        // (not the current role holder), so auth is "none" — only an address
+        // equality check against the pending slot is performed.
+        methods.push_back(method("accept_admin", true, "none", "adm_acc"));
+        methods.push_back(method("accept_operator", true, "none", "op_acc"));
         // Calculation:
         methods.push_back(method("calculate_sla", true, "operator", "sla_calc"));
         methods.push_back(method("calculate_sla_view", false, "none", ""));
