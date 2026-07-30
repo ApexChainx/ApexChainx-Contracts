@@ -9,6 +9,7 @@
 ## [Unreleased]
 
 ### Added
+- `docs/CONTRACT_LIFECYCLE.md` — Mermaid state-transition diagrams for the `apexchainx_calculator` contract lifecycle: top-level lifecycle, pause/unpause, storage migration, config-freeze, admin transfer (two-step), and operator handoff flows; plus the combined orthogonal state matrix and invariants table (closes #256)
 - `docs/CONTRACT_MAINTENANCE_POLICY.md` — comprehensive maintenance policy covering `#[contracttype]` compatibility notes (#279), response-shape stability (#283), version negotiation (#284), API archetypes (#285), event payload size checks (#286), event drift review (#287), history write audit (#288), telemetry counters (#289), and role-change incident review (#290)
 - `tooling/release-summary.ts` — release summary generator for maintainers (#280)
 - `.devcontainer/` — reproducible dev container workspace with Rust + WASM target + just + Node.js (#281)

@@ -8,6 +8,7 @@
 - [Repository Architecture](#repository-architecture)
 - [System Flow](#system-flow)
 - [Architectural Rules](#architectural-rules)
+- [Contract Lifecycle](#contract-lifecycle)
 - [SC-100: Future Contract Roadmap](#sc-100-future-contract-roadmap)
 
 ---
@@ -39,6 +40,29 @@ The ApexChainx platform is composed of three repositories:
 1. **Frontend never calls contracts directly** — all contract interactions go through the backend
 2. **Backend is the exclusive bridge** — translates contract data to frontend-friendly responses
 3. **Contracts are execution-layer only** — pure deterministic computation, no external dependencies
+
+---
+
+## Contract Lifecycle
+
+The `apexchainx_calculator` contract has four independent state axes
+(initialized, version-matched, paused, config-frozen) that combine to determine
+which operations are permitted at any moment.
+
+**→ See the full state-transition diagram: [docs/CONTRACT_LIFECYCLE.md](CONTRACT_LIFECYCLE.md)**
+
+Quick overview of the main lifecycle states:
+
+```
+[Uninitialized] ──initialize()──→ [Active]
+    [Active] ──pause()──→ [Paused] ──unpause()──→ [Active]
+    [Active] ──(binary upgrade)──→ [NeedsMigration] ──migrate()──→ [Active]
+    [Active] ──freeze_config()──→ [ConfigFrozen] ──unfreeze_config()──→ [Active]
+    [Active] ──renounce_admin()──→ [AdminRenounced]  ← irreversible
+```
+
+See [`CONTRACT_LIFECYCLE.md`](CONTRACT_LIFECYCLE.md) for Mermaid diagrams of
+each flow, the combined state matrix, and the full invariants table.
 
 ---
 

@@ -98,3 +98,14 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed setup instructions.
 - **Dependency auditing:** `cargo audit` runs on CI for every push
 - **WASM integrity:** Release artifacts include SHA-256 manifests
 - **Reproducible builds:** Local builds can be verified against CI-generated manifests
+
+## Contract Lifecycle
+
+The contract's state machine has four orthogonal axes — initialized,
+version-matched, paused, and config-frozen — that stack to determine which
+operations are permitted.
+
+→ **[docs/CONTRACT_LIFECYCLE.md](docs/CONTRACT_LIFECYCLE.md)** — Mermaid
+state-transition diagrams for init, pause, migrate, config-freeze, admin
+transfer, and operator handoff flows, plus the combined state matrix and
+invariants table.
