@@ -3067,6 +3067,130 @@ fn test_get_history_page_order_is_oldest_first() {
 }
 
 // ============================================================
+// #380 – History pagination metadata (get_history_page_with_meta)
+// ============================================================
+
+#[test]
+fn test_get_history_page_with_meta_returns_total_and_has_more() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..5u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PGM_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // First full page of 2 from a 5-entry history: more remain.
+    let p0 = client.get_history_page_with_meta(&0, &2);
+    assert_eq!(p0.total, 5);
+    assert_eq!(p0.items.len(), 2);
+    assert!(p0.has_more);
+
+    // Second full page: more remain.
+    let p1 = client.get_history_page_with_meta(&2, &2);
+    assert_eq!(p1.total, 5);
+    assert_eq!(p1.items.len(), 2);
+    assert!(p1.has_more);
+
+    // Final short page: exactly the remaining entry, nothing after it.
+    let p2 = client.get_history_page_with_meta(&4, &2);
+    assert_eq!(p2.total, 5);
+    assert_eq!(p2.items.len(), 1);
+    assert!(!p2.has_more);
+}
+
+#[test]
+fn test_get_history_page_with_meta_empty_history() {
+    let (_env, client, _actors) = setup();
+
+    let page = client.get_history_page_with_meta(&0, &10);
+    assert_eq!(page.total, 0);
+    assert_eq!(page.items.len(), 0);
+    assert!(!page.has_more);
+}
+
+#[test]
+fn test_get_history_page_with_meta_offset_beyond_end() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..3u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PGM_OOB_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    let page = client.get_history_page_with_meta(&100, &10);
+    assert_eq!(page.total, 3);
+    assert_eq!(page.items.len(), 0);
+    assert!(!page.has_more);
+}
+
+#[test]
+fn test_get_history_page_with_meta_zero_limit() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..3u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PGM_ZL_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // `limit == 0` returns an empty page with the correct total. The cursor
+    // has not advanced past `offset`, so history still remains at offset 0.
+    let page = client.get_history_page_with_meta(&0, &0);
+    assert_eq!(page.total, 3);
+    assert_eq!(page.items.len(), 0);
+    assert!(page.has_more);
+}
+
+#[test]
+fn test_get_history_page_with_meta_items_match_get_history_page() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..5u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PGM_MATCH_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    for offset in 0..6u32 {
+        for limit in [0u32, 1, 2, 5, u32::MAX] {
+            let plain = client.get_history_page(&offset, &limit);
+            let meta = client.get_history_page_with_meta(&offset, &limit);
+            assert_eq!(
+                meta.items, plain,
+                "items mismatch at offset={} limit={}",
+                offset, limit
+            );
+            assert_eq!(
+                meta.total, 5,
+                "total mismatch at offset={} limit={}",
+                offset, limit
+            );
+        }
+    }
+}
+
+#[test]
+fn test_get_history_page_with_meta_saturating_arithmetic() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..4u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PGM_SAT_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // `offset + u32::MAX` would wrap in unchecked arithmetic; saturation must
+    // clamp to the real length so the single remaining entry is returned.
+    let page = client.get_history_page_with_meta(&3, &u32::MAX);
+    assert_eq!(page.total, 4);
+    assert_eq!(page.items.len(), 1);
+    assert!(!page.has_more);
+
+    // An offset at `u32::MAX` is beyond any real history: empty, no more.
+    let extreme = client.get_history_page_with_meta(&u32::MAX, &1);
+    assert_eq!(extreme.total, 4);
+    assert_eq!(extreme.items.len(), 0);
+    assert!(!extreme.has_more);
+}
+
+// ============================================================
 // SC-060 – History query by outage identifier
 // ============================================================
 
@@ -8638,9 +8762,9 @@ fn test_get_public_api_includes_all_major_methods() {
 fn test_get_public_api_method_count_is_stable() {
     let (_env, client, _actors) = setup();
     let api = client.get_public_api();
-    // 57 methods as of get_contract_info/get_contract_state_fingerprint/etc.
+    // 58 methods as of get_history_page_with_meta (#380).
     // This test catches accidental additions or removals
-    assert_eq!(api.methods.len(), 57, "Public API method count changed");
+    assert_eq!(api.methods.len(), 58, "Public API method count changed");
 }
 
 #[test]

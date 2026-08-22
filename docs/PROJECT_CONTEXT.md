@@ -63,7 +63,7 @@ No on-chain state is written and no events are emitted.
 | Config views | `get_config`, `get_config_snapshot`, `get_config_version_hash`, `list_configs`, `get_last_config_update`, `get_config_bundle` |
 | Custom severity views | `get_custom_severity`, `get_custom_config_snapshot` |
 | Stats & telemetry | `get_stats`, `get_economic_exposure`, `get_severity_telemetry` |
-| History views | `get_history`, `get_history_page`, `get_history_by_outage`, `get_latest_by_outage` |
+| History views | `get_history`, `get_history_page`, `get_history_page_with_meta`, `get_history_by_outage`, `get_latest_by_outage` |
 | Role queries | `get_admin`, `get_operator`, `get_pending_admin`, `get_pending_operator` |
 | Introspection | `get_result_schema`, `get_failure_schema`, `get_contract_metadata`, `get_full_audit_state` |
 | Retention helpers | `get_retention_limit`, `get_config_count`, `get_storage_version` |
@@ -269,6 +269,7 @@ None require caller auth, mutate storage, or emit events.
 | `get_economic_exposure` | `CONFIG_KEY` | Reads all canonical configs, computes max-reward + penalty-rate totals. |
 | `get_history` | `HISTORY_KEY` | Returns full `Vec<SLAResult>`. |
 | `get_history_page` | `HISTORY_KEY` | Bounded slice of history. See the [History Pagination Policy](HISTORY_PAGINATION_POLICY.md) (issue #263): offset-based, oldest-first, empty-page end-of-history signalling, saturating `offset + limit` arithmetic. |
+| `get_history_page_with_meta` | `HISTORY_KEY` | Same page as `get_history_page` plus `HistoryPage` metadata (`items`, `total`, `has_more`) so consumers can page without a separate `get_history` call (#380). |
 | `get_history_by_outage` | `HISTORY_KEY` | Filters history by `outage_id`. |
 | `get_latest_by_outage` | `HISTORY_KEY` | Scans history for newest match. |
 | `get_retention_limit` | `RETENTION_LIMIT_KEY` | Returns `u32`, defaults to `MAX_HISTORY_SIZE`. |

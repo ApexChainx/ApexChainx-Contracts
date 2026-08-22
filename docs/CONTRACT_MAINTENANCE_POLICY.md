@@ -291,8 +291,9 @@ Every code path that writes to `HISTORY_KEY` MUST be audited for:
 - [ ] Duplicate detection (`outage_id` + config hash) is not bypassed
 - [ ] `OutageRecalcLimit` is enforced for multi-generation outages
 - [ ] `retention_limit` is respected when set
-- [ ] History read functions (`get_history_page`, `get_history_by_outage`,
-  `get_latest_by_outage`) return correct subsets after modification
+- [ ] History read functions (`get_history_page`, `get_history_page_with_meta`,
+  `get_history_by_outage`, `get_latest_by_outage`) return correct subsets after
+  modification
 
 ### Testing Requirements
 

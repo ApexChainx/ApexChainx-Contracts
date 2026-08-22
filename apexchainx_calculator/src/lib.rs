@@ -542,6 +542,29 @@ pub struct SLAResult {
     pub recorded_at: u64,
 }
 
+/// A single page of SLA history with pagination metadata.
+///
+/// `get_history_page_with_meta` returns this instead of a bare `Vec` so
+/// consumers can detect the end of history and the total size in one read,
+/// without a separate `get_history` or `get_retention_limit` call.
+///
+/// The `items` slice is identical to what `get_history_page` returns for the
+/// same `(offset, limit)`; `total` is the full history length and `has_more`
+/// is `true` when the requested range ends before the end of history (i.e.
+/// more entries can be fetched by advancing `offset`).
+#[allow(missing_docs)]
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryPage {
+    /// The entries in this page (oldest-first), up to `limit` items.
+    pub items: Vec<SLAResult>,
+    /// Total number of history entries currently stored.
+    pub total: u32,
+    /// Whether the requested range ends before the end of history (more
+    /// entries can be fetched by advancing `offset`).
+    pub has_more: bool,
+}
+
 /// A single severity-to-config mapping entry in a config snapshot.
 #[allow(missing_docs)]
 #[contracttype]
@@ -1920,6 +1943,7 @@ impl SLACalculatorContract {
         methods.push_back(method("get_history", false, "none", ""));
         methods.push_back(method("get_history_by_outage", false, "none", ""));
         methods.push_back(method("get_history_page", false, "none", ""));
+        methods.push_back(method("get_history_page_with_meta", false, "none", ""));
         methods.push_back(method("get_latest_by_outage", false, "none", ""));
         methods.push_back(method("get_last_config_update", false, "none", ""));
         methods.push_back(method("get_migration_state", false, "none", ""));
@@ -3020,6 +3044,45 @@ impl SLACalculatorContract {
             page.push_back(history.get(i).unwrap());
         }
         Ok(page)
+    }
+
+    /// Returns a bounded page of history entries together with pagination
+    /// metadata.
+    ///
+    /// This is a metadata-carrying companion to `get_history_page`. The
+    /// `items` slice is identical to what `get_history_page` returns for the
+    /// same `(offset, limit)`; `total` is the full history length and
+    /// `has_more` is `true` when the requested range ends before the end of
+    /// history.
+    ///
+    /// Pagination semantics (offset-based, oldest-first, saturating
+    /// `offset + limit`, empty page when `offset >= len` or `limit == 0`) are
+    /// identical to `get_history_page` — see
+    /// `docs/HISTORY_PAGINATION_POLICY.md`.
+    pub fn get_history_page_with_meta(env: Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
+        Self::check_version(&env)?;
+        let history: Vec<SLAResult> = env
+            .storage()
+            .instance()
+            .get(&HISTORY_KEY)
+            .unwrap_or_else(|| Vec::new(&env));
+        let total = history.len();
+        let mut items = Vec::new(&env);
+        // Saturating arithmetic mirrors `get_history_page`: clamp the end index
+        // to the real history length so extreme `u32` inputs can never wrap into
+        // a wrong slice. `end` also drives `has_more`: entries remain whenever
+        // the requested range stops short of the end of history.
+        let end = offset.saturating_add(limit).min(total);
+        if offset < total && limit != 0 {
+            for i in offset..end {
+                items.push_back(history.get(i).unwrap());
+            }
+        }
+        Ok(HistoryPage {
+            items,
+            total,
+            has_more: end < total,
+        })
     }
 
     // -------------------------------------------------------------------

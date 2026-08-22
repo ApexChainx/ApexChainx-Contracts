@@ -61,7 +61,7 @@ All paths are relative to `apexchainx_calculator/src/`.
 | `governance.rs` | Contract Governance | `set_operator`, `propose_admin`, `accept_admin`, `cancel_admin_proposal`, `get_pending_admin`, `propose_operator`, `accept_operator`, `cancel_operator_proposal`, `get_pending_operator`, `renounce_admin` | **High** |
 | `config_freeze.rs` | Contract Governance | `freeze_config`, `unfreeze_config`, `is_config_frozen` | **Medium** |
 | `metadata.rs` | Contract Governance | `pause`, `unpause`, `is_paused`, `get_pause_info`, `require_not_paused` | **High** |
-| `history.rs` | Contract Data Layer | `get_history`, `prune_history`, `prune_history_by_age`, `get_history_page`, `get_history_by_outage`, `get_latest_by_outage`, `get_config_count`, `set_retention_limit`, `get_retention_limit` | **High** |
+| `history.rs` | Contract Data Layer | `get_history`, `prune_history`, `prune_history_by_age`, `get_history_page`, `get_history_page_with_meta`, `get_history_by_outage`, `get_latest_by_outage`, `get_config_count`, `set_retention_limit`, `get_retention_limit` | **High** |
 | `history_snapshot.rs` | Contract Data Layer | `normalize_history` | **Medium** |
 | `config_metadata.rs` | Contract Data Layer | `record_config_update`, `get_last_config_update` | **Medium** |
 | `config_bundle.rs` | Contract Data Layer | (composed types for `get_config_bundle`) | **Low** |

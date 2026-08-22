@@ -2,7 +2,7 @@
 
 > **Status:** Active
 > **Reference:** [Issue #263](https://github.com/ApexChainx/ApexChainx-Contracts/issues/263)
-> **Last updated:** 2026-08-02
+> **Last updated:** 2026-08-20
 > **Audience:** Backend consumers, operators, and contract contributors
 
 ## Table of Contents
@@ -12,6 +12,7 @@
 - [Policy: offset semantics](#policy-offset-semantics)
 - [Policy: limit & page size](#policy-limit--page-size)
 - [Policy: end-of-history signalling](#policy-end-of-history-signalling)
+- [Policy: pagination metadata](#policy-pagination-metadata)
 - [Policy: overflow safety](#policy-overflow-safety)
 - [Policy: ordering & stability](#policy-ordering--stability)
 - [Canonical source of truth](#canonical-source-of-truth)
@@ -30,13 +31,14 @@ document exists to make that behaviour explicit and reviewable.
 
 ## Contract implementation
 
-The paginated accessor is:
+The paginated accessors are:
 
 ```rust
 pub fn get_history_page(env: Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError>
+pub fn get_history_page_with_meta(env: Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError>
 ```
 
-Implemented in two places that must stay in lockstep:
+Each is implemented in two places that must stay in lockstep:
 
 - `apexchainx_calculator/src/lib.rs` — the `#[contractimpl]` entry point
   (the on-chain method consumers call).
@@ -80,6 +82,35 @@ There are two equivalent end-of-history signals:
 Consumers are encouraged to iterate with a fixed page size and stop on the
 first short page, which is exactly one extra call after the last full page
 and needs no special-casing for empty histories.
+
+## Policy: pagination metadata
+
+`get_history_page_with_meta` returns the same page as `get_history_page`
+wrapped in a `HistoryPage` struct:
+
+```rust
+pub struct HistoryPage {
+    pub items: Vec<SLAResult>, // identical to get_history_page(offset, limit)
+    pub total: u32,            // full history length at read time
+    pub has_more: bool,        // end = min(saturating_add(offset, limit), total) < total
+}
+```
+
+- `items` is **byte-for-byte identical** to `get_history_page(offset, limit)`
+  for the same inputs; the legacy accessor remains unchanged for backward
+  compatibility.
+- `total` is the full history length, so consumers no longer need a separate
+  `get_history` or `get_retention_limit` call to learn the total size.
+- `has_more` is `true` exactly when the requested range ends before the end
+  of history (`end < total`). A consumer can therefore iterate with
+  `offset += items.len()` and stop when `has_more` is `false`.
+- The same empty-page edge cases apply to `items`: `offset >= total` and
+  `limit == 0` both produce an empty `items`. For `limit == 0` with
+  `offset < total`, `has_more` is still `true` because the cursor has not
+  advanced past `offset`.
+
+`get_history_page_with_meta` is read-only, performs no storage writes, emits
+no events, and never mutates history.
 
 ## Policy: overflow safety
 

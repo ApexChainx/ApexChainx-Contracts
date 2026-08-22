@@ -110,6 +110,7 @@ safe (additive) or dangerous (breaking).
 |-----------|------|------|--------------|-------|
 | `get_history` | ⚠️ Stable | Public | **Medium** | Return type `Vec<SLAResult>`. `SLAResult` changes are breaking. |
 | `get_history_page` | ⚠️ Stable | Public | **Medium** | Pagination parameters must remain `(offset: u32, limit: u32)`. |
+| `get_history_page_with_meta` | ⚠️ Stable | Public | **Medium** | Return type `HistoryPage`. Pagination parameters must remain `(offset: u32, limit: u32)`. |
 | `get_history_by_outage` | ⚠️ Stable | Public | **Low** | Filtered read. Return type follows `SLAResult`. |
 | `get_latest_by_outage` | ⚠️ Stable | Public | **Low** | Return type `Option<SLAResult>`. |
 | `prune_history` | 🛡️ Admin-Gated | Admin | **Medium** | Parameter `keep_latest: u32` must stay. |

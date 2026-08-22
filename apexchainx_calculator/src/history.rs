@@ -7,8 +7,8 @@
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
-    SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_VERSION, HISTORY_KEY, MAX_HISTORY_SIZE,
-    RETENTION_LIMIT_KEY,
+    HistoryPage, SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_VERSION, HISTORY_KEY,
+    MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
 };
 
 /// Returns the full SLA calculation history.
@@ -133,6 +133,43 @@ pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLARes
         page.push_back(history.get(i).unwrap());
     }
     Ok(page)
+}
+
+/// Returns a paginated slice of the SLA history with pagination metadata.
+///
+/// This is a metadata-carrying companion to [`get_history_page`]. The `items`
+/// slice is identical to what `get_history_page` returns for the same
+/// `(offset, limit)`; `total` is the full history length and `has_more` is
+/// `true` when the requested range ends before the end of history.
+///
+/// Pagination semantics (offset-based, oldest-first, saturating
+/// `offset + limit`, empty page when `offset >= len` or `limit == 0`) are
+/// identical to [`get_history_page`] — see
+/// `docs/HISTORY_PAGINATION_POLICY.md`.
+pub fn get_history_page_with_meta(env: &Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    let history: Vec<SLAResult> = env
+        .storage()
+        .instance()
+        .get(&HISTORY_KEY)
+        .unwrap_or_else(|| Vec::new(env));
+    let total = history.len();
+    let mut items = Vec::new(env);
+    // Saturating arithmetic mirrors `get_history_page`: clamp the end index to
+    // the real history length so extreme `u32` inputs can never wrap into a
+    // wrong slice. `end` also drives `has_more`: entries remain whenever the
+    // requested range stops short of the end of history.
+    let end = offset.saturating_add(limit).min(total);
+    if offset < total && limit != 0 {
+        for i in offset..end {
+            items.push_back(history.get(i).unwrap());
+        }
+    }
+    Ok(HistoryPage {
+        items,
+        total,
+        has_more: end < total,
+    })
 }
 
 /// Returns all history entries for a specific outage ID.

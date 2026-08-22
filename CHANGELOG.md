@@ -22,7 +22,7 @@
   internal severity list invariant is ever broken the call surfaces a
   deterministic `InvalidSeverity` error rather than an unrecoverable host trap.
 ### Added
-- `dup_input` event — emitted on the `DuplicateOutageInput` rejection path carrying the previously stored `SLAResult`, so consumers can reconcile a conflicting duplicate from the same transaction's event log without a follow-up `get_latest_by_outage` call (closes #385)
+- `get_history_page_with_meta` — paginated history read that returns a `HistoryPage` struct (`items`, `total`, `has_more`) so consumers can detect end-of-history and total size in one read without a separate `get_history` call; `get_history_page` is unchanged (#380)
 - Per-severity telemetry counter saturation regression coverage — documented the `u32` lane saturation behavior in the `record_severity_telemetry` code docs and `docs/CONTRACT_MAINTENANCE_POLICY.md`, and added `test_severity_telemetry_counters_saturate_at_u32_max` to verify counters saturate at `u32::MAX` instead of wrapping (release) or panicking (debug) (#387)
 - `docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md` — release-readiness checklist for PRs that touch storage keys, `STORAGE_VERSION`, event topic constants, or event payload fields; cross-referenced from `CONTRIBUTING.md` as SC-100
 - **[SC-509] SLAError Addition Workflow** (#253) — comprehensive contributor guide for adding, deprecating, or reviewing `SLAError` variants without breaking backend adapter logic. See `docs/sla-error-additions-guide.md`.

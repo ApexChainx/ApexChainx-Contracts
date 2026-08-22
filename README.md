@@ -100,13 +100,15 @@ contract is paused — and never modify on-chain state or emit events.
 | Config views | `get_config`, `get_config_snapshot`, `get_config_version_hash`, `list_configs`, `get_last_config_update`, `get_config_bundle` |
 | Custom severity views | `get_custom_severity`, `get_custom_config_snapshot` |
 | Stats & telemetry | `get_stats`, `get_economic_exposure`, `get_severity_telemetry` |
-| History views | `get_history`, `get_history_page`, `get_history_by_outage`, `get_latest_by_outage` |
+| History views | `get_history`, `get_history_page`, `get_history_page_with_meta`, `get_history_by_outage`, `get_latest_by_outage` |
 
 `get_history_page` follows the documented [History Pagination
 Policy](docs/HISTORY_PAGINATION_POLICY.md) (issue #263): offset-based,
 oldest-first, empty-page end-of-history signalling, and saturating
 `offset + limit` arithmetic so extreme `u32` values can never overflow into
-a wrong slice.
+a wrong slice. `get_history_page_with_meta` returns the same page plus
+`total` and `has_more` metadata so consumers can page without a separate
+`get_history` call.
 | Role queries | `get_admin`, `get_operator`, `get_pending_admin`, `get_pending_operator` |
 | Introspection | `get_result_schema`, `get_failure_schema`, `get_contract_metadata`, `get_full_audit_state` |
 | Retention helpers | `get_retention_limit`, `get_config_count`, `get_storage_version` |
