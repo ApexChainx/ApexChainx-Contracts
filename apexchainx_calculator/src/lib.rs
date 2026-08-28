@@ -1691,18 +1691,7 @@ impl SLACalculatorContract {
     /// Returns a deterministic backend-friendly snapshot of all config values.
     pub fn get_config_snapshot(env: Env) -> Result<SLAConfigSnapshot, SLAError> {
         Self::check_version(&env)?;
-
-        let mut entries = Vec::new(&env);
-
-        for severity in Self::canonical_severities(&env) {
-            let config = Self::load_config(&env, &severity)?;
-            entries.push_back(SLAConfigEntry { severity, config });
-        }
-
-        Ok(SLAConfigSnapshot {
-            version: symbol_short!("v1"),
-            entries,
-        })
+        Self::build_config_snapshot(&env)
     }
 
     /// Returns the config snapshot recorded for a given version hash, if any. (#408)
@@ -1817,7 +1806,11 @@ impl SLACalculatorContract {
     /// Returns the result schema descriptor for backend symbol mapping.
     pub fn get_result_schema(env: Env) -> Result<SLAResultSchema, SLAError> {
         Self::check_version(&env)?;
-        Ok(SLAResultSchema {
+        Ok(Self::build_result_schema(&env))
+    }
+
+    pub(crate) fn build_result_schema(env: &Env) -> SLAResultSchema {
+        SLAResultSchema {
             version: symbol_short!("v1"),
             schema_version: RESULT_SCHEMA_VERSION,
             result_field_count: RESULT_SCHEMA_FIELD_COUNT,
@@ -1830,9 +1823,9 @@ impl SLACalculatorContract {
             rating_good: symbol_short!("good"),
             rating_poor: symbol_short!("poor"),
             includes_config_version_hash: true,
-            deprecated_symbols: Vec::new(&env),
-            severity_aliases: Vec::new(&env),
-        })
+            deprecated_symbols: Vec::new(env),
+            severity_aliases: Vec::new(env),
+        }
     }
 
     /// #1 – Combined configuration snapshot and result schema for one-shot
@@ -1855,18 +1848,33 @@ impl SLACalculatorContract {
     }
 
     /// Returns the full audit state including roles, config, stats, and history.
+    ///
+    /// Performs a single version check and direct single-pass reads of storage keys
+    /// without redundant `check_version` calls or repeated getter delegations.
     pub fn get_full_audit_state(env: Env) -> Result<AuditState, SLAError> {
         Self::check_version(&env)?;
 
-        let admin = Self::get_admin(env.clone())?;
-        let operator = Self::get_operator(env.clone())?;
-        let pending_admin = Self::get_pending_admin(env.clone())?;
-        let pending_operator = Self::get_pending_operator(env.clone())?;
-        let paused = Self::is_paused(env.clone())?;
-        let pause_info = Self::get_pause_info(env.clone())?;
-        let config_snapshot = Self::get_config_snapshot(env.clone())?;
-        let stats = Self::get_stats(env.clone())?;
-        let result_schema = Self::get_result_schema(env.clone())?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ADMIN_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+        let operator: Address = env
+            .storage()
+            .instance()
+            .get(&OPERATOR_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+        let pending_admin: Option<Address> = env.storage().instance().get(&PENDING_ADMIN_KEY);
+        let pending_operator: Option<Address> = env.storage().instance().get(&PENDING_OP_KEY);
+        let paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
+        let pause_info_opt: Option<PauseInfo> = env.storage().instance().get(&PAUSE_INFO_KEY);
+        let config_snapshot = Self::build_config_snapshot(&env)?;
+        let stats: SLAStats = env
+            .storage()
+            .instance()
+            .get(&STATS_KEY)
+            .ok_or(SLAError::NotInitialized)?;
+        let result_schema = Self::build_result_schema(&env);
 
         let history: Vec<SLAResult> = env
             .storage()
@@ -1884,7 +1892,7 @@ impl SLACalculatorContract {
             // Empty when unpaused, single-element when paused: `Option<PauseInfo>`
             // cannot be a `#[contracttype]` field (the SDK's ScVal conversion
             // needs `From<&PauseInfo>`, which `#[contracttype]` does not derive).
-            pause_info: match pause_info {
+            pause_info: match pause_info_opt {
                 Some(info) => soroban_sdk::vec![&env, info],
                 None => Vec::new(&env),
             },
@@ -2928,8 +2936,10 @@ impl SLACalculatorContract {
         let last_violation = Self::count_lane(last_violations, index) as u64;
         let calc_stale = last_calc != 0 && now.saturating_sub(last_calc) >= week_seconds;
         let violation_stale = last_violation != 0 && now.saturating_sub(last_violation) >= week_seconds;
-        if calc_stale || violation_stale {
+        if calc_stale {
             calculations = Self::set_count_lane(calculations, index, 0);
+        }
+        if violation_stale {
             violations = Self::set_count_lane(violations, index, 0);
         }
 
@@ -3066,11 +3076,16 @@ impl SLACalculatorContract {
     /// current ledger timestamp.  Entries with `recorded_at == 0` (view-mode
     /// results that were never stored with a real timestamp) are always kept.
     /// Admin-only.  Emits a `pruned_a` event.
+    ///
+    /// Returns `Err(SLAError::InvalidInput)` if `min_age_seconds >= now`.
     pub fn prune_history_by_age(env: Env, caller: Address, min_age_seconds: u64) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
 
         let now = env.ledger().timestamp();
+        if min_age_seconds >= now {
+            return Err(SLAError::InvalidInput);
+        }
         let cutoff = now.saturating_sub(min_age_seconds);
 
         let history: Vec<SLAResult> = env
@@ -3202,21 +3217,14 @@ impl SLACalculatorContract {
 
     /// Returns all history entries whose `outage_id` matches the given value.
     /// Returns an empty Vec when no matching entries exist.
+    ///
+    /// Entries are returned in chronological order (oldest decision first, latest decision last).
+    /// When an outage has multiple calculations across configuration changes (up to `MAX_RECALCS_PER_OUTAGE`),
+    /// each entry carries its generation's `config_version_hash`. Consumers can distinguish multi-generation
+    /// entries by their `config_version_hash` and position (the last entry is the most recent decision, or
+    /// compare `entry.config_version_hash == get_config_version_hash()`).
     pub fn get_history_by_outage(env: Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
-        Self::check_version(&env)?;
-        let history: Vec<SLAResult> = env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env));
-        let mut matches = Vec::new(&env);
-        for i in 0..history.len() {
-            let entry = history.get(i).unwrap();
-            if entry.outage_id == outage_id {
-                matches.push_back(entry);
-            }
-        }
-        Ok(matches)
+        history::get_history_by_outage(&env, outage_id)
     }
 
     // -------------------------------------------------------------------

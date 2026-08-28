@@ -72,11 +72,16 @@ pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<()
 
 /// Prunes history entries older than `min_age_seconds`.
 /// Admin only. Emits a `pruned_a` event.
+///
+/// Returns `Err(SLAError::InvalidInput)` if `min_age_seconds >= now`.
 pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
 
     let now = env.ledger().timestamp();
+    if min_age_seconds >= now {
+        return Err(SLAError::InvalidInput);
+    }
     let cutoff = now.saturating_sub(min_age_seconds);
 
     let history: Vec<SLAResult> = env
@@ -193,6 +198,12 @@ pub fn get_history_page_with_meta(env: &Env, offset: u32, limit: u32) -> Result<
 }
 
 /// Returns all history entries for a specific outage ID.
+///
+/// Entries are returned in chronological order (oldest decision first, latest decision last).
+/// When an outage has multiple calculations across configuration changes (up to `MAX_RECALCS_PER_OUTAGE`),
+/// each entry carries its generation's `config_version_hash`. Consumers can distinguish multi-generation
+/// entries by their `config_version_hash` and position (the last entry is the most recent decision, or
+/// compare `entry.config_version_hash == get_config_version_hash()`).
 pub fn get_history_by_outage(env: &Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let history: Vec<SLAResult> = env

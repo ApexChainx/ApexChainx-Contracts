@@ -305,6 +305,61 @@ fn test_severity_telemetry_weekly_reset_semantics() {
 }
 
 #[test]
+fn test_record_severity_telemetry_decoupled_lane_resets() {
+    let (env, client, actors) = setup();
+
+    // 1. Initial calculation & violation at t = 1,000,000
+    env.ledger().set_timestamp(1_000_000);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("V1"),
+        &symbol_short!("critical"),
+        &50, // violation
+    );
+
+    // 2. Second calculation (met) at t = 1,100,000 -> last_calc = 1,100,000, last_violation remains 1,000,000
+    env.ledger().set_timestamp(1_100_000);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("V2"),
+        &symbol_short!("critical"),
+        &5, // met
+    );
+
+    // 3. Third calculation (met) at t = 1,200,000 -> last_calc = 1,200,000, last_violation remains 1,000,000
+    env.ledger().set_timestamp(1_200_000);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("V3"),
+        &symbol_short!("critical"),
+        &5, // met
+    );
+
+    let t1 = client.get_severity_telemetry();
+    let crit1 = t1.get(0).unwrap();
+    assert_eq!(crit1.calculations, 3);
+    assert_eq!(crit1.violations, 1);
+
+    // 4. Advance to t = 1,000,000 + 8 days (691,200s) = 1,691,200.
+    // At t = 1,691,200:
+    // - last_calc (1,200,000) is 491,200s ago < 604,800s (FRESH -> calc_stale = false)
+    // - last_violation (1,000,000) is 691,200s ago >= 604,800s (STALE -> violation_stale = true)
+    // Under decoupled logic: violation counter resets to 0, calculation counter survives (3 + 1 = 4).
+    env.ledger().set_timestamp(1_691_200);
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("V4"),
+        &symbol_short!("critical"),
+        &5, // met
+    );
+
+    let t2 = client.get_severity_telemetry();
+    let crit2 = t2.get(0).unwrap();
+    assert_eq!(crit2.calculations, 4, "Fresh calculation counter survived stale violation reset");
+    assert_eq!(crit2.violations, 0, "Stale violation counter reset on violation staleness");
+}
+
+#[test]
 fn test_severity_telemetry_counters_saturate_at_u32_max() {
     let (env, client, actors) = setup();
     env.ledger().set_timestamp(1000);
@@ -3248,6 +3303,66 @@ fn test_get_history_by_outage_empty_history() {
     assert_eq!(results.len(), 0);
 }
 
+#[test]
+fn test_get_history_by_outage_multi_generation_history() {
+    let (env, client, actors) = setup();
+
+    let outage_id = symbol(&env, "OUT_MULTI");
+
+    // Generation 1: calculate SLA
+    client.calculate_sla(
+        &actors.operator,
+        &outage_id,
+        &symbol_short!("critical"),
+        &5,
+    );
+    let gen1_hash = client.get_config_version_hash();
+
+    // Change configuration to create Generation 2
+    client.set_config(&actors.admin, &symbol_short!("critical"), &20, &200, &1000);
+    let gen2_hash = client.get_config_version_hash();
+    assert_ne!(gen1_hash, gen2_hash);
+
+    // Generation 2: recalculate SLA for same outage
+    client.calculate_sla(
+        &actors.operator,
+        &outage_id,
+        &symbol_short!("critical"),
+        &25,
+    );
+
+    let results = client.get_history_by_outage(&outage_id);
+    assert_eq!(results.len(), 2);
+
+    // Verify chronological order and distinct config_version_hash per generation
+    let entry0 = results.get(0).unwrap();
+    let entry1 = results.get(1).unwrap();
+
+    assert_eq!(entry0.config_version_hash, gen1_hash);
+    assert_eq!(entry1.config_version_hash, gen2_hash);
+    assert_eq!(entry1.config_version_hash, client.get_config_version_hash());
+    assert!(entry0.recorded_at <= entry1.recorded_at);
+}
+
+#[test]
+fn test_get_full_audit_state_single_pass_efficiency() {
+    let (_env, client, actors) = setup();
+
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("AUD1"),
+        &symbol_short!("critical"),
+        &5,
+    );
+
+    let state = client.get_full_audit_state();
+    assert_eq!(state.admin, actors.admin);
+    assert_eq!(state.operator, actors.operator);
+    assert_eq!(state.history_len, 1);
+    assert_eq!(state.config_snapshot.entries.len(), 4);
+    assert_eq!(state.stats.total_calculations, 1);
+}
+
 // ============================================================
 // SC-061 – Latest result by outage identifier
 // ============================================================
@@ -3391,27 +3506,77 @@ fn test_prune_by_age_keeps_all_when_none_old_enough() {
     client.calculate_sla(&op, &symbol_short!("E1"), &symbol_short!("critical"), &5);
     client.calculate_sla(&op, &symbol_short!("E2"), &symbol_short!("high"), &10);
 
-    // Prune with min_age_seconds=2000 → cutoff = 1000 - 2000 saturates to 0
-    // All entries have recorded_at=1000 >= 0 → nothing removed
-    client.prune_history_by_age(&admin, &2000);
+    // Prune with min_age_seconds=500 → cutoff = 1000 - 500 = 500
+    // All entries have recorded_at=1000 >= 500 → nothing removed
+    client.prune_history_by_age(&admin, &500);
 
     let history = client.get_history();
     assert_eq!(history.len(), 2);
 }
 
 #[test]
+fn test_prune_by_age_rejects_min_age_equal_to_now() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let res = client.try_prune_history_by_age(&admin, &1000);
+    assert_eq!(res, Err(Ok(SLAError::InvalidInput)));
+}
+
+#[test]
+fn test_prune_by_age_rejects_min_age_greater_than_now() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let res = client.try_prune_history_by_age(&admin, &2000);
+    assert_eq!(res, Err(Ok(SLAError::InvalidInput)));
+}
+
+#[test]
 fn test_prune_by_age_empty_history_is_noop() {
-    let (_env, client, actors) = setup();
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
     // No entries – should not panic
-    client.prune_history_by_age(&actors.admin, &100);
+    client.prune_history_by_age(&admin, &100);
     assert_eq!(client.get_history().len(), 0);
 }
 
 #[test]
 #[should_panic]
 fn test_prune_by_age_operator_cannot_prune() {
-    let (_env, client, actors) = setup();
-    client.prune_history_by_age(&actors.operator, &100);
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1000);
+
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    client.prune_history_by_age(&op, &100);
 }
 
 #[test]
