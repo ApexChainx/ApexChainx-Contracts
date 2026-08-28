@@ -89,7 +89,7 @@ pub fn canonical_field_counts() -> [(&'static str, u32); 31] {
         ("FailureCode", 3),
         ("FailureSchema", 2),
         ("HealthcheckResult", 3),
-        ("ConfigBundle", 2),
+        ("ConfigBundle", 3),
         ("AuditState", 10),
         ("ContractInfo", 11),
         ("HistoryPage", 3),

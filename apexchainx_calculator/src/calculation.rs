@@ -149,6 +149,11 @@ pub fn calculate_sla(
 
 /// Recalculates SLA deterministically without mutating state or emitting events.
 /// Can be called by anyone for audit and verification purposes.
+///
+/// Applies duplicate-detection and replay logic read-only:
+/// - Returns stored `SLAResult` if `outage_id` exists under unchanged `config_version_hash` and matching inputs.
+/// - Returns `Err(SLAError::DuplicateOutageInput)` if inputs conflict under unchanged `config_version_hash`.
+/// - Computes fresh result if `outage_id` is new or config hash changed.
 pub fn calculate_sla_view(
     env: &Env,
     outage_id: Symbol,
@@ -158,6 +163,34 @@ pub fn calculate_sla_view(
     crate::SLACalculatorContract::check_version(env)?;
     let cfg = crate::SLACalculatorContract::load_config(env, &severity)?;
     let config_version_hash = crate::SLACalculatorContract::compute_config_version_hash(env)?;
+
+    let history: Vec<SLAResult> = env
+        .storage()
+        .instance()
+        .get(&HISTORY_KEY)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut existing: Option<SLAResult> = None;
+    let mut stored_for_outage: u32 = 0;
+    for i in 0..history.len() {
+        let entry = history.get(i).unwrap();
+        if entry.outage_id == outage_id {
+            stored_for_outage += 1;
+            existing = Some(entry);
+        }
+    }
+    if let Some(prev) = existing {
+        if prev.config_version_hash == config_version_hash {
+            if prev.mttr_minutes != mttr_minutes || prev.threshold_minutes != cfg.threshold_minutes {
+                return Err(SLAError::DuplicateOutageInput);
+            }
+            return Ok(prev);
+        }
+        if stored_for_outage >= MAX_RECALCS_PER_OUTAGE {
+            return Err(SLAError::OutageRecalcLimit);
+        }
+    }
+
     compute_result(
         outage_id,
         mttr_minutes,

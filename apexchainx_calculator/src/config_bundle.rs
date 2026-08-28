@@ -46,6 +46,8 @@ pub struct ConfigBundle {
     pub snapshot: SLAConfigSnapshot,
     /// Result schema descriptor with symbol mappings.
     pub schema: SLAResultSchema,
+    /// Config version hash corresponding to the snapshot for duplicate detection.
+    pub config_version_hash: u64,
 }
 
 #[cfg(test)]
@@ -106,6 +108,21 @@ mod tests {
         assert!(
             bundle.schema.includes_config_version_hash,
             "Bundle schema must preserve includes_config_version_hash = true",
+        );
+    }
+
+    #[test]
+    fn test_config_bundle_hash_matches_get_config_version_hash() {
+        let (_env, client, _admin) = setup();
+
+        let bundle = client
+            .get_config_bundle()
+            .expect("bundle must be available after init");
+        let hash = client.get_config_version_hash();
+
+        assert_eq!(
+            bundle.config_version_hash, hash,
+            "Bundle config_version_hash must equal get_config_version_hash",
         );
     }
 

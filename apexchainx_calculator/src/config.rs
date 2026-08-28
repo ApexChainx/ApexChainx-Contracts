@@ -4,7 +4,7 @@
 //! SLA configurations. It enforces validation, cross-severity ordering,
 //! and freeze-state gating for all config mutations.
 
-use soroban_sdk::{symbol_short, Env, Map, Symbol, Vec};
+use soroban_sdk::{Env, Map, Symbol, Vec};
 
 use crate::{
     config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
@@ -75,7 +75,7 @@ pub fn get_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAError> {
     }
 
     Ok(SLAConfigSnapshot {
-        version: symbol_short!("v1"),
+        version: crate::CONFIG_SNAPSHOT_VERSION,
         entries,
     })
 }
@@ -201,7 +201,7 @@ pub fn get_custom_config_snapshot(env: &Env) -> Result<SLAConfigSnapshot, SLAErr
     }
 
     Ok(SLAConfigSnapshot {
-        version: symbol_short!("v1"),
+        version: crate::CONFIG_SNAPSHOT_VERSION,
         entries,
     })
 }

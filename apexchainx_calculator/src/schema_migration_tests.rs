@@ -31,7 +31,8 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        SLACalculatorContract, SLACalculatorContractClient, RESULT_SCHEMA_FIELD_COUNT, RESULT_SCHEMA_VERSION,
+        SLACalculatorContract, SLACalculatorContractClient, CONFIG_SNAPSHOT_VERSION, RESULT_SCHEMA_FIELD_COUNT,
+        RESULT_SCHEMA_VERSION,
     };
     use soroban_sdk::{testutils::Address as _, Env, Symbol};
 
@@ -216,4 +217,38 @@ mod tests {
             panic!("get_config_bundle returned None after initialization");
         }
     }
+
+    // -----------------------------------------------------------------------
+    // SLAConfigSnapshot version sentinel
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_config_snapshot_version_sentinel() {
+        use crate::SLAConfigSnapshot;
+        use soroban_sdk::{symbol_short, Vec};
+
+        let env = Env::default();
+
+        // Destructure SLAConfigSnapshot exhaustively so adding or changing fields
+        // requires updating this sentinel test.
+        let sample = SLAConfigSnapshot {
+            version: symbol_short!("v1"),
+            entries: Vec::new(&env),
+        };
+
+        let SLAConfigSnapshot { version: _, entries: _ } = sample;
+
+        let (_env, client) = setup();
+        let snapshot = client.get_config_snapshot();
+        assert_eq!(
+            snapshot.version, CONFIG_SNAPSHOT_VERSION,
+            "get_config_snapshot version label does not match CONFIG_SNAPSHOT_VERSION"
+        );
+        let custom_snapshot = client.get_custom_config_snapshot();
+        assert_eq!(
+            custom_snapshot.version, CONFIG_SNAPSHOT_VERSION,
+            "get_custom_config_snapshot version label does not match CONFIG_SNAPSHOT_VERSION"
+        );
+    }
 }
+

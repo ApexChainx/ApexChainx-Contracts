@@ -65,6 +65,27 @@ fn test_initialize_stores_roles() {
 }
 
 #[test]
+fn test_initialize_supports_equal_admin_and_operator() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let contract_id = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &contract_id);
+    let user = Address::generate(&env);
+
+    client.initialize(&user, &user);
+    assert_eq!(client.get_admin(), user);
+    assert_eq!(client.get_operator(), user);
+
+    // Single address holds admin role (e.g. set_config)
+    client.set_config(&user, &symbol_short!("high"), &25, &60, &800);
+    assert_eq!(client.get_config(&symbol_short!("high")).threshold_minutes, 25);
+
+    // Single address holds operator role (e.g. calculate_sla)
+    let result = client.calculate_sla(&user, &symbol_short!("EQ1"), &symbol_short!("high"), &10);
+    assert_eq!(result.status, symbol_short!("met"));
+}
+
+#[test]
 #[should_panic]
 fn test_double_initialize_fails() {
     let (_env, client, actors) = setup();
@@ -6626,6 +6647,39 @@ fn test_385_exact_replay_does_not_emit_dup_input() {
 }
 
 #[test]
+fn test_calculate_sla_view_agrees_with_calculate_sla_on_duplicates_and_replay() {
+    let (env, client, actors) = setup();
+    let outage_id = symbol_short!("VIEW_DUP");
+    let severity = symbol_short!("high");
+
+    // Initial calculation via mutating path
+    let initial = client.calculate_sla(&actors.operator, &outage_id, &severity, &10u32);
+
+    // Advance ledger timestamp to verify view replay returns original recorded_at
+    env.ledger().set_timestamp(initial.recorded_at + 1000);
+
+    // Replay case via view: same inputs under unchanged config_version_hash
+    let view_replay = client.calculate_sla_view(&outage_id, &severity, &10u32);
+    assert_eq!(
+        view_replay, initial,
+        "calculate_sla_view replay must return stored result matching calculate_sla"
+    );
+
+    // Conflict case via view: conflicting mttr under unchanged config_version_hash
+    let conflict_res = client.try_calculate_sla_view(&outage_id, &severity, &20u32);
+    assert!(
+        conflict_res.is_err(),
+        "calculate_sla_view must reject conflicting duplicate input"
+    );
+    let conflict_err = conflict_res.unwrap_err().unwrap();
+    assert!(error_responses::is_duplicate_outage_input(&conflict_err));
+
+    // Ensure view call did not mutate history or stats
+    assert_eq!(client.get_history().len(), 1);
+    assert_eq!(client.get_stats().total_calculations, 1);
+}
+
+#[test]
 fn test_config_bumped_duplicate_treated_as_fresh_calculation() {
     // After set_config changes the config_version_hash, a duplicate outage_id
     // must be treated as a fresh calculation rather than returning stale cache.
@@ -8086,6 +8140,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
             deprecated_symbols,
             severity_aliases,
         },
+        config_version_hash: 123456789,
     };
     let scval_bundle: soroban_sdk::Val = config_bundle.clone().try_into_val(&env).unwrap();
     let restored_bundle: ConfigBundle = scval_bundle.try_into_val(&env).unwrap();

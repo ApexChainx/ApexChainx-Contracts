@@ -160,6 +160,10 @@ pub(crate) const STORAGE_VERSION: u32 = 1;
 /// Incremented when result encoding changes in a breaking way.
 pub(crate) const RESULT_SCHEMA_VERSION: u32 = 1;
 
+/// Version label of the SLAConfigSnapshot schema exposed via get_config_snapshot() and get_custom_config_snapshot().
+/// Incremented (e.g. "v1" -> "v2") when the snapshot structure or entry format changes.
+pub(crate) const CONFIG_SNAPSHOT_VERSION: Symbol = symbol_short!("v1");
+
 /// Number of named fields in `SLAResult`.
 ///
 /// This constant is the migration guardrail for `get_result_schema()`.
@@ -1058,16 +1062,26 @@ impl SLACalculatorContract {
     // Initialisation
     // -------------------------------------------------------------------
 
-    /// Deploy the contract.
-    /// `admin`    – may update config, pause/unpause, and assign the operator.
-    /// `operator` – may call `calculate_sla`.
+    /// Deploy and initialize the contract.
+    ///
+    /// # Roles
+    /// - `admin`    – may update config, pause/unpause, and assign/transfer the operator role.
+    /// - `operator` – may call `calculate_sla`.
+    ///
+    /// # Role Separation & Single-Address Mode
+    /// Both `admin` and `operator` authorizations are verified during initialization.
+    /// `admin` and `operator` may be distinct addresses (supporting separation of duties)
+    /// or the same address (`admin == operator`, supporting single-address / merged-role deployments).
+    /// When `admin == operator`, both role capabilities are assigned to that single address.
     pub fn initialize(env: Env, admin: Address, operator: Address) -> Result<(), SLAError> {
         if env.storage().instance().has(&ADMIN_KEY) {
             return Err(SLAError::AlreadyInitialized);
         }
 
         admin.require_auth();
-        operator.require_auth();
+        if admin != operator {
+            operator.require_auth();
+        }
 
         env.storage().instance().set(&ADMIN_KEY, &admin);
         env.storage().instance().set(&OPERATOR_KEY, &operator); // #28
@@ -1850,8 +1864,13 @@ impl SLACalculatorContract {
     /// contract is initialised and on the current storage version.
     pub fn get_config_bundle(env: Env) -> Result<Option<ConfigBundle>, SLAError> {
         let snapshot = Self::get_config_snapshot(env.clone())?;
-        let schema = Self::get_result_schema(env)?;
-        Ok(Some(ConfigBundle { snapshot, schema }))
+        let schema = Self::get_result_schema(env.clone())?;
+        let config_version_hash = Self::compute_config_version_hash(&env)?;
+        Ok(Some(ConfigBundle {
+            snapshot,
+            schema,
+            config_version_hash,
+        }))
     }
 
     /// Returns the full audit state including roles, config, stats, and history.
@@ -2219,23 +2238,7 @@ impl SLACalculatorContract {
         severity: Symbol,
         mttr_minutes: u32,
     ) -> Result<SLAResult, SLAError> {
-        Self::check_version(&env)?;
-        // We bypass pause and operator checks to allow continuous, public verification
-        let cfg = Self::load_config(&env, &severity)?;
-        let config_version_hash = Self::compute_config_version_hash(&env)?;
-
-        // Delegate to pure internal math without mutating state or emitting events.
-
-        // Use the current ledger timestamp so the view result matches the mutating
-        // path for the same inputs executed in the same ledger, while still avoiding
-        // any state writes or event emission.
-        Self::compute_result(
-            outage_id,
-            mttr_minutes,
-            &cfg,
-            config_version_hash,
-            env.ledger().timestamp(),
-        )
+        crate::calculation::calculate_sla_view(&env, outage_id, severity, mttr_minutes)
     }
 
     // -------------------------------------------------------------------
