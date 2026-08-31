@@ -26,7 +26,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [compute_result, validate_config, config_mutation_sequences]
+        target:
+          - compute_result
+          - validate_config
+          - config_mutation_sequences
+          - governance_sequences
+          - history_state_machine
 
     steps:
       - name: Checkout

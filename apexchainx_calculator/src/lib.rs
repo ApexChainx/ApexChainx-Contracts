@@ -43,7 +43,11 @@ pub mod deployment_policy;
 pub mod error_responses;
 pub mod event;
 pub mod event_correlation;
-mod event_schema;
+/// Canonical event schema and constants, consumed by backend indexers and by
+/// the event-ABI guardrails. Public so its `EVENT_*` constants are part of the
+/// crate's API surface (and therefore kept live by the compiler) rather than
+/// needing a blanket `#![allow(dead_code)]` as in the pre-#496 state.
+pub mod event_schema;
 /// Spec-assertion bodies shared by the `cargo-fuzz` targets in `fuzz/`.
 /// The targets stay a few lines long and every invariant they check is
 /// compiled and unit-tested here. See `docs/FUZZING_GUARANTEES.md`.

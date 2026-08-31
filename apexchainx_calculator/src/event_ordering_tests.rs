@@ -14,17 +14,22 @@
 //!    emitted in the order of the lifecycle phase they represent.
 //! 5. Operator handoff events (`op_prop`, `op_acc`, `op_can`) follow the same
 //!    lifecycle ordering as admin events.
+//! 6. When a running-stats counter saturates mid-calculation, the `stats_sat`
+//!    event precedes the `sla_calc` / `set_int` decision events for the same
+//!    calculation. A consumer processing `stats_sat` to mark "the totals now
+//!    under-report" can therefore trust that the decision event that follows it
+//!    in the same transaction reflects the counter already capped at its bound
+//!    (SC-W5-047).
 
 #[cfg(test)]
 mod event_ordering_tests {
     use soroban_sdk::{
-        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol,
-        TryIntoVal,
+        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
     };
     use alloc::vec::Vec;
     use crate::{
-        EVENT_CONFIG_UPD, EVENT_PAUSED, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED,
-        SLACalculatorContract, SLACalculatorContractClient,
+        EVENT_CONFIG_UPD, EVENT_PAUSED, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_STATS_SAT,
+        EVENT_UNPAUSED, SLACalculatorContract, SLACalculatorContractClient, SLAStats, STATS_KEY,
     };
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -301,5 +306,73 @@ mod event_ordering_tests {
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
         client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
+    }
+
+    // ── 6. stats_sat precedes the decision events for the same calc ─────
+
+    #[test]
+    fn test_stats_sat_precedes_sla_calc_and_set_int_for_same_calculation() {
+        // SC-W5-047 – when a counter saturates mid-calculation the emitted order
+        // is `stats_sat` (from increment_stats) followed by `sla_calc` / `set_int`
+        // (published after all state mutations commit). Reaching saturation is
+        // astronomically unlikely in production (u64::MAX), so this test drives it
+        // deterministically by stamping the counter to its ceiling in storage.
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &cid);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        // Patch total_calculations to its ceiling so the next increment overflows.
+        env.as_contract(&client.address, || {
+            let mut stats: SLAStats = env.storage().instance().get(&STATS_KEY).unwrap_or(SLAStats {
+                total_calculations: 0,
+                total_violations: 0,
+                total_rewards: 0,
+                total_penalties: 0,
+            });
+            stats.total_calculations = u64::MAX;
+            env.storage().instance().set(&STATS_KEY, &stats);
+        });
+
+        // One calculate_sla call in a single transaction. The met path increments
+        // total_calculations (which now saturates) and also emits sla_calc + set_int.
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("SAT_ORD"),
+            &symbol_short!("critical"),
+            &5,
+        );
+
+        let names = event_names(&env);
+        let pos = |target: Symbol| {
+            names
+                .iter()
+                .position(|n| *n == target)
+                .unwrap_or_else(|| panic!("expected one {:?} event, found none", target))
+        };
+
+        let sat_pos = pos(EVENT_STATS_SAT);
+        let sla_pos = pos(EVENT_SLA_CALC);
+        let set_pos = pos(EVENT_SETTLE_INTENT);
+
+        // Ordering contract: saturation is reported before the decision events.
+        assert!(
+            sat_pos < sla_pos,
+            "stats_sat must precede sla_calc (got {} >= {})",
+            sat_pos, sla_pos
+        );
+        assert!(
+            sat_pos < set_pos,
+            "stats_sat must precede set_int (got {} >= {})",
+            sat_pos, set_pos
+        );
+
+        // The saturation signal is emitted from inside increment_stats, so the
+        // decision events that follow reflect the counter already capped.
+        let stats = client.get_stats();
+        assert_eq!(stats.total_calculations, u64::MAX, "counter must cap, not wrap");
     }
 }

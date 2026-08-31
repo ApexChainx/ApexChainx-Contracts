@@ -227,6 +227,61 @@ mod tests {
         });
     }
 
+    /// #497 – The version posture reported by `get_contract_info` must be
+    /// coherent: every field derived from a canonical constant, and the
+    /// event-ABI co-bump invariant enforced.
+    #[test]
+    fn test_contract_info_event_version_tracks_event_schema() {
+        let (env, contract_id, _admin, _operator) = setup();
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).unwrap();
+            // The advertised event version is the canonical one (no drift).
+            assert_eq!(info.event_version, crate::event_schema::current_event_version());
+            assert_eq!(info.event_version, crate::event_schema::EVENT_VERSION);
+        });
+    }
+
+    /// #497 – Co-bump invariant between the event-ABI generation and the
+    /// storage/result-schema posture (docs/UPGRADE_PLAYBOOK.md § "Version
+    /// posture & co-bump rules").
+    ///
+    /// A breaking event-ABI bump (generation `g`) must be a coordinated
+    /// release: it can never be shipped on an unchanged storage schema or an
+    /// unchanged result schema. Bumping `EVENT_VERSION`/`EVENT_ABI_GENERATION`
+    /// without a matching `STORAGE_VERSION`/`RESULT_SCHEMA_VERSION` bump fails
+    /// this test, so a silent event-ABI change can no longer pass CI under an
+    /// unchanged version story.
+    #[test]
+    fn test_event_abi_cobump_invariant() {
+        let gen = crate::event_schema::EVENT_ABI_GENERATION;
+        let required = crate::event_schema::EVENT_ABI_TO_SCHEMA_VERSION[(gen - 1) as usize];
+        assert!(
+            STORAGE_VERSION >= required,
+            "event ABI generation {} requires STORAGE_VERSION >= {} (got {}): a breaking \
+             event change must be a coordinated storage release (#497)",
+            gen,
+            required,
+            STORAGE_VERSION
+        );
+        assert!(
+            RESULT_SCHEMA_VERSION >= required,
+            "event ABI generation {} requires RESULT_SCHEMA_VERSION >= {} (got {}): a \
+             breaking event change must update the result schema (#497)",
+            gen,
+            required,
+            RESULT_SCHEMA_VERSION
+        );
+
+        // The posture get_contract_info advertises agrees with the same
+        // constants the co-bump rule is evaluated over.
+        let (env, contract_id, _admin, _operator) = setup();
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).unwrap();
+            assert!((info.storage_version as i64) >= required as i64);
+            assert!(info.result_schema_version >= required);
+        });
+    }
+
     #[test]
     fn test_contract_info_has_canonical_severities() {
         let (env, contract_id, _admin, _operator) = setup();

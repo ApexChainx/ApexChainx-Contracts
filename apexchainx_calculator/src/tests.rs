@@ -4,7 +4,6 @@ use super::*;
 use crate::audit_state::AuditState;
 use crate::config_bundle::ConfigBundle;
 use crate::cross_contract_safety::CompensationAction;
-use crate::event::CalculationExecutedEventV1;
 use crate::metrics::retention_stats::HistoryRetentionMetrics;
 use crate::version_negotiation::{
     NegotiationOutcome, VersionMismatchDetail, VersionNegotiationInfo, VersionNegotiationResult,
@@ -5920,7 +5919,7 @@ fn test_calculate_sla_view_handles_replay() {
 
     // Assert side-effect free: history count remains 1
     let history = client.get_history_page(&0, &10);
-    assert_eq!(history.entries.len(), 1);
+    assert_eq!(history.len(), 1);
 }
 
 #[test]
@@ -9174,20 +9173,6 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
     let scval_audit: soroban_sdk::Val = audit_state.clone().try_into_val(&env).unwrap();
     let restored_audit: AuditState = scval_audit.try_into_val(&env).unwrap();
     assert_eq!(audit_state, restored_audit, "AuditState round-trip failed");
-
-    // Test CalculationExecutedEventV1
-    let event = CalculationExecutedEventV1 {
-        input_key: symbol_short!("test_key"),
-        input_value: 5,
-        result_value: 1500,
-        timestamp: 1700000000,
-    };
-    let scval_event: soroban_sdk::Val = event.clone().try_into_val(&env).unwrap();
-    let restored_event: CalculationExecutedEventV1 = scval_event.try_into_val(&env).unwrap();
-    assert_eq!(
-        event, restored_event,
-        "CalculationExecutedEventV1 round-trip failed"
-    );
 
     // Test CompensationAction
     let compensation = CompensationAction {
