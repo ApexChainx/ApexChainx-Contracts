@@ -8,7 +8,7 @@ use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
     HistoryPage, SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_RET_LIM, EVENT_VERSION,
-    HISTORY_KEY, MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
+    HISTORY_KEY, HISTORY_LEN_KEY, MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
 };
 
 /// Upper bound on the number of entries a single pagination call may return.
@@ -59,7 +59,9 @@ pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<()
             new_history.push_back(history.get(i).unwrap());
         }
 
+        // Issue #463: maintain cached history length alongside history
         env.storage().instance().set(&HISTORY_KEY, &new_history);
+        env.storage().instance().set(&HISTORY_LEN_KEY, &new_history.len());
         let kept = new_history.len();
         env.events().publish(
             (EVENT_PRUNED, EVENT_VERSION, caller.clone()),
@@ -104,7 +106,9 @@ pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -
 
     if removed > 0 {
         let kept = new_history.len();
+        // Issue #463: maintain cached history length alongside history
         env.storage().instance().set(&HISTORY_KEY, &new_history);
+        env.storage().instance().set(&HISTORY_LEN_KEY, &new_history.len());
         env.events()
             .publish((EVENT_PRUNED_AGE, EVENT_VERSION, caller.clone()), (removed, kept));
     }

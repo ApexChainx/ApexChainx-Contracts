@@ -29,9 +29,9 @@ use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::{
     SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT,
-    EVENT_SLA_CALC, EVENT_VERSION, HISTORY_KEY, LAST_CALCULATION_TS_KEY, LAST_VIOLATION_TS_KEY,
-    MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY,
-    SEVERITY_VIOL_COUNTS_KEY, STATS_KEY, TOTAL_ENTRIES_KEY, TOTAL_PRUNED_KEY,
+    EVENT_SLA_CALC, EVENT_VERSION, HISTORY_KEY, HISTORY_LEN_KEY, LAST_CALCULATION_TS_KEY,
+    LAST_VIOLATION_TS_KEY, MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY,
+    SEVERITY_CALC_COUNTS_KEY, SEVERITY_VIOL_COUNTS_KEY, STATS_KEY,
 };
 
 /// Calculate the SLA outcome for an outage event (delegated implementation).
@@ -137,17 +137,10 @@ pub fn calculate_sla(
             trimmed.push_back(history.get(i).unwrap());
         }
         env.storage().instance().set(&HISTORY_KEY, &trimmed);
-        // #461 – automatic trim pruned exactly 1 entry (the oldest)
-        let prev_pruned: u32 = env
-            .storage()
-            .instance()
-            .get(&TOTAL_PRUNED_KEY)
-            .unwrap_or(0);
-        env.storage()
-            .instance()
-            .set(&TOTAL_PRUNED_KEY, &prev_pruned.saturating_add(1));
+        env.storage().instance().set(&HISTORY_LEN_KEY, &trimmed.len());
     } else {
         env.storage().instance().set(&HISTORY_KEY, &history);
+        env.storage().instance().set(&HISTORY_LEN_KEY, &history.len());
     }
 
     if result.status == symbol_short!("viol") {

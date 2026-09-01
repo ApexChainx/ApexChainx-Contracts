@@ -11,6 +11,9 @@
 - [Storage Footprint Telemetry](#storage-footprint-telemetry)
 - [Critical Path Cost Baseline](#critical-path-cost-baseline)
 - [Mutating Function CPU Budgets](#mutating-function-cpu-budgets)
+- [Per-Call Write-Cost Budget at Pinned History (#466)](#per-call-write-cost-budget-at-pinned-history-466)
+- [Bootstrap Read Cost: get_full_audit_state (#463)](#bootstrap-read-cost-get_full_audit_state-463)
+- [Budget-Change Review Process](#budget-change-review-process)
 - [Regression Detection](#regression-detection)
 
 ---
@@ -104,10 +107,21 @@ fn test_no_storage_key_collisions() {
 
 | Dimension | Baseline | Regression Threshold |
 |-----------|----------|---------------------|
-| CPU instructions | TBD (measured) | +10% from baseline |
-| Memory | TBD (measured) | +15% from baseline |
+| CPU instructions (empty/small history) | ~120k (single-call, see [Mutating Function CPU Budgets](#mutating-function-cpu-budgets)) | +10% from baseline |
+| CPU instructions (at MAX history) | ~18M per call (see [Per-Call Write-Cost Budget](#per-call-write-cost-budget-at-pinned-history-466)) | 50M hard ceiling |
+| Memory | scales with retained history | +15% from baseline |
 | Storage reads | 2-4 (config + state) | +1 additional read |
-| Storage writes | 1 (result record) | +1 additional write |
+| Storage writes | 1 instance entry (result record + cached length) | +1 additional write |
+
+> **Two cost regimes.** `calculate_sla`'s CPU cost is *not* a single number: it
+> is dominated by rewriting the entire `HISTORY_KEY` vector on every call, so it
+> scales O(retained history size). A single call against a near-empty history
+> measures ~120k (the `#91` per-entrypoint budget); the same call against a
+> ~1000-entry history measures ~18M. Both are enforced — the first by the
+> per-entrypoint budget test, the second by the #466 write-cost gate below.
+> Writing the cached `HISTLEN` length (#463) does **not** add a storage write:
+> it is another key in the same instance entry, which is serialised once per
+> call regardless.
 
 ### Testing Requirements
 

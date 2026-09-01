@@ -59,6 +59,7 @@ and the migration paths between versions.
 | Storage Ver | Contract Ver | Breaking Changes | Migration Function | Backward Compat? | Forward Compat? |
 |---|---|---|---|---|---|
 | **1** | v0.1.0 | Initial storage layout | `initialize()` | N/A | N/A |
+| **2** | v0.1.0 | Adds cached `HISTLEN` counter for audit bootstrap | `migrate()` backfills from `HIST` | v1 → v2 | No |
 
 ### Migration Paths
 
@@ -80,7 +81,7 @@ transactions.
 
 | Field | Current Value | Notes |
 |-------|--------------|-------|
-| `storage_version` | 1 | Value from `STORAGE_VERSION_KEY` |
+| `storage_version` | 2 | Value from `STORAGE_VERSION_KEY` |
 | `result_schema_version` | 1 | Value from `RESULT_SCHEMA_VERSION` |
 | `needs_migration` | `false` | `true` when storage ≠ expected |
 | `is_paused` | varies | Runtime-dependent |

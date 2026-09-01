@@ -524,6 +524,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
     //   LAST_CALCULATION_TS_KEY     = "CALCTS"
     //   LAST_VIOLATION_TS_KEY       = "VIOLTS"
     //   HISTORY_KEY                = "HIST"
+    //   HISTORY_LEN_KEY            = "HISTLEN"  (cached history length for issue #463)
     //   STORAGE_VERSION_KEY        = "VER"
     //   RETENTION_LIMIT_KEY        = "RETLIM"
     //   TOTAL_PRUNED_KEY           = "TPRUNED"
@@ -547,6 +548,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         LAST_CALCULATION_TS_KEY,
         LAST_VIOLATION_TS_KEY,
         HISTORY_KEY,
+        HISTORY_LEN_KEY,
         STORAGE_VERSION_KEY,
         RETENTION_LIMIT_KEY,
         TOTAL_PRUNED_KEY,
@@ -1720,6 +1722,55 @@ fn test_calculate_sla_view_matches_mutating_and_does_not_mutate() {
     assert_eq!(view_result.outage_id, mut_result.outage_id);
     assert_eq!(view_result.recorded_at, mut_result.recorded_at);
 }
+
+/// Issue #465 — pin `calculate_sla_view`'s `recorded_at` semantics.
+///
+/// The stale documentation described `recorded_at` as "0 in view/audit mode",
+/// but `calculate_sla_view` passes the *live* ledger timestamp. That mismatch
+/// was invisible to every test because the default test ledger timestamp is 0,
+/// so view results happened to be 0 regardless. This test sets a non-zero
+/// timestamp and pins the actual value, so the corrected semantics cannot
+/// silently regress back to the "always 0" fiction.
+#[test]
+fn test_calculate_sla_view_recorded_at_uses_live_ledger_timestamp() {
+    let (env, client, actors) = setup();
+
+    let ts: u64 = 1_726_000_000; // arbitrary non-zero ledger time
+    env.ledger().set_timestamp(ts);
+
+    let outage_id = symbol_short!("TS001");
+    let severity = symbol_short!("critical");
+    let mttr = 25u32;
+
+    // The view path records the live ledger timestamp — not 0.
+    let view = client.calculate_sla_view(&outage_id, &severity, &mttr);
+    assert_eq!(
+        view.recorded_at, ts,
+        "calculate_sla_view.recorded_at must equal the live ledger timestamp (issue #465)"
+    );
+    assert_ne!(view.recorded_at, 0, "recorded_at must not be hardcoded to 0");
+
+    // The mutating path executed in the same ledger records the same timestamp.
+    let mutating = client.calculate_sla(&actors.operator, &outage_id, &severity, &mttr);
+    assert_eq!(
+        mutating.recorded_at, ts,
+        "calculate_sla.recorded_at must equal the live ledger timestamp"
+    );
+    assert_eq!(
+        view.recorded_at, mutating.recorded_at,
+        "view and mutating recorded_at must match within the same ledger"
+    );
+
+    // Advancing the ledger clock changes the recorded value: proof that it
+    // tracks the live timestamp rather than any constant.
+    let ts2: u64 = ts + 3_600;
+    env.ledger().set_timestamp(ts2);
+    let view2 = client.calculate_sla_view(&symbol_short!("TS002"), &severity, &mttr);
+    assert_eq!(
+        view2.recorded_at, ts2,
+        "calculate_sla_view.recorded_at must track the advancing ledger clock"
+    );
+}
 // ============================================================
 // #32 – Contract Economic Stress Test Suite
 // ============================================================
@@ -2570,7 +2621,7 @@ fn test_get_contract_metadata_returns_expected_fields() {
     let (_env, client, _actors) = setup();
     let meta = client.get_contract_metadata();
     assert_eq!(meta.contract_name, symbol_short!("sla_calc"));
-    assert_eq!(meta.storage_version, 1);
+    assert_eq!(meta.storage_version, STORAGE_VERSION);
     assert_eq!(meta.result_schema_version, 1);
     assert_eq!(meta.supported_severities.len(), 4);
     assert_eq!(meta.features.len(), 10);
@@ -2688,7 +2739,7 @@ fn test_migrate_emits_migrate_done_event() {
             assert_eq!(topic2, actors.admin);
 
             let payload_tuple: (u32, u32) = payload.try_into_val(&env).unwrap();
-            assert_eq!(payload_tuple, (0, 1));
+            assert_eq!(payload_tuple, (0, STORAGE_VERSION));
         }
     }
     assert!(found, "migrate_done event not found");
@@ -3526,74 +3577,59 @@ fn test_get_history_page_with_meta_items_match_get_history_page() {
     }
 }
 
-/// #503 - Matrix test asserting get_history_page_with_meta(offset, limit).items == get_history_page(offset, limit)
-/// and has_more against a manual count across edge cases (empty history, offset beyond end, limit 0, limit exceeding remaining).
+/// Issue #464 — documented equivalence of the two paginated accessors.
+///
+/// `get_history_page` and `get_history_page_with_meta` now derive their slice
+/// from the single `compute_page_slice` implementation. This pins the
+/// documented equivalence end-to-end: for every `(offset, limit)` the `items`
+/// are byte-for-byte identical across both accessors, and the metadata
+/// accessor's `has_more` and page length match the independent executable
+/// pagination spec in `spec.rs`. A refactor that let the two accessors drift
+/// apart — or either one diverge from the policy — fails here.
 #[test]
-fn test_get_history_page_equivalence_and_has_more_matrix() {
-    let (_env, client, actors) = setup();
+fn test_pagination_slice_equivalence_matches_spec() {
+    let (env, client, actors) = setup();
 
-    // 1. Test empty history matrix
-    let empty_offsets = [0u32, 1, 10, u32::MAX];
-    let limits = [0u32, 1, 2, 5, 100, u32::MAX];
-
-    for &offset in &empty_offsets {
-        for &limit in &limits {
-            let plain = client.get_history_page(&offset, &limit);
-            let meta = client.get_history_page_with_meta(&offset, &limit);
-
-            assert_eq!(
-                meta.items, plain,
-                "empty history items mismatch at offset={} limit={}",
-                offset, limit
-            );
-            assert_eq!(meta.total, 0);
-            assert!(
-                !meta.has_more,
-                "has_more should be false for empty history at offset={} limit={}",
-                offset, limit
-            );
-        }
-    }
-
-    // 2. Test populated history matrix (len = 5)
     for i in 0..5u32 {
-        let oid = Symbol::new(&_env, &alloc::format!("PG_EQ_{}", i));
+        let oid = Symbol::new(&env, &alloc::format!("PGEQ_{}", i));
         client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
     }
-    let total_len = 5u32;
+    let len = 5u32;
 
-    let offsets = [0u32, 1, 2, 4, 5, 6, 100, u32::MAX];
-
-    for &offset in &offsets {
-        for &limit in &limits {
+    // Includes limits straddling MAX_PAGE_SIZE (200) and the u32 extremes so the
+    // clamp and saturating arithmetic are exercised against the spec too.
+    for offset in 0..7u32 {
+        for limit in [0u32, 1, 2, 3, 5, 200, 201, u32::MAX] {
             let plain = client.get_history_page(&offset, &limit);
             let meta = client.get_history_page_with_meta(&offset, &limit);
 
-            // Equivalence assertion: meta.items == get_history_page(offset, limit)
+            // Cross-accessor equivalence: items are identical.
             assert_eq!(
                 meta.items, plain,
                 "items mismatch at offset={} limit={}",
                 offset, limit
             );
+            // total is always the full history length.
             assert_eq!(
-                meta.total, total_len,
+                meta.total, len,
                 "total mismatch at offset={} limit={}",
                 offset, limit
             );
-
-            // Manual calculation for has_more
-            let expected_has_more = if offset >= total_len {
-                false
-            } else if limit == 0 {
-                true
-            } else {
-                offset.saturating_add(limit.min(200)) < total_len
-            };
-
+            // has_more matches the independent executable spec.
             assert_eq!(
-                meta.has_more, expected_has_more,
-                "has_more mismatch at offset={} limit={}: expected {}, got {}",
-                offset, limit, expected_has_more, meta.has_more
+                meta.has_more,
+                crate::spec::expected_has_more(offset, limit, len),
+                "has_more mismatch at offset={} limit={}",
+                offset,
+                limit
+            );
+            // Page length matches the independent executable spec.
+            assert_eq!(
+                meta.items.len(),
+                crate::spec::expected_page_len(offset, limit, len),
+                "page-length mismatch at offset={} limit={}",
+                offset,
+                limit
             );
         }
     }
@@ -4738,8 +4774,8 @@ fn test_retention_limit_update_trims_existing_history() {
 fn test_get_migration_state_returns_current_version() {
     let (_env, client, _actors) = setup();
     let info = client.get_migration_state();
-    assert_eq!(info.stored_version, 1);
-    assert_eq!(info.expected_version, 1);
+    assert_eq!(info.stored_version, STORAGE_VERSION);
+    assert_eq!(info.expected_version, STORAGE_VERSION);
     assert!(!info.needs_migration);
 }
 
@@ -4760,7 +4796,7 @@ fn test_get_migration_state_detects_version_mismatch() {
 
     let info = client.get_migration_state();
     assert_eq!(info.stored_version, 99);
-    assert_eq!(info.expected_version, 1);
+    assert_eq!(info.expected_version, STORAGE_VERSION);
     assert!(info.needs_migration);
 }
 
@@ -4815,6 +4851,34 @@ fn test_migrate_initialises_missing_fields() {
         assert!(env.storage().instance().has(&CONFIG_KEY));
         assert!(env.storage().instance().has(&STATS_KEY));
     });
+}
+
+#[test]
+fn test_migrate_v1_backfills_cached_history_length() {
+    let (env, client, actors) = setup();
+    client.calculate_sla(
+        &actors.operator,
+        &symbol(&env, "MIG_HIST_1"),
+        &symbol_short!("low"),
+        &10,
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol(&env, "MIG_HIST_2"),
+        &symbol_short!("low"),
+        &10,
+    );
+
+    // A v1 deployment has history but lacks the v2 cached length key.
+    env.as_contract(&client.address, || {
+        env.storage().instance().remove(&HISTORY_LEN_KEY);
+        env.storage().instance().set(&STORAGE_VERSION_KEY, &1u32);
+    });
+
+    client.migrate(&actors.admin);
+
+    assert_eq!(client.get_storage_version(), STORAGE_VERSION);
+    assert_eq!(client.get_full_audit_state().history_len, 2);
 }
 
 // ============================================================
@@ -5140,7 +5204,7 @@ fn test_event_replay_after_prune_history_page_reflects_pruned_state() {
 fn test_get_version_info_returns_correct_versions_after_init() {
     let (_env, client, _actors) = setup();
     let info = client.get_version_info();
-    assert_eq!(info.storage_version, 1);
+    assert_eq!(info.storage_version, STORAGE_VERSION);
     assert_eq!(info.result_schema_version, 1);
     assert!(!info.needs_migration);
     assert!(!info.is_paused);
@@ -6007,8 +6071,11 @@ fn test_storage_growth_regression_mixed_operations() {
 //
 // Both paths share compute_result; these tests prove they never diverge
 // in result semantics across all severities and representative MTTR values.
-// Allowed differences (history growth, stats increment, recorded_at timestamp)
-// are explicitly documented and isolated below.
+// Allowed differences (history growth, stats increment) are explicitly
+// documented and isolated below. `recorded_at` is NOT one of them: both paths
+// record the live ledger timestamp (issue #465), so the two values must be
+// equal — asserted below and pinned against a non-zero timestamp by
+// `test_calculate_sla_view_recorded_at_uses_live_ledger_timestamp`.
 // ============================================================
 
 /// Helper: call both paths and assert full result parity.
@@ -6045,8 +6112,12 @@ fn assert_invariant(
         mttr
     );
     assert_eq!(view.rating, mutating.rating, "rating mismatch mttr={}", mttr);
-    // Documented allowed difference: recorded_at is 0 for view, ledger timestamp for mutating.
-    assert_eq!(view.recorded_at, 0, "view recorded_at must always be 0");
+    // Issue #465: the view path records the *live* ledger timestamp, identical
+    // to the mutating path when both run in the same ledger — it is NOT
+    // hardcoded to 0. (The earlier "view recorded_at is always 0" contract only
+    // ever looked true because the default test ledger timestamp is 0.) The
+    // exact value is pinned against a non-zero timestamp by
+    // `test_calculate_sla_view_recorded_at_uses_live_ledger_timestamp`.
     assert_eq!(
         view.recorded_at, mutating.recorded_at,
         "recorded_at mismatch mttr={}",
@@ -9044,7 +9115,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
     supported_severities.push_back(symbol_short!("critical"));
     let metadata = ContractMetadata {
         contract_name: symbol_short!("sla_calc"),
-        storage_version: 1,
+        storage_version: STORAGE_VERSION,
         result_schema_version: 1,
         supported_severities,
         features: Vec::new(&env),
@@ -9182,7 +9253,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
 
     // Test VersionInfo
     let version_info = VersionInfo {
-        storage_version: 1,
+        storage_version: STORAGE_VERSION,
         result_schema_version: 1,
         needs_migration: false,
         is_paused: false,
@@ -9254,7 +9325,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
     let version_info = VersionNegotiationInfo {
         contract_name: symbol_short!("sla_calc"),
         protocol_version: 1,
-        storage_version: 1,
+        storage_version: STORAGE_VERSION,
         min_compatible_protocol: 1,
         is_paused: false,
         needs_migration: false,
@@ -9647,7 +9718,7 @@ fn test_261_fingerprint_includes_all_required_fields() {
     let fingerprint = client.get_contract_state_fingerprint();
 
     assert_eq!(fingerprint.contract_name, symbol_short!("sla_calc"));
-    assert_eq!(fingerprint.storage_version, 1);
+    assert_eq!(fingerprint.storage_version, STORAGE_VERSION);
     assert_eq!(fingerprint.result_schema_version, 1);
     assert!(
         fingerprint.config_version_hash > 0,
@@ -9766,7 +9837,7 @@ fn test_261_fingerprint_before_and_after_upgrade_differ() {
     client.migrate(&actors.admin);
 
     let fp_after = client.get_contract_state_fingerprint();
-    assert_eq!(fp_after.storage_version, 1);
+    assert_eq!(fp_after.storage_version, STORAGE_VERSION);
     assert!(!fp_after.needs_migration);
 
     // Config hash should remain unchanged across migration if no config changed
@@ -9800,7 +9871,7 @@ fn test_261_fingerprint_use_case_pre_upgrade_audit() {
     let fp_pre_upgrade = client.get_contract_state_fingerprint();
 
     // Verify all expected pre-upgrade state
-    assert_eq!(fp_pre_upgrade.storage_version, 1);
+    assert_eq!(fp_pre_upgrade.storage_version, STORAGE_VERSION);
     assert!(!fp_pre_upgrade.needs_migration);
     assert!(fp_pre_upgrade.config_version_hash > 0);
 

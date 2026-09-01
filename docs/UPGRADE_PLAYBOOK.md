@@ -147,7 +147,7 @@ pub fn migrate(env: Env, caller: Address) -> Result<(), SLAError>
 6. After all steps, verifies `current == STORAGE_VERSION`
 7. Emits a `migrate_done` event with `(old_version, new_version)`
 
-**Current migration path (as of v1):**
+**Current migration path (as of v2):**
 
 | Step | From | To | Action |
 |------|------|----|--------|
@@ -329,7 +329,7 @@ reversibility of each step in the upgrade history log (§8).
 
 | Concept | Location | Description |
 |---------|----------|-------------|
-| `STORAGE_VERSION` constant | [`apexchainx_calculator/src/lib.rs`](../apexchainx_calculator/src/lib.rs) | The version this binary expects (currently `1`) |
+| `STORAGE_VERSION` constant | [`apexchainx_calculator/src/lib.rs`](../apexchainx_calculator/src/lib.rs) | The version this binary expects (currently `2`) |
 | `STORAGE_VERSION_KEY` | `lib.rs` | On-chain storage key `VER` |
 | `migrate()` entrypoint | `lib.rs` | Admin-gated migration harness with sequential step application |
 | `init_missing_storage_defaults()` | `lib.rs` | Idempotent initialisation of missing keys for v0→v1 migration |

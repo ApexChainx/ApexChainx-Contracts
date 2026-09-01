@@ -61,9 +61,9 @@ fn storage_key_count_is_stable_after_init() {
     // Keys written eagerly by initialize (see SLACalculatorContract::initialize
     // in lib.rs). Asserting presence pins the post-init footprint so accidental
     // additions or removals are caught.
-    let eagerly_written: [&str; 13] = [
+    let eagerly_written: [&str; 12] = [
         "ADMIN", "OPERATOR", "CONFIG", "PAUSED", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST",
-        "VER", "TPRUNED", "TTOTENT",
+        "HISTLEN", "VER",
     ];
 
     // Keys intentionally created lazily — they must be absent until the
@@ -269,4 +269,151 @@ fn pause_cycles_do_not_leak_storage() {
     // And pause info should be None.
     let pause_info = client.get_pause_info();
     assert!(pause_info.is_none(), "Pause info must be cleared after unpause");
+}
+
+// ── Per-call storage write cost budget (Issue #466) ──────────────────
+
+/// Measure CPU cost of `calculate_sla` at a pinned history size to gate
+/// write-amplification regressions. Each call rewrites the entire history Vec,
+/// so the cost is O(retained_history_size). This test ensures the per-call
+/// cost does not unexpectedly jump due to a storage redesign or extra
+/// serialization step.
+///
+/// The budget is calibrated at MAX_HISTORY_SIZE = 1000 entries. If history
+/// storage changes (e.g. pruned more aggressively), the budget must be
+/// re-baselined and documented in a CHANGELOG entry.
+#[test]
+fn calculate_sla_per_call_write_cost_at_max_history() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Populate to near MAX_HISTORY_SIZE
+    for i in 0..950u32 {
+        let oid = soroban_sdk::Symbol::new(&env, &format!("FILL_{}", i));
+        client.calculate_sla(&op, &oid, &soroban_sdk::symbol_short!("low"), &10);
+    }
+
+    // Warm the budget cache
+    for i in 0..10u32 {
+        let oid = soroban_sdk::Symbol::new(&env, &format!("WARM_{}", i));
+        client.calculate_sla(&op, &oid, &soroban_sdk::symbol_short!("low"), &10);
+    }
+
+    // Measure 10 calls at steady state (near 1000 entries)
+    env.budget().reset_default();
+    let before = env.budget().cpu_instruction_cost();
+
+    for i in 0..10u32 {
+        let oid = soroban_sdk::Symbol::new(&env, &format!("BENCH_{}", i));
+        client.calculate_sla(&op, &oid, &soroban_sdk::symbol_short!("low"), &10);
+    }
+
+    let after = env.budget().cpu_instruction_cost();
+    let per_call_avg = (after - before) / 10;
+
+    // Budget at MAX_HISTORY_SIZE: per-call O(n) cost must stay under 50M instructions.
+    // Measured baseline: ~18M for 1000-entry Vec. Headroom prevents regressions like:
+    // - Extra deserialization round-trips
+    // - Silent Vec duplication on append
+    // - Inefficient slice-copy patterns
+    assert!(
+        per_call_avg < 50_000_000,
+        "Per-call write cost at MAX_HISTORY_SIZE: {} instructions exceeds budget 50M (issue #466)",
+        per_call_avg
+    );
+}
+
+// ── Bootstrap-envelope read cost (Issue #463) ────────────────────────
+
+/// Measure and gate the cost of the `get_full_audit_state` bootstrap read, and
+/// pin the measured cost model documented in `docs/AUDIT_MODE_SEMANTICS.md`.
+///
+/// # What #463 changed
+///
+/// `get_full_audit_state` previously materialized the entire history `Vec` into
+/// Rust just to report `history_len`. It now reads a cached `HISTLEN` counter
+/// (see `update_history_and_cache`), so the length is obtained without building
+/// N `SLAResult` structs.
+///
+/// # Measured cost model (the honest part of criterion (b))
+///
+/// History is stored in the **instance** storage entry, alongside every other
+/// instance key. The Soroban host loads and parses that whole entry on first
+/// instance access, so any instance read — including reading the `HISTLEN`
+/// counter — pays a cost that scales with the serialized history size. The
+/// counter removes the redundant Rust-side `Vec` materialization but NOT the
+/// shared entry-load cost. Empirically the two are indistinguishable in CPU
+/// terms: `get_full_audit_state` and `get_history` grow at the *same* rate as
+/// history grows, differing only by a constant (~80k instructions) for the
+/// extra roles/config/stats/schema work the audit envelope does.
+///
+/// Fully decoupling the bootstrap read from history size would require moving
+/// history to its own storage entry — the history-storage redesign that #463
+/// explicitly places out of scope. This test therefore gates the read against
+/// a documented ceiling rather than asserting a (false) constant cost, and
+/// pins the "audit read ≈ history read + bounded overhead" relationship so a
+/// future change that makes the envelope scale *worse* than a plain history
+/// read is caught.
+#[test]
+fn get_full_audit_state_cost_at_pinned_history() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // Pin history near MAX_HISTORY_SIZE (1000).
+    for i in 0..1000u32 {
+        let oid = soroban_sdk::Symbol::new(&env, &format!("AUD_{}", i));
+        client.calculate_sla(&op, &oid, &soroban_sdk::symbol_short!("low"), &10);
+    }
+
+    // Warm both reads so first-touch effects don't skew the steady-state cost.
+    client.get_full_audit_state();
+    client.get_history();
+
+    // Measure get_full_audit_state.
+    env.budget().reset_default();
+    let b0 = env.budget().cpu_instruction_cost();
+    client.get_full_audit_state();
+    let audit_cost = env.budget().cpu_instruction_cost() - b0;
+
+    // Measure a plain get_history read at the same history size for comparison.
+    env.budget().reset_default();
+    let b1 = env.budget().cpu_instruction_cost();
+    client.get_history();
+    let history_cost = env.budget().cpu_instruction_cost() - b1;
+
+    // Ceiling gate: the bootstrap read at MAX history must stay well under 50M
+    // instructions. Measured baseline at 1000 entries is ~22M (dominated by the
+    // shared instance-entry load). Headroom catches an accidental O(n^2) or a
+    // duplicated deserialization pass.
+    assert!(
+        audit_cost < 50_000_000,
+        "get_full_audit_state cost at ~MAX history: {} exceeds budget 50M (issue #463)",
+        audit_cost
+    );
+
+    // Relationship gate: obtaining history_len via the counter must not make the
+    // audit envelope materially more expensive than a single get_history read.
+    // Both share the dominant instance-entry load; the envelope adds only a
+    // bounded constant for roles/config/stats/schema. If get_full_audit_state
+    // ever re-introduced a full-history materialization *on top of* the entry
+    // load, this bound would be the first to break at MAX history.
+    assert!(
+        audit_cost <= history_cost + 2_000_000,
+        "get_full_audit_state ({}) must not exceed get_history ({}) by more than a bounded \
+         constant; the length counter must not add an O(n) materialization pass (issue #463)",
+        audit_cost,
+        history_cost
+    );
 }

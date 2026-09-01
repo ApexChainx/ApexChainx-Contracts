@@ -86,7 +86,7 @@ stateDiagram-v2
 
 ```mermaid
 stateDiagram-v2
-    [*] --> VersionCurrent : initialize()\n(writes VER = STORAGE_VERSION = 1)
+    [*] --> VersionCurrent : initialize()\n(writes VER = STORAGE_VERSION = 2)
 
     VersionCurrent --> VersionMismatch : contract binary upgraded\n(new binary has STORAGE_VERSION = N+1)\n(on-chain VER still = N)
 
