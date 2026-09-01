@@ -229,12 +229,38 @@
 //! When adding or modifying events, refer to both the SC-099 Event-Topic Schema
 //! Checklist and the SC-100 Public Method Review Checklist in `CONTRIBUTING.md`.
 
-#![allow(dead_code)]
-
 use soroban_sdk::{symbol_short, Symbol};
 
 /// Canonical event version symbol used by all events.
 pub const EVENT_VERSION: Symbol = symbol_short!("v1");
+
+/// 1-based event-ABI generation number for the current `EVENT_VERSION`.
+///
+/// This is the mechanical index that ties the event symbol to the rest of the
+/// contract's version posture. Generation 1 corresponds to `"v1"`; a breaking
+/// event change MUST bump `EVENT_VERSION` to `"v2"` **and** this constant to
+/// `2` in the same commit (the two can never diverge). Removals/removals of
+/// event fields are tracked by generation, not by the symbol string, so the
+/// co-bump rules in `contract_info.rs` and `docs/UPGRADE_PLAYBOOK.md` can be
+/// enforced numerically instead of by parsing symbols. (#497)
+pub const EVENT_ABI_GENERATION: u32 = 1;
+
+/// Required minimum `STORAGE_VERSION` / `RESULT_SCHEMA_VERSION` for each event
+/// ABI generation. Indexed by `EVENT_ABI_GENERATION - 1`.
+///
+/// A release that bumps the event ABI to generation `g` MUST also ship a
+/// storage schema and result schema at least the value in this table for index
+/// `g - 1`. In other words, a breaking event change can never ride along on an
+/// unchanged `STORAGE_VERSION`/`RESULT_SCHEMA_VERSION`:
+///
+/// | `EVENT_VERSION` | generation | required schema version |
+/// |-----------------|------------|-------------------------|
+/// | `"v1"`          | `1`        | `1`                     |
+/// | `"v2"`          | `2`        | `2`                     |
+///
+/// The enforcement test `test_event_abi_cobump_invariant` in `contract_info.rs`
+/// fails CI if the current generation's requirement is not met. (#497)
+pub const EVENT_ABI_TO_SCHEMA_VERSION: &[u32] = &[1, 2];
 
 /// Event name constants — these form topic[0] of every event.
 pub const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
@@ -281,11 +307,28 @@ pub fn current_event_version() -> Symbol {
 
 #[cfg(test)]
 mod tests {
+    // #496 – allows the emit-site audit below to read crate source. This crate
+    // is `#![no_std]`, so `std` must be linked explicitly (as in orphan_lint).
+    extern crate std;
+
     use super::*;
     use alloc::format;
 
     #[test]
     fn test_event_version_is_stable() {
+        assert_eq!(current_event_version(), symbol_short!("v1"));
+    }
+
+    #[test]
+    fn test_event_abi_generation_tracks_version_symbol() {
+        // The generation table must have an entry for the current generation.
+        assert!(
+            EVENT_ABI_GENERATION >= 1 && EVENT_ABI_GENERATION as usize <= EVENT_ABI_TO_SCHEMA_VERSION.len(),
+            "EVENT_ABI_GENERATION {} out of range for the policy table",
+            EVENT_ABI_GENERATION
+        );
+        // Generation 1 is always "v1".
+        assert_eq!(EVENT_ABI_GENERATION, 1);
         assert_eq!(current_event_version(), symbol_short!("v1"));
     }
 
@@ -326,6 +369,78 @@ mod tests {
                     names[i], names[j]
                 );
             }
+        }
+    }
+
+    /// #496 – The compiler can only see an event constant is unused; the
+    /// divergence that matters is *declared but never emitted*. Every event
+    /// name constant in the catalog below must be referenced inside a `publish`
+    /// call somewhere in the crate's `src/` (excluding this catalog and the
+    /// `api_stability` guardrail). Adding an event constant to the schema
+    /// without wiring it to an emit site fails this test.
+    #[test]
+    fn test_every_declared_event_has_an_emit_site() {
+        use std::string::String;
+        use std::vec::Vec;
+
+        // (event name string, source identifier of the emitting constant).
+        let catalog: [(&str, &str); 24] = [
+            ("sla_calc", "EVENT_SLA_CALC"),
+            ("set_int", "EVENT_SETTLE_INTENT"),
+            ("cfg_upd", "EVENT_CONFIG_UPD"),
+            ("cfg_rem", "EVENT_CONFIG_REM"),
+            ("paused", "EVENT_PAUSED"),
+            ("unpause", "EVENT_UNPAUSED"),
+            ("op_set", "EVENT_OP_SET"),
+            ("pruned", "EVENT_PRUNED"),
+            ("pruned_a", "EVENT_PRUNED_AGE"),
+            ("adm_prop", "EVENT_ADMIN_PROP"),
+            ("adm_acc", "EVENT_ADMIN_ACC"),
+            ("adm_can", "EVENT_ADMIN_CAN"),
+            ("adm_ren", "EVENT_ADMIN_REN"),
+            ("adm_sup", "EVENT_ADMIN_SUP"),
+            ("op_prop", "EVENT_OP_PROP"),
+            ("op_acc", "EVENT_OP_ACC"),
+            ("op_can", "EVENT_OP_CAN"),
+            ("op_sup", "EVENT_OP_SUP"),
+            ("cfg_frz", "EVENT_CONFIG_FREEZE"),
+            ("cfg_unfrz", "EVENT_CONFIG_UNFREEZE"),
+            ("stats_sat", "EVENT_STATS_SAT"),
+            ("dup_input", "EVENT_DUP_INPUT"),
+            ("migrate_done", "EVENT_MIGRATE_DONE"),
+            ("ret_lim", "EVENT_RET_LIM"),
+        ];
+
+        let src_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&src_dir).expect("src/ readable for emit-site audit") {
+            let entry = entry.expect("read_dir entry");
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            // Skip this schema catalog and the api_stability guardrail: both are
+            // *declaration* sites, not emit sites.
+            if fname == "event_schema.rs" || fname == "api_stability.rs" || !fname.ends_with(".rs") {
+                continue;
+            }
+            sources.push(
+                std::fs::read_to_string(src_dir.join(&fname)).expect("cannot read source file"),
+            );
+        }
+
+        for (event_name, ident) in catalog {
+            // A publish call can span several lines, so inspect a window after
+            // every occurrence of "publish" rather than matching per line.
+            let emitted = sources.iter().any(|text: &String| {
+                text.match_indices("publish").any(|(idx, _)| {
+                    let end = text.len().min(idx + 300);
+                    text[idx..end].contains(ident)
+                })
+            });
+            assert!(
+                emitted,
+                "event `{}` (constant `{}`) is declared in the schema catalog but never \
+                 emitted from a publish site in src/ — wire it up or remove it (#496)",
+                event_name, ident
+            );
         }
     }
 

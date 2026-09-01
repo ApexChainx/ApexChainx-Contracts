@@ -45,6 +45,18 @@ path = "fuzz_targets/config_mutation_sequences.rs"
 test = false
 doc = false
 
+[[bin]]
+name = "governance_sequences"
+path = "fuzz_targets/governance_sequences.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "history_state_machine"
+path = "fuzz_targets/history_state_machine.rs"
+test = false
+doc = false
+
 [profile.release]
 debug = true
 lto = false

@@ -325,6 +325,42 @@ reversibility of each step in the upgrade history log (§8).
 
 ---
 
+## 6.5 Version Posture & Co-Bump Rules (#497)
+
+The contract exposes a multi-surface version posture through
+[`get_contract_info`](../apexchainx_calculator/src/contract_info.rs):
+
+| Surface | Field | Source |
+|---------|-------|--------|
+| Contract release | `contract_version` | Derived from `CARGO_PKG_VERSION` (dots → underscores) |
+| Storage schema | `storage_version` | `STORAGE_VERSION` in `lib.rs` |
+| Result encoding | `result_schema_version` | `RESULT_SCHEMA_VERSION` in `lib.rs` |
+| Event ABI | `event_version` | `event_schema::EVENT_VERSION` |
+
+These surfaces evolve independently, but **breaking event changes are
+coordinated releases**. Bumping the event ABI generation (`EVENT_VERSION`
+`"v1" → "v2"` **and** `EVENT_ABI_GENERATION` `1 → 2`, in the same commit)
+MUST be accompanied by:
+
+1. A `STORAGE_VERSION` / `RESULT_SCHEMA_VERSION` at least the value in
+   `event_schema::EVENT_ABI_TO_SCHEMA_VERSION` for that generation. A breaking
+   event change can never ship on an unchanged storage schema or unchanged
+   result schema.
+2. A documented release note in `CHANGELOG.md` under `[Unreleased]` describing
+   the event-ABI change and its consumer impact.
+3. An update to the event payload schemas in `event_schema.rs` and to
+   `docs/CONTRACT_SHAPE_CHANGE_CHECKLIST.md`.
+
+### Enforcement
+
+- `contract_info::test_event_abi_cobump_invariant` fails CI if the current
+  generation's schema requirement is not met.
+- `contract_status`-type consumers should check `get_contract_info()` once at
+  startup and treat `event_version` + `result_schema_version` + `storage_version`
+  as a single compatibility tuple that must all match the backend's parser.
+
+---
+
 ## 7. Code References
 
 | Concept | Location | Description |
@@ -343,6 +379,9 @@ reversibility of each step in the upgrade history log (§8).
 | `negotiate_contract_versions()` | `version_negotiation.rs` | Cross-contract version compatibility negotiation |
 | `classifyVersion()` | [`ts/upgradeGuardTests.ts`](../ts/upgradeGuardTests.ts) | TypeScript reference implementation of version classification |
 | `assertRollbackInvariant()` | `upgradeGuardTests.ts` | Enforces monotonic version progression |
+| `EVENT_VERSION` / `EVENT_ABI_GENERATION` | [`event_schema.rs`](../apexchainx_calculator/src/event_schema.rs) | Event-ABI version symbol & numeric generation (#497) |
+| `EVENT_ABI_TO_SCHEMA_VERSION` | `event_schema.rs` | Required schema posture per event-ABI generation (#497) |
+| `test_event_abi_cobump_invariant` | [`contract_info.rs`](../apexchainx_calculator/src/contract_info.rs) | Enforces the co-bump rule (#497) |
 | Cross-Contract Deployment Checklist | [`docs/CROSS_CONTRACT_DEPLOYMENT_CHECKLIST.md`](CROSS_CONTRACT_DEPLOYMENT_CHECKLIST.md) | Pre/post-deployment compatibility verification |
 | Contract API Compatibility | [`docs/CONTRACT_API_COMPATIBILITY.md`](CONTRACT_API_COMPATIBILITY.md) | Stable API signature specification for backend consumers |
 

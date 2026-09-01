@@ -325,7 +325,7 @@ mod topic_stability_tests {
             &5,
         );
         client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "testing"));
         client.unpause(&admin);
         client.propose_admin(&admin, &new_admin);
         client.cancel_admin_proposal(&admin);

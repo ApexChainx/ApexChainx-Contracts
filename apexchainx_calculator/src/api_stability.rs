@@ -119,11 +119,12 @@ pub fn sl_a_error_count() -> u32 {
 ///
 /// **Maintainer note:** This must cover every event constant declared in
 /// `event_schema.rs`. When a new event name is added there, add it here too.
-pub fn event_name_symbols() -> [&'static str; 22] {
+pub fn event_name_symbols() -> [&'static str; 23] {
     [
         "sla_calc",
         "set_int",
         "cfg_upd",
+        "cfg_rem",
         "paused",
         "unpause",
         "op_set",
@@ -167,7 +168,7 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check event symbols are at expected count.
-    if event_name_symbols().len() != 22 {
+    if event_name_symbols().len() != 23 {
         return StabilityScore::C;
     }
 
@@ -251,7 +252,7 @@ mod tests {
     fn test_225_event_symbols_are_well_known() {
         // All public event names must be documented and stable.
         let events = event_name_symbols();
-        let expected = 22;
+        let expected = 23;
         assert_eq!(
             events.len(),
             expected,
@@ -278,6 +279,7 @@ mod tests {
             crate::event_schema::EVENT_SLA_CALC,
             crate::event_schema::EVENT_SETTLE_INTENT,
             crate::event_schema::EVENT_CONFIG_UPD,
+            crate::event_schema::EVENT_CONFIG_REM,
             crate::event_schema::EVENT_PAUSED,
             crate::event_schema::EVENT_UNPAUSED,
             crate::event_schema::EVENT_OP_SET,
