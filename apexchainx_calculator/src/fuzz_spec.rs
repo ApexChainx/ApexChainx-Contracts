@@ -349,7 +349,7 @@ pub fn assert_pagination_oracle_self_consistent(offset: u32, limit: u32, len: u3
     }
     assert_eq!(
         spec::expected_has_more(offset, limit, len),
-        end < len,
+        limit > 0 && end < len,
         "has_more disagrees with the page end for offset={} limit={} len={}",
         offset,
         limit,

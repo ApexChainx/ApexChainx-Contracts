@@ -90,9 +90,18 @@ mod tests {
 
     #[test]
     fn test_consistent_payment() {
-        assert!(is_consistent_payment(&symbol_short!("met"), &symbol_short!("rew")));
-        assert!(is_consistent_payment(&symbol_short!("viol"), &symbol_short!("pen")));
-        assert!(!is_consistent_payment(&symbol_short!("met"), &symbol_short!("pen")));
+        assert!(is_consistent_payment(
+            &symbol_short!("met"),
+            &symbol_short!("rew")
+        ));
+        assert!(is_consistent_payment(
+            &symbol_short!("viol"),
+            &symbol_short!("pen")
+        ));
+        assert!(!is_consistent_payment(
+            &symbol_short!("met"),
+            &symbol_short!("pen")
+        ));
     }
 
     #[test]

@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod auth_matrix_tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
+    #![allow(clippy::module_inception)]
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
@@ -25,13 +26,7 @@ mod auth_matrix_tests {
     fn test_only_admin_can_set_config() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        client.set_config(
-            &admin,
-            &symbol_short!("high"),
-            &30,
-            &50,
-            &500,
-        );
+        client.set_config(&admin, &symbol_short!("high"), &30, &50, &500);
     }
 
     #[test]
@@ -77,12 +72,7 @@ mod auth_matrix_tests {
         // MockAuth would satisfy the call. The stranger has none, so the call
         // must surface an error – exactly the role-isolation we want to assert.
         env.mock_auths(&[]);
-        let result = client.try_calculate_sla(
-            &stranger,
-            &symbol_short!("OUT"),
-            &symbol_short!("high"),
-            &5,
-        );
+        let result = client.try_calculate_sla(&stranger, &symbol_short!("OUT"), &symbol_short!("high"), &5);
         assert!(result.is_err());
     }
 
@@ -101,12 +91,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.calculate_sla(
-            &stranger,
-            &symbol_short!("U_CALC"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&stranger, &symbol_short!("U_CALC"), &symbol_short!("high"), &10);
     }
 
     #[test]
@@ -115,12 +100,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
         // admin holds the admin role, NOT the operator role.
-        client.calculate_sla(
-            &admin,
-            &symbol_short!("A_CALC"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&admin, &symbol_short!("A_CALC"), &symbol_short!("high"), &10);
     }
 
     #[test]
@@ -129,13 +109,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.set_config(
-            &stranger,
-            &symbol_short!("high"),
-            &30,
-            &50,
-            &500,
-        );
+        client.set_config(&stranger, &symbol_short!("high"), &30, &50, &500);
     }
 
     #[test]
@@ -143,13 +117,7 @@ mod auth_matrix_tests {
     fn test_operator_cannot_set_config() {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
-        client.set_config(
-            &operator,
-            &symbol_short!("high"),
-            &30,
-            &50,
-            &500,
-        );
+        client.set_config(&operator, &symbol_short!("high"), &30, &50, &500);
     }
     #[test]
     #[should_panic]
@@ -189,13 +157,7 @@ mod auth_matrix_tests {
         env.mock_auths(&[]);
 
         // admin role is set, but auth is not provided → should return error, not panic
-        let result = client.try_set_config(
-            &admin,
-            &symbol_short!("high"),
-            &30,
-            &50,
-            &500,
-        );
+        let result = client.try_set_config(&admin, &symbol_short!("high"), &30, &50, &500);
         assert!(result.is_err());
     }
 }

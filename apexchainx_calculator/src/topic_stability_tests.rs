@@ -11,13 +11,13 @@
 
 #[cfg(test)]
 mod topic_stability_tests {
-    use soroban_sdk::{
-        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol,
-        TryIntoVal,
-    };
+    #![allow(clippy::module_inception, clippy::len_zero)]
     use crate::{
-        EVENT_CONFIG_UPD, EVENT_PAUSED, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED,
-        EVENT_VERSION, SLACalculatorContract, SLACalculatorContractClient,
+        SLACalculatorContract, SLACalculatorContractClient, EVENT_CONFIG_UPD, EVENT_PAUSED,
+        EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED, EVENT_VERSION,
+    };
+    use soroban_sdk::{
+        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
     };
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -38,12 +38,7 @@ mod topic_stability_tests {
         let env = Env::default();
         let (_admin, _operator, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.calculate_sla(
-            &stranger,
-            &symbol_short!("U_TS"),
-            &symbol_short!("critical"),
-            &5,
-        );
+        client.calculate_sla(&stranger, &symbol_short!("U_TS"), &symbol_short!("critical"), &5);
     }
 
     #[test]
@@ -84,10 +79,7 @@ mod topic_stability_tests {
         let _context = topics.get(2).unwrap();
 
         assert_eq!(name, expected_name, "topic[0] must be the event name");
-        assert_eq!(
-            version, EVENT_VERSION,
-            "topic[1] must be the event version v1"
-        );
+        assert_eq!(version, EVENT_VERSION, "topic[1] must be the event version v1");
     }
 
     // ── sla_calc topic stability ────────────────────────────────────────
@@ -236,10 +228,7 @@ mod topic_stability_tests {
             let (_, topics, _) = events.get(i).unwrap();
             if topics.len() >= 2 {
                 let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
-                assert_eq!(
-                    version, EVENT_VERSION,
-                    "topic[1] must always be event version v1"
-                );
+                assert_eq!(version, EVENT_VERSION, "topic[1] must always be event version v1");
             }
         }
     }
@@ -251,12 +240,7 @@ mod topic_stability_tests {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("CTX1"),
-            &symbol_short!("high"),
-            &20,
-        );
+        client.calculate_sla(&operator, &symbol_short!("CTX1"), &symbol_short!("high"), &20);
 
         let events = env.events().all();
         for i in 0..events.len() {
@@ -268,7 +252,8 @@ mod topic_stability_tests {
             if name == EVENT_SLA_CALC {
                 let context: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
                 assert_eq!(
-                    context, symbol_short!("high"),
+                    context,
+                    symbol_short!("high"),
                     "topic[2] must be the severity for sla_calc"
                 );
                 return;
@@ -282,12 +267,7 @@ mod topic_stability_tests {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("CTX2"),
-            &symbol_short!("medium"),
-            &30,
-        );
+        client.calculate_sla(&operator, &symbol_short!("CTX2"), &symbol_short!("medium"), &30);
 
         let events = env.events().all();
         for i in 0..events.len() {
@@ -299,7 +279,8 @@ mod topic_stability_tests {
             if name == EVENT_SETTLE_INTENT {
                 let context: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
                 assert_eq!(
-                    context, symbol_short!("medium"),
+                    context,
+                    symbol_short!("medium"),
                     "topic[2] must be the severity for set_int"
                 );
                 return;
@@ -318,12 +299,7 @@ mod topic_stability_tests {
         let new_op = Address::generate(&env);
 
         // Trigger all event types to ensure comprehensive coverage
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("ALL3"),
-            &symbol_short!("critical"),
-            &5,
-        );
+        client.calculate_sla(&operator, &symbol_short!("ALL3"), &symbol_short!("critical"), &5);
         client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
         client.pause(&admin, &soroban_sdk::String::from_str(&env, "testing"));
         client.unpause(&admin);
@@ -340,7 +316,8 @@ mod topic_stability_tests {
         for i in 0..events.len() {
             let (_, topics, _) = events.get(i).unwrap();
             assert_eq!(
-                topics.len(), 3,
+                topics.len(),
+                3,
                 "Every event must have exactly 3 topics (name, version, context), found {} topics",
                 topics.len()
             );

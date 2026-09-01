@@ -3,7 +3,7 @@
 //! This module checks that the ledger environment supports the required
 //! minimum protocol version before the contract is considered deployable.
 
-use soroban_sdk::{Env, Symbol, symbol_short};
+use soroban_sdk::{symbol_short, Env, Symbol};
 
 /// Deployment policy asserting protocol-version compatibility.
 ///

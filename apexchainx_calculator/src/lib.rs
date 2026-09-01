@@ -31,6 +31,11 @@ mod fuzz_tests;
 
 pub mod api_stability;
 pub mod audit_state;
+/// #422 – formerly-orphan test-only modules, now declared so their guarantees
+/// (threshold boundaries, auth matrix, event ordering/stability, payload
+/// versioning, outage-id, pruning performance) are actually compiled and run.
+#[cfg(test)]
+mod auth_matrix_tests;
 pub mod calculation;
 pub mod config;
 pub mod config_bundle;
@@ -43,11 +48,15 @@ pub mod deployment_policy;
 pub mod error_responses;
 pub mod event;
 pub mod event_correlation;
+#[cfg(test)]
+mod event_ordering_tests;
 /// Canonical event schema and constants, consumed by backend indexers and by
 /// the event-ABI guardrails. Public so its `EVENT_*` constants are part of the
 /// crate's API surface (and therefore kept live by the compiler) rather than
 /// needing a blanket `#![allow(dead_code)]` as in the pre-#496 state.
 pub mod event_schema;
+#[cfg(test)]
+mod event_state_tests;
 /// Spec-assertion bodies shared by the `cargo-fuzz` targets in `fuzz/`.
 /// The targets stay a few lines long and every invariant they check is
 /// compiled and unit-tested here. See `docs/FUZZING_GUARANTEES.md`.
@@ -56,16 +65,24 @@ pub mod governance;
 pub mod history;
 pub mod metadata;
 pub mod metrics;
-/// #422 – event payload-optimization helpers (consumer-side validation).
-pub mod payload_optimizer;
-pub mod policy;
+#[cfg(test)]
+mod orphan_lint_tests;
+#[cfg(test)]
+mod outage_id_tests;
 /// Parity checker: compares current `compute_result` against the locked-in
 /// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
 /// Run with `cargo test --lib parity_tests::` or `just parity-check`.
 #[cfg(test)]
 mod parity_tests;
+/// #422 – event payload-optimization helpers (consumer-side validation).
+pub mod payload_optimizer;
+#[cfg(test)]
+mod payload_versioning_tests;
+pub mod policy;
 #[cfg(test)]
 mod prune_benchmark;
+#[cfg(test)]
+mod pruning_perf;
 #[cfg(test)]
 mod schema_migration_tests;
 /// Executable restatement of the contract's documented pure semantics —
@@ -76,33 +93,16 @@ pub mod storage_estimation;
 #[cfg(test)]
 mod storage_footprint_tests;
 pub mod storage_version;
+#[cfg(test)]
+mod threshold_config;
+#[cfg(test)]
+mod topic_stability_tests;
 /// Generates the contract-derived fixtures that `ts/` parity-checks against.
 /// Test-only: it executes the real contract in an `Env` and writes
 /// `ts/fixtures/contract-read-semantics.json`.
 #[cfg(test)]
 mod ts_parity_fixtures;
-/// #422 – formerly-orphan test-only modules, now declared so their guarantees
-/// (threshold boundaries, auth matrix, event ordering/stability, payload
-/// versioning, outage-id, pruning performance) are actually compiled and run.
-#[cfg(test)]
-mod auth_matrix_tests;
-#[cfg(test)]
-mod event_ordering_tests;
-#[cfg(test)]
-mod event_state_tests;
-#[cfg(test)]
-mod outage_id_tests;
-#[cfg(test)]
-mod payload_versioning_tests;
-#[cfg(test)]
-mod pruning_perf;
-#[cfg(test)]
-mod threshold_config;
-#[cfg(test)]
-mod topic_stability_tests;
 pub mod version_negotiation;
-#[cfg(test)]
-mod orphan_lint_tests;
 
 use crate::audit_state::AuditState;
 use crate::config_bundle::ConfigBundle;
@@ -236,6 +236,7 @@ pub(crate) const CONFIG_SNAPSHOT_SCHEMA_VERSION: Symbol = symbol_short!("v1");
 /// `SLAConfigSnapshot`. The companion test `test_config_snapshot_schema_field_count_sentinel`
 /// in `schema_migration_tests.rs` will fail CI if the struct layout changes
 /// without a corresponding update to this constant and `CONFIG_SNAPSHOT_SCHEMA_VERSION`.
+#[cfg(test)]
 pub(crate) const CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT: u32 = 2;
 
 /// Hard upper bound on retained history entries. (SC-062)
@@ -269,6 +270,7 @@ pub(crate) const RETENTION_LIMIT_KEY: Symbol = symbol_short!("RETLIM");
 /// Cumulative count of history entries removed by pruning (admin prune, age
 /// prune, and automatic trim in calculate_sla). Used by `get_retention_metrics`
 /// to compute retention ratio. (#461)
+#[cfg(test)]
 pub(crate) const TOTAL_PRUNED_KEY: Symbol = symbol_short!("TPRUNED");
 
 /// Cumulative count of history entries ever stored (retained + pruned). Used
@@ -1219,7 +1221,12 @@ impl SLACalculatorContract {
         }
 
         admin.require_auth();
-        operator.require_auth();
+        // In single-address (merged-role) mode admin == operator; authorize the
+        // operator frame only when it is a distinct address, otherwise the
+        // second require_auth raises "frame is already authorized".
+        if !admin.eq(&operator) {
+            operator.require_auth();
+        }
 
         env.storage().instance().set(&ADMIN_KEY, &admin);
         env.storage().instance().set(&OPERATOR_KEY, &operator); // #28
@@ -1798,11 +1805,7 @@ impl SLACalculatorContract {
         // is identical (threshold, penalty, reward) so consumers that only
         // care about values can parse either; consumers that need the
         // lifecycle distinction check topic[0].
-        let event_name = if is_update {
-            EVENT_SEV_UPD
-        } else {
-            EVENT_SEV_ADD
-        };
+        let event_name = if is_update { EVENT_SEV_UPD } else { EVENT_SEV_ADD };
         env.events().publish(
             (event_name, EVENT_VERSION, severity),
             (threshold_minutes, penalty_per_minute, reward_base),
@@ -2597,7 +2600,9 @@ impl SLACalculatorContract {
     ///
     /// # Input constraints
     ///
-    /// - `mttr_minutes` must be ≤ 525,600 (365 days). Values exceeding this bound are rejected with `InvalidInput`.
+    /// - `mttr_minutes` is an unsigned minute count; penalties and rewards are
+    ///   computed with checked arithmetic so an overflowing amount surfaces as
+    ///   `InvalidPenaltyAmount` / `InvalidRewardAmount` rather than panicking.
     ///
     /// # Repeated submissions for the same outage_id
     ///
@@ -3521,6 +3526,10 @@ impl SLACalculatorContract {
             .unwrap_or_else(|| Vec::new(&env));
         let total = history.len();
         let (end, items) = Self::compute_page_slice(&env, &history, offset, limit);
+        // `has_more` is true when the requested range stops before the end of
+        // history and limit > 0. When limit == 0, the empty page signals
+        // end-of-history per docs/HISTORY_PAGINATION_POLICY.md.
+        let has_more = if limit == 0 { false } else { end < total };
         Ok(HistoryPage {
             items,
             total,

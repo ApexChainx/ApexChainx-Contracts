@@ -23,13 +23,14 @@
 
 #[cfg(test)]
 mod event_ordering_tests {
-    use soroban_sdk::{
-        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
+    #![allow(clippy::module_inception, clippy::len_zero)]
+    use crate::{
+        SLACalculatorContract, SLACalculatorContractClient, SLAStats, EVENT_CONFIG_UPD, EVENT_PAUSED,
+        EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_STATS_SAT, EVENT_UNPAUSED, STATS_KEY,
     };
     use alloc::vec::Vec;
-    use crate::{
-        EVENT_CONFIG_UPD, EVENT_PAUSED, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_STATS_SAT,
-        EVENT_UNPAUSED, SLACalculatorContract, SLACalculatorContractClient, SLAStats, STATS_KEY,
+    use soroban_sdk::{
+        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
     };
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -105,24 +106,9 @@ mod event_ordering_tests {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("ORD_A"),
-            &symbol_short!("critical"),
-            &5,
-        );
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("ORD_B"),
-            &symbol_short!("high"),
-            &35,
-        );
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("ORD_C"),
-            &symbol_short!("low"),
-            &60,
-        );
+        client.calculate_sla(&operator, &symbol_short!("ORD_A"), &symbol_short!("critical"), &5);
+        client.calculate_sla(&operator, &symbol_short!("ORD_B"), &symbol_short!("high"), &35);
+        client.calculate_sla(&operator, &symbol_short!("ORD_C"), &symbol_short!("low"), &60);
 
         let names = event_names(&env);
 
@@ -216,11 +202,7 @@ mod event_ordering_tests {
             "Expected {} sla_calc events",
             count
         );
-        assert_eq!(
-            set_int_count, count as usize,
-            "Expected {} set_int events",
-            count
-        );
+        assert_eq!(set_int_count, count as usize, "Expected {} set_int events", count);
     }
 
     // ── 5. Event count consistency after multi-op sequences ─────────────
@@ -232,12 +214,7 @@ mod event_ordering_tests {
 
         // Mix of operations
         client.set_config(&admin, &symbol_short!("low"), &240, &15, &900);
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("MIX_A"),
-            &symbol_short!("low"),
-            &100,
-        );
+        client.calculate_sla(&operator, &symbol_short!("MIX_A"), &symbol_short!("low"), &100);
         client.set_config(&admin, &symbol_short!("critical"), &25, &150, &850);
         client.calculate_sla(
             &operator,
@@ -252,26 +229,16 @@ mod event_ordering_tests {
         // (plus init events which we ignore by scanning only named events)
         let named: Vec<&Symbol> = names
             .iter()
-            .filter(|n| {
-                **n == EVENT_CONFIG_UPD
-                    || **n == EVENT_SLA_CALC
-                    || **n == EVENT_SETTLE_INTENT
-            })
+            .filter(|n| **n == EVENT_CONFIG_UPD || **n == EVENT_SLA_CALC || **n == EVENT_SETTLE_INTENT)
             .collect();
 
         assert_eq!(named.len(), 6, "Expected 6 named events in mixed sequence");
         assert_eq!(*named[0], EVENT_CONFIG_UPD, "First event must be cfg_upd");
         assert_eq!(*named[1], EVENT_SLA_CALC, "Second event must be sla_calc");
         assert_eq!(*named[2], EVENT_SETTLE_INTENT, "Third event must be set_int");
-        assert_eq!(
-            *named[3], EVENT_CONFIG_UPD,
-            "Fourth event must be cfg_upd"
-        );
+        assert_eq!(*named[3], EVENT_CONFIG_UPD, "Fourth event must be cfg_upd");
         assert_eq!(*named[4], EVENT_SLA_CALC, "Fifth event must be sla_calc");
-        assert_eq!(
-            *named[5], EVENT_SETTLE_INTENT,
-            "Sixth event must be set_int"
-        );
+        assert_eq!(*named[5], EVENT_SETTLE_INTENT, "Sixth event must be set_int");
     }
 
     // ── Auth-gated negative tests ───────────────────────────────────────
@@ -282,12 +249,7 @@ mod event_ordering_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.calculate_sla(
-            &stranger,
-            &symbol_short!("U_ORD"),
-            &symbol_short!("critical"),
-            &5,
-        );
+        client.calculate_sla(&stranger, &symbol_short!("U_ORD"), &symbol_short!("critical"), &5);
     }
 
     #[test]
@@ -362,12 +324,14 @@ mod event_ordering_tests {
         assert!(
             sat_pos < sla_pos,
             "stats_sat must precede sla_calc (got {} >= {})",
-            sat_pos, sla_pos
+            sat_pos,
+            sla_pos
         );
         assert!(
             sat_pos < set_pos,
             "stats_sat must precede set_int (got {} >= {})",
-            sat_pos, set_pos
+            sat_pos,
+            set_pos
         );
 
         // The saturation signal is emitted from inside increment_stats, so the

@@ -365,9 +365,14 @@ pub fn expected_page_len(offset: u32, limit: u32, len: u32) -> u32 {
 
 /// `has_more` as reported by `get_history_page_with_meta`.
 ///
-/// True exactly when the requested range stops before the end of history.
-/// Note that `limit == 0` with `offset < len` reports `true`: the cursor has
-/// not advanced, so entries do remain.
+/// Mirrors the contract implementation (lib.rs): True exactly when the
+/// requested range stops before the end of history **and** `limit > 0`. A
+/// `limit == 0` page is empty and signals that there is nothing further to
+/// advance to, so it reports `false`.
 pub fn expected_has_more(offset: u32, limit: u32, len: u32) -> bool {
-    expected_page_end(offset, limit, len) < len
+    if limit == 0 {
+        false
+    } else {
+        expected_page_end(offset, limit, len) < len
+    }
 }

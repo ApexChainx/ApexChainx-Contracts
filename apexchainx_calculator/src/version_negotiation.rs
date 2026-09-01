@@ -325,8 +325,8 @@ mod tests {
         let env = Env::default();
         let ifaces = version_discovery_interfaces(&env);
         assert_eq!(ifaces.len(), 3);
-        assert!(ifaces.contains(&Symbol::new(&env, "get_version_info")));
-        assert!(ifaces.contains(&Symbol::new(&env, "get_migration_state")));
+        assert!(ifaces.contains(Symbol::new(&env, "get_version_info")));
+        assert!(ifaces.contains(Symbol::new(&env, "get_migration_state")));
         assert!(ifaces.contains(&symbol_short!("is_paused")));
     }
 
@@ -334,7 +334,7 @@ mod tests {
     fn test_version_discovery_interfaces_match_actual_methods() {
         let env = Env::default();
         let ifaces = version_discovery_interfaces(&env);
-        
+
         // Verify each discovery symbol corresponds to an actual contract method
         // These are the exact method names exposed in the contract's public API
         let expected_methods = [
@@ -342,7 +342,7 @@ mod tests {
             Symbol::new(&env, "get_migration_state"),
             symbol_short!("is_paused"),
         ];
-        
+
         for expected_method in expected_methods.iter() {
             assert!(
                 ifaces.contains(expected_method),

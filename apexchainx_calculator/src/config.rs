@@ -4,12 +4,12 @@
 //! SLA configurations. It enforces validation, cross-severity ordering,
 //! and freeze-state gating for all config mutations.
 
-use soroban_sdk::{symbol_short, Env, Map, Symbol, Vec};
+use soroban_sdk::{Env, Map, Symbol, Vec};
 
 use crate::{
     config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
-    CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_REM, EVENT_CONFIG_UPD,
-    EVENT_SEV_ADD, EVENT_SEV_UPD, EVENT_VERSION,
+    CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_REM, EVENT_CONFIG_UPD, EVENT_SEV_ADD,
+    EVENT_SEV_UPD, EVENT_VERSION,
 };
 
 /// Sets the SLA configuration for a given severity level.
@@ -196,11 +196,7 @@ pub fn set_custom_severity(
     );
     env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
-    let event_name = if is_update {
-        EVENT_SEV_UPD
-    } else {
-        EVENT_SEV_ADD
-    };
+    let event_name = if is_update { EVENT_SEV_UPD } else { EVENT_SEV_ADD };
     env.events().publish(
         (event_name, EVENT_VERSION, severity),
         (threshold_minutes, penalty_per_minute, reward_base),

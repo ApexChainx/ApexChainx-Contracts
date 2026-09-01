@@ -11,13 +11,18 @@
 
 #[cfg(test)]
 mod payload_versioning_tests {
-    use soroban_sdk::{
-        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol,
-        TryIntoVal,
-    };
+    #![allow(
+        clippy::module_inception,
+        clippy::len_zero,
+        clippy::unnecessary_unwrap,
+        clippy::type_complexity
+    )]
     use crate::{
-        EVENT_SLA_CALC, EVENT_SETTLE_INTENT, EVENT_VERSION, SLACalculatorContract,
-        SLACalculatorContractClient,
+        SLACalculatorContract, SLACalculatorContractClient, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
+        EVENT_VERSION,
+    };
+    use soroban_sdk::{
+        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
     };
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -33,9 +38,11 @@ mod payload_versioning_tests {
     // ── sla_calc payload versioning ─────────────────────────────────────
 
     #[test]
-    fn test_sla_calc_payload_has_seven_fields() {
-        // sla_calc payload: (outage_id, status, payment_type, rating, mttr, threshold, amount)
-        // This is the canonical 7-field format. Adding fields would be backward-compatible.
+    fn test_sla_calc_payload_has_nine_fields() {
+        // sla_calc payload: (outage_id, status, mttr_minutes, threshold_minutes,
+        //   amount, payment_type, rating, config_version_hash, recorded_at)
+        // This is the canonical 9-field format (#429), shared with set_int and
+        // dup_input so indexers parse one layout.
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
@@ -54,21 +61,19 @@ mod payload_versioning_tests {
             }
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_SLA_CALC {
-                // Canonical 7-field payload must decode without error
-                let payload: Result<(Symbol, Symbol, Symbol, Symbol, u32, u32, i128), _> =
+                // Canonical 9-field payload must decode without error
+                let payload: Result<(Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64), _> =
                     data.try_into_val(&env);
-                assert!(
-                    payload.is_ok(),
-                    "sla_calc payload must decode as 7-field tuple"
-                );
-                let (outage_id, status, ptype, rating, mttr, threshold, amount) = payload.unwrap();
+                assert!(payload.is_ok(), "sla_calc payload must decode as 9-field tuple");
+                let (outage_id, status, mttr, threshold, amount, ptype, rating, _cfg, _recorded) =
+                    payload.unwrap();
                 assert_eq!(outage_id, symbol_short!("VERSION1"));
                 assert_eq!(status, symbol_short!("met"));
-                assert_eq!(ptype, symbol_short!("rew"));
-                assert_eq!(rating, symbol_short!("top"));
                 assert_eq!(mttr, 5u32);
                 assert_eq!(threshold, 15u32);
                 assert_eq!(amount, 1500i128);
+                assert_eq!(ptype, symbol_short!("rew"));
+                assert_eq!(rating, symbol_short!("top"));
                 return;
             }
         }
@@ -78,8 +83,11 @@ mod payload_versioning_tests {
     // ── set_int payload versioning ──────────────────────────────────────
 
     #[test]
-    fn test_settle_intent_payload_has_six_fields() {
-        // set_int payload: (outage_id, status, payment_type, amount, config_hash, recorded_at)
+    fn test_settle_intent_payload_has_nine_fields() {
+        // set_int payload carries the full decision, sharing the canonical
+        // 9-field (#429) layout with sla_calc:
+        //   (outage_id, status, mttr_minutes, threshold_minutes, amount,
+        //    payment_type, rating, config_version_hash, recorded_at)
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
@@ -98,13 +106,10 @@ mod payload_versioning_tests {
             }
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_SETTLE_INTENT {
-                // 6-field payload must decode without error
-                let payload: Result<(Symbol, Symbol, Symbol, i128, u64, u64), _> =
+                // 9-field payload must decode without error
+                let payload: Result<(Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64), _> =
                     data.try_into_val(&env);
-                assert!(
-                    payload.is_ok(),
-                    "set_int payload must decode as 6-field tuple"
-                );
+                assert!(payload.is_ok(), "set_int payload must decode as 9-field tuple");
                 return;
             }
         }
@@ -246,9 +251,9 @@ mod payload_versioning_tests {
             }
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_SLA_CALC {
-                let payload: (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) =
+                let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
                     data.try_into_val(&env).unwrap();
-                assert_eq!(payload.6, result.amount, "Event amount must match result");
+                assert_eq!(payload.4, result.amount, "Event amount must match result");
                 return;
             }
         }

@@ -240,7 +240,10 @@ mod tests {
 
         let updated_footprint = client.get_storage_footprint_estimate();
         assert!(updated_footprint > initial_footprint);
-        assert_eq!(updated_footprint, initial_footprint + (5 * BYTES_PER_HISTORY_ENTRY));
+        assert_eq!(
+            updated_footprint,
+            initial_footprint + (5 * BYTES_PER_HISTORY_ENTRY)
+        );
 
         let updated_rent = client.get_rent_estimate();
         assert!(updated_rent >= initial_rent);
@@ -250,16 +253,21 @@ mod tests {
     /// of real Soroban serialized sizes. This guards against encoding changes
     /// that would make the constants meaningless.
     #[test]
+    #[allow(clippy::assertions_on_constants)]
     fn test_byte_constants_are_reasonable() {
         // HISTORY_ENTRY: SLAResult has 9 fields — Symbol, Symbol, u32, u32,
         // i128, Symbol, Symbol, u64, u64. The i128 dominates at ~32 bytes,
         // Symbols at ~16 bytes each, u32 at ~8 bytes. Total ~120 is reasonable.
-        assert!(BYTES_PER_HISTORY_ENTRY >= 60 && BYTES_PER_HISTORY_ENTRY <= 300,
+        assert!(
+            BYTES_PER_HISTORY_ENTRY >= 60 && BYTES_PER_HISTORY_ENTRY <= 300,
             "BYTES_PER_HISTORY_ENTRY {} out of reasonable range [60, 300]",
-            BYTES_PER_HISTORY_ENTRY);
+            BYTES_PER_HISTORY_ENTRY
+        );
         // CUSTOM_SEVERITY: SLAConfig has 3 fields (u32, i128, i128) + Symbol key.
-        assert!(BYTES_PER_CUSTOM_SEVERITY >= 60 && BYTES_PER_CUSTOM_SEVERITY <= 300,
+        assert!(
+            BYTES_PER_CUSTOM_SEVERITY >= 60 && BYTES_PER_CUSTOM_SEVERITY <= 300,
             "BYTES_PER_CUSTOM_SEVERITY {} out of reasonable range [60, 300]",
-            BYTES_PER_CUSTOM_SEVERITY);
+            BYTES_PER_CUSTOM_SEVERITY
+        );
     }
 }

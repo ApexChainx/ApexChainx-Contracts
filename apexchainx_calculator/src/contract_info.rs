@@ -157,7 +157,7 @@ pub fn get_contract_info(env: &Env) -> Result<ContractInfo, SLAError> {
         contract_name: symbol_short!("sla_calc"),
         // #423 – derived from CARGO_PKG_VERSION, not a hand-maintained literal.
         contract_version: cargo_pkg_version_symbol(env),
-        storage_version: STORAGE_VERSION,
+        storage_version: stored_version,
         result_schema_version: RESULT_SCHEMA_VERSION,
         event_version: crate::event_schema::current_event_version(),
         needs_migration,
@@ -222,8 +222,10 @@ mod tests {
             assert_eq!(info.contract_version, cargo_pkg_version_symbol(&env));
             // And it differs from the dotted literal forever, so parity with
             // the package version is enforced (a bump changes this symbol).
-            assert_eq!(info.contract_version, expected_symbol,
-                "contract_version must stay in lockstep with CARGO_PKG_VERSION");
+            assert_eq!(
+                info.contract_version, expected_symbol,
+                "contract_version must stay in lockstep with CARGO_PKG_VERSION"
+            );
         });
     }
 

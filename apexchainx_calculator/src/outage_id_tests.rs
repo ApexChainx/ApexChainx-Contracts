@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod outage_id_tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+    #![allow(clippy::module_inception)]
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
@@ -19,12 +20,7 @@ mod outage_id_tests {
         let env = Env::default();
         let (_admin, _operator, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.calculate_sla(
-            &stranger,
-            &symbol_short!("U_OUT"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&stranger, &symbol_short!("U_OUT"), &symbol_short!("high"), &10);
     }
 
     #[test]
@@ -33,12 +29,7 @@ mod outage_id_tests {
         let env = Env::default();
         let (admin, _operator, client) = setup(&env);
         // admin holds the admin role, not the operator role
-        client.calculate_sla(
-            &admin,
-            &symbol_short!("U_ADMIN"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&admin, &symbol_short!("U_ADMIN"), &symbol_short!("high"), &10);
     }
 
     #[test]

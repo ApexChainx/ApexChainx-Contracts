@@ -421,9 +421,7 @@ mod tests {
             if fname == "event_schema.rs" || fname == "api_stability.rs" || !fname.ends_with(".rs") {
                 continue;
             }
-            sources.push(
-                std::fs::read_to_string(src_dir.join(&fname)).expect("cannot read source file"),
-            );
+            sources.push(std::fs::read_to_string(src_dir.join(&fname)).expect("cannot read source file"));
         }
 
         for (event_name, ident) in catalog {

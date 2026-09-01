@@ -472,7 +472,10 @@ fn config_check_invariants<'a>(client: &SLACalculatorContractClient<'a>) {
             && threshold_at(1) <= threshold_at(2)
             && threshold_at(2) <= threshold_at(3),
         "cross-severity threshold ordering violated: critical={} high={} medium={} low={}",
-        threshold_at(0), threshold_at(1), threshold_at(2), threshold_at(3)
+        threshold_at(0),
+        threshold_at(1),
+        threshold_at(2),
+        threshold_at(3)
     );
 
     let custom = client.get_custom_config_snapshot();

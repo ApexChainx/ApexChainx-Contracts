@@ -50,25 +50,25 @@ fn deploy() -> (Env, SLACalculatorContractClient<'static>, soroban_sdk::Address)
 /// documented in the `Storage Keys` block in `lib.rs`.
 ///
 /// Note: only the keys written eagerly by `initialize` are expected here.
-/// `PADMIN`/`POP` (pending transfers), `CUSTCFG` (custom severities),
-/// `PAUSEINF` (pause metadata), `RETLIM` (retention override), and
-/// `LCFGUPD` (config-update stamp) are created lazily on first use and must
-/// NOT exist after a fresh initialize.
+/// `PADMIN`/`POP` (pending transfers), `PAUSEINF` (pause metadata), `RETLIM`
+/// (retention override), and `LCFGUPD` (config-update stamp) are created
+/// lazily on first use and must NOT exist after a fresh initialize. `CUSTCFG`
+/// (custom severities) is seeded eagerly since #455, so it IS expected here.
 #[test]
 fn storage_key_count_is_stable_after_init() {
     let (env, client, _op) = deploy();
 
     // Keys written eagerly by initialize (see SLACalculatorContract::initialize
     // in lib.rs). Asserting presence pins the post-init footprint so accidental
-    // additions or removals are caught.
-    let eagerly_written: [&str; 12] = [
+    // additions or removals are caught. CUSTCFG is seeded eagerly since #455.
+    let eagerly_written: [&str; 13] = [
         "ADMIN", "OPERATOR", "CONFIG", "PAUSED", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST",
-        "HISTLEN", "VER",
+        "HISTLEN", "VER", "CUSTCFG",
     ];
 
     // Keys intentionally created lazily — they must be absent until the
     // corresponding feature is first exercised.
-    let lazily_created: [&str; 6] = ["PADMIN", "POP", "CUSTCFG", "PAUSEINF", "RETLIM", "LCFGUPD"];
+    let lazily_created: [&str; 5] = ["PADMIN", "POP", "PAUSEINF", "RETLIM", "LCFGUPD"];
 
     env.as_contract(&client.address, || {
         for key in eagerly_written {
@@ -305,8 +305,11 @@ fn calculate_sla_per_call_write_cost_at_max_history() {
         client.calculate_sla(&op, &oid, &soroban_sdk::symbol_short!("low"), &10);
     }
 
-    // Measure 10 calls at steady state (near 1000 entries)
-    env.budget().reset_default();
+    // Sample with an unbounded budget so the 10-call benchmark can complete;
+    // the cost gate below asserts the steady-state per-call cost stays under the
+    // 50M ceiling. (10 x per-call cost exceeds the default 100M host budget, so
+    // `reset_default()` would abort the sample loop before it finishes.)
+    env.budget().reset_unlimited();
     let before = env.budget().cpu_instruction_cost();
 
     for i in 0..10u32 {

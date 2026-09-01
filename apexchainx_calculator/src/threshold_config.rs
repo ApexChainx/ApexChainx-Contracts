@@ -44,13 +44,7 @@ mod threshold_tests {
         let env = Env::default();
         let (_admin, _operator, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.set_config(
-            &stranger,
-            &symbol_short!("low"),
-            &1,
-            &5,
-            &50,
-        );
+        client.set_config(&stranger, &symbol_short!("low"), &1, &5, &50);
     }
 
     #[test]
@@ -59,12 +53,7 @@ mod threshold_tests {
         let env = Env::default();
         let (admin, _operator, client) = setup(&env);
         // admin is not the operator
-        client.calculate_sla(
-            &admin,
-            &symbol_short!("THR_ADMIN"),
-            &symbol_short!("low"),
-            &1,
-        );
+        client.calculate_sla(&admin, &symbol_short!("THR_ADMIN"), &symbol_short!("low"), &1);
     }
 
     /// `set_config` with `threshold_minutes = 0` must be rejected with
@@ -82,13 +71,7 @@ mod threshold_tests {
         let env = Env::default();
         let (admin, _operator, client) = setup(&env);
 
-        let result = client.try_set_config(
-            &admin,
-            &symbol_short!("low"),
-            &0,
-            &10,
-            &600,
-        );
+        let result = client.try_set_config(&admin, &symbol_short!("low"), &0, &10, &600);
 
         assert_eq!(
             result,
@@ -108,13 +91,7 @@ mod threshold_tests {
         let before = client.get_config(&symbol_short!("low"));
 
         // Attempt the invalid write.
-        let _ = client.try_set_config(
-            &admin,
-            &symbol_short!("low"),
-            &0,
-            &10,
-            &600,
-        );
+        let _ = client.try_set_config(&admin, &symbol_short!("low"), &0, &10, &600);
 
         // The stored config must be identical to what it was before.
         let after = client.get_config(&symbol_short!("low"));
@@ -128,27 +105,16 @@ mod threshold_tests {
     fn test_near_zero_threshold_one_minute() {
         let env = Env::default();
         let (admin, operator, client) = setup(&env);
-        client.set_config(
-            &admin,
-            &symbol_short!("low"),
-            &1,
-            &5,
-            &50,
-        );
-        let met = client.calculate_sla(
-            &operator,
-            &symbol_short!("OUT2"),
-            &symbol_short!("low"),
-            &1,
-        );
+        // (#487) low.threshold must be >= medium, so lower all severities'
+        // thresholds to the 1-minute floor before setting low.
+        client.set_config(&admin, &symbol_short!("critical"), &1, &50, &500);
+        client.set_config(&admin, &symbol_short!("high"), &1, &50, &500);
+        client.set_config(&admin, &symbol_short!("medium"), &1, &50, &500);
+        client.set_config(&admin, &symbol_short!("low"), &1, &5, &50);
+        let met = client.calculate_sla(&operator, &symbol_short!("OUT2"), &symbol_short!("low"), &1);
         assert_eq!(met.status, symbol_short!("met"));
 
-        let viol = client.calculate_sla(
-            &operator,
-            &symbol_short!("OUT3"),
-            &symbol_short!("low"),
-            &2,
-        );
+        let viol = client.calculate_sla(&operator, &symbol_short!("OUT3"), &symbol_short!("low"), &2);
         assert_eq!(viol.status, symbol_short!("viol"));
     }
 }

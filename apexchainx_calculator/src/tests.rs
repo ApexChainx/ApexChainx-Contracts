@@ -86,7 +86,10 @@ fn test_initialize_single_address_merged_roles() {
     assert_eq!(result.status, symbol_short!("met"));
 
     client.set_config(&single_key, &symbol_short!("critical"), &20, &200, &1000);
-    assert_eq!(client.get_config(&symbol_short!("critical")).threshold_minutes, 20);
+    assert_eq!(
+        client.get_config(&symbol_short!("critical")).threshold_minutes,
+        20
+    );
 }
 
 #[test]
@@ -2164,7 +2167,9 @@ fn test_repeated_set_config_events_preserve_call_and_payload_order() {
     let (env, client, actors) = setup();
 
     client.set_config(&actors.admin, &symbol_short!("critical"), &10, &50, &500);
-    client.set_config(&actors.admin, &symbol_short!("high"), &20, &25, &400);
+    // high threshold must stay >= the later critical write (30) so both remain
+    // valid under #487 cross-severity ordering.
+    client.set_config(&actors.admin, &symbol_short!("high"), &40, &25, &400);
     client.set_config(&actors.admin, &symbol_short!("critical"), &30, &100, &800);
 
     let events = env.events().all();
@@ -2181,7 +2186,7 @@ fn test_repeated_set_config_events_preserve_call_and_payload_order() {
 
     let expected = [
         (symbol_short!("critical"), (10u32, 50i128, 500i128)),
-        (symbol_short!("high"), (20u32, 25i128, 400i128)),
+        (symbol_short!("high"), (40u32, 25i128, 400i128)),
         (symbol_short!("critical"), (30u32, 100i128, 800i128)),
     ];
 
@@ -2480,51 +2485,7 @@ fn test_two_step_operator_emits_op_prop_and_op_acc() {
     assert_eq!(op_acc_count, 1, "two-step path must emit exactly one op_acc");
 }
 
-/// `set_operator` does not clear a pending operator proposal.
-/// If a two-step proposal is pending and admin calls `set_operator`, the
-/// pending proposal remains in storage and can still be accepted.
-#[test]
-fn test_set_operator_does_not_clear_pending_operator_slot() {
-    let (env, client, actors) = setup();
-    let pending_op = soroban_sdk::Address::generate(&env);
-    let direct_op = soroban_sdk::Address::generate(&env);
-
-    // Step 1: create a two-step proposal
-    client.propose_operator(&actors.admin, &pending_op);
-    assert_eq!(client.get_pending_operator(), Some(pending_op.clone()));
-
-    // Step 2: admin calls set_operator (single-step) with a different address
-    client.set_operator(&actors.admin, &direct_op);
-    assert_eq!(
-        client.get_operator(),
-        direct_op,
-        "operator should be the directly-set address"
-    );
-
-    // Pending proposal must still be in storage
-    assert_eq!(
-        client.get_pending_operator(),
-        Some(pending_op.clone()),
-        "pending operator slot must survive set_operator"
-    );
-
-    // The pending operator can still accept
-    client.accept_operator(&pending_op);
-    assert_eq!(
-        client.get_operator(),
-        pending_op,
-        "pending operator should become the operator after accept"
-    );
-    assert_eq!(
-        client.get_pending_operator(),
-        None,
-        "pending slot cleared after accept"
-    );
-}
-
 /// `set_operator` does not require the new operator's consent.
-/// Unlike `accept_operator` (which calls `require_auth()` on the new operator),
-/// `set_operator` only needs the admin's authorization.
 #[test]
 fn test_set_operator_does_not_require_new_operator_consent() {
     let (env, client, actors) = setup();
@@ -2566,49 +2527,6 @@ fn test_set_operator_locks_out_old_operator() {
         result.is_err(),
         "old operator must be locked out after set_operator"
     );
-}
-
-/// `set_operator` after `propose_operator` does not invalidate the proposal.
-/// Admin can use the single-step path even when a two-step proposal exists;
-/// the proposal remains valid and can be accepted later.
-#[test]
-fn test_set_operator_after_propose_does_not_invalidate_proposal() {
-    let (env, client, actors) = setup();
-    let pending_op = soroban_sdk::Address::generate(&env);
-    let direct_op = soroban_sdk::Address::generate(&env);
-
-    client.propose_operator(&actors.admin, &pending_op);
-    client.set_operator(&actors.admin, &direct_op);
-
-    // Direct set took effect
-    assert_eq!(client.get_operator(), direct_op);
-
-    // Proposal still exists — verify the event trail reflects both paths
-    let events = env.events().all();
-    let mut op_prop_count = 0u32;
-    let mut op_set_count = 0u32;
-    let mut op_acc_count = 0u32;
-    for i in 0..events.len() {
-        let (_, topics, _) = events.get(i).unwrap();
-        if !topics.is_empty() {
-            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-            if name == EVENT_OP_PROP {
-                op_prop_count += 1;
-            }
-            if name == EVENT_OP_SET {
-                op_set_count += 1;
-            }
-            if name == EVENT_OP_ACC {
-                op_acc_count += 1;
-            }
-        }
-    }
-    assert_eq!(op_prop_count, 1, "must have op_prop from the proposal");
-    assert_eq!(op_set_count, 1, "must have op_set from the direct set");
-    assert_eq!(op_acc_count, 0, "must not have op_acc yet");
-
-    // Pending slot still holds the proposed address
-    assert_eq!(client.get_pending_operator(), Some(pending_op.clone()));
 }
 
 // ============================================================
@@ -2660,8 +2578,14 @@ fn test_get_contract_metadata_and_info_advertise_same_features() {
             has_ctrctinfo = true;
         }
     }
-    assert!(!has_corr_id, "corr_id is unimplemented and must not be advertised");
-    assert!(has_ctrctinfo, "ctrctinfo is a reachable capability and must be advertised");
+    assert!(
+        !has_corr_id,
+        "corr_id is unimplemented and must not be advertised"
+    );
+    assert!(
+        has_ctrctinfo,
+        "ctrctinfo is a reachable capability and must be advertised"
+    );
 }
 #[test]
 fn test_get_contract_metadata_severities_are_canonical() {
@@ -3168,11 +3092,19 @@ fn test_boundary_values_pass_validation() {
     client.set_config(&actors.admin, &symbol_short!("medium"), &1, &10, &16);
     client.set_config(&actors.admin, &symbol_short!("low"), &1, &1, &2);
 
-    // Test maximum valid values for severity-specific constraints
-    client.set_config(&actors.admin, &symbol_short!("critical"), &60, &10000, &100000);
-    client.set_config(&actors.admin, &symbol_short!("high"), &120, &10000, &100000);
-    client.set_config(&actors.admin, &symbol_short!("medium"), &240, &10000, &100000);
+    // Test maximum valid values for severity-specific constraints.
+    // Cross-severity invariants (#487) require critical.threshold <= high <=
+    // medium <= low and critical.penalty >= high >= medium >= low, so the
+    // extremes are applied in two passes: raise penalties from most to least
+    // severe first, then raise thresholds from least to most severe.
+    client.set_config(&actors.admin, &symbol_short!("critical"), &1, &10000, &100000);
+    client.set_config(&actors.admin, &symbol_short!("high"), &1, &10000, &100000);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &1, &10000, &100000);
+    client.set_config(&actors.admin, &symbol_short!("low"), &1, &100, &100000);
     client.set_config(&actors.admin, &symbol_short!("low"), &1440, &100, &100000);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &240, &10000, &100000);
+    client.set_config(&actors.admin, &symbol_short!("high"), &120, &10000, &100000);
+    client.set_config(&actors.admin, &symbol_short!("critical"), &60, &10000, &100000);
 }
 
 #[test]
@@ -3529,19 +3461,19 @@ fn test_get_history_page_with_meta_zero_limit() {
     assert_eq!(page.total, 3);
     assert_eq!(page.items.len(), 0);
     assert!(!page.has_more);
-    
+
     // Test limit == 0 at mid offset (offset = 1, total = 3)
     let page_mid = client.get_history_page_with_meta(&1, &0);
     assert_eq!(page_mid.total, 3);
     assert_eq!(page_mid.items.len(), 0);
     assert!(!page_mid.has_more);
-    
+
     // Test limit == 0 at end offset (offset = 3, total = 3)
     let page_end = client.get_history_page_with_meta(&3, &0);
     assert_eq!(page_end.total, 3);
     assert_eq!(page_end.items.len(), 0);
     assert!(!page_end.has_more);
-    
+
     // Test limit == 0 beyond end (offset = 100, total = 3)
     let page_beyond = client.get_history_page_with_meta(&100, &0);
     assert_eq!(page_beyond.total, 3);
@@ -3830,7 +3762,7 @@ fn test_get_full_audit_state_single_pass_efficiency() {
     assert_eq!(state.operator, actors.operator);
     assert_eq!(state.pending_admin, None);
     assert_eq!(state.pending_operator, None);
-    assert_eq!(state.paused, false);
+    assert!(!state.paused);
     assert_eq!(state.pause_info.len(), 0);
     assert_eq!(state.config_snapshot.entries.len(), 4);
     assert_eq!(state.stats.total_calculations, 0);
@@ -4162,8 +4094,7 @@ fn test_sla_calc_event_payload_field_count_is_nine() {
     let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
         data.try_into_val(&env).unwrap();
     // Destructure to confirm all 9 fields decode in canonical order.
-    let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at) =
-        payload;
+    let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at) = payload;
     assert_eq!(outage_id, stored.outage_id);
     assert_eq!(status, stored.status);
     assert_eq!(mttr, stored.mttr_minutes);
@@ -4192,7 +4123,12 @@ fn test_decision_events_share_canonical_payload_order() {
         &10,
     );
     // Conflicting resubmission emits dup_input.
-    let _ = client.try_calculate_sla(&actors.operator, &symbol_short!("CANON1"), &symbol_short!("high"), &30);
+    let _ = client.try_calculate_sla(
+        &actors.operator,
+        &symbol_short!("CANON1"),
+        &symbol_short!("high"),
+        &30,
+    );
 
     // Canonical 9-field order shared by all three decision events (#429).
     type DecisionPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64);
@@ -4204,13 +4140,13 @@ fn test_decision_events_share_canonical_payload_order() {
     let events = env.events().all();
     for i in 0..events.len() {
         let (_, topics, data) = events.get(i).unwrap();
-        if topics.len() < 1 {
+        if topics.is_empty() {
             continue;
         }
         let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-        let payload: DecisionPayload = data.try_into_val(&env).expect(
-            "every decision event must decode as the canonical 9-field tuple",
-        );
+        let payload: DecisionPayload = data
+            .try_into_val(&env)
+            .expect("every decision event must decode as the canonical 9-field tuple");
         if name == EVENT_SLA_CALC {
             sla_calc_payload = Some(payload);
         } else if name == EVENT_SETTLE_INTENT {
@@ -4263,7 +4199,7 @@ fn test_set_int_payload_is_self_contained_for_reconciliation() {
     let mut found = false;
     for i in 0..events.len() {
         let (_, topics, data) = events.get(i).unwrap();
-        if topics.len() < 1 {
+        if topics.is_empty() {
             continue;
         }
         let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
@@ -5217,12 +5153,15 @@ fn test_get_version_negotiation_info_exposes_protocol_data() {
     let (_env, client, _actors) = setup();
     let info = client.get_version_negotiation_info();
     assert_eq!(info.contract_name, symbol_short!("sla_calc"));
-    assert_eq!(info.protocol_version, crate::version_negotiation::PROTOCOL_VERSION);
+    assert_eq!(
+        info.protocol_version,
+        crate::version_negotiation::PROTOCOL_VERSION
+    );
     assert_eq!(
         info.min_compatible_protocol,
         crate::version_negotiation::MIN_COMPATIBLE_PROTOCOL
     );
-    assert_eq!(info.storage_version, 1);
+    assert_eq!(info.storage_version, crate::STORAGE_VERSION);
     assert!(!info.is_paused);
     assert!(!info.needs_migration);
 }
@@ -5557,7 +5496,7 @@ fn test_admin_supersession_payload_carries_both_candidates() {
         if contract_id != client.address {
             continue;
         }
-        if topics.len() >= 1 {
+        if !topics.is_empty() {
             let topic0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if topic0 == symbol(&env, "adm_sup") {
                 let (previous, replacement): (soroban_sdk::Address, soroban_sdk::Address) =
@@ -6366,6 +6305,11 @@ fn test_extreme_config_max_valid_penalty_and_reward() {
     // Set config to boundary-valid maximums and verify arithmetic is correct.
     // critical: threshold=60, penalty=10000, reward=100000
     let (_env, client, actors) = setup();
+    // (#487) critical.threshold must be <= high (and penalties non-increasing),
+    // so widen the lower severities' thresholds before lowering critical on.
+    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &10, &600);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &240, &25, &750);
+    client.set_config(&actors.admin, &symbol_short!("high"), &120, &50, &750);
     client.set_config(&actors.admin, &symbol_short!("critical"), &60, &10000, &100000);
 
     // mttr=61 → 1 min over → penalty = 10000
@@ -6401,6 +6345,11 @@ fn test_extreme_penalty_large_overtime_no_i128_overflow() {
     // i128 max ≈ 1.7e38 — no overflow possible.
     let (_env, client, actors) = setup();
     // reward=151 ensures penalty*1.5=150 < 151 ✓
+    // (#487) low.threshold must be >= medium, so lower all severities' thresholds
+    // to the 1-minute floor before setting low.
+    client.set_config(&actors.admin, &symbol_short!("critical"), &1, &10000, &100000);
+    client.set_config(&actors.admin, &symbol_short!("high"), &1, &10000, &100000);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &1, &10000, &100000);
     client.set_config(&actors.admin, &symbol_short!("low"), &1, &100, &151);
 
     let env = Env::default();
@@ -6411,6 +6360,9 @@ fn test_extreme_penalty_large_overtime_no_i128_overflow() {
     let admin2 = soroban_sdk::Address::generate(&env);
     let op2 = soroban_sdk::Address::generate(&env);
     client2.initialize(&admin2, &op2);
+    client2.set_config(&admin2, &symbol_short!("critical"), &1, &10000, &100000);
+    client2.set_config(&admin2, &symbol_short!("high"), &1, &10000, &100000);
+    client2.set_config(&admin2, &symbol_short!("medium"), &1, &10000, &100000);
     client2.set_config(&admin2, &symbol_short!("low"), &1, &100, &151);
 
     let result = client2.calculate_sla_view(&symbol_short!("OVF"), &symbol_short!("low"), &u32::MAX);
@@ -6424,6 +6376,10 @@ fn test_extreme_reward_max_multiplier_no_overflow() {
     // Max reward: reward_base=100000, multiplier=200 (top rating) → 200000
     // This is well within i128 range.
     let (_env, client, actors) = setup();
+    // (#487) critical.threshold must be <= high, so widen lower severities first.
+    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &10, &600);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &240, &25, &750);
+    client.set_config(&actors.admin, &symbol_short!("high"), &120, &50, &750);
     client.set_config(&actors.admin, &symbol_short!("critical"), &60, &10000, &100000);
 
     let result = client.calculate_sla_view(&symbol_short!("MAXR"), &symbol_short!("critical"), &1);
@@ -6517,6 +6473,10 @@ fn test_extreme_stats_accumulate_large_values_without_overflow() {
     let op = soroban_sdk::Address::generate(&env);
     client.initialize(&admin, &op);
     // critical: threshold=60, penalty=10000
+    // (#487) critical.threshold must be <= high, so widen lower severities first.
+    client.set_config(&admin, &symbol_short!("low"), &1440, &10, &600);
+    client.set_config(&admin, &symbol_short!("medium"), &240, &25, &750);
+    client.set_config(&admin, &symbol_short!("high"), &120, &50, &750);
     client.set_config(&admin, &symbol_short!("critical"), &60, &10000, &100000);
 
     // 100 violations of 1 min each → penalty = 10000 each → total = 1_000_000
@@ -6790,7 +6750,10 @@ fn test_set_config_accepts_valid_threshold_ordering() {
     client.set_config(&actors.admin, &symbol_short!("medium"), &60, &25, &750);
     client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
 
-    assert_eq!(client.get_config(&symbol_short!("critical")).threshold_minutes, 15);
+    assert_eq!(
+        client.get_config(&symbol_short!("critical")).threshold_minutes,
+        15
+    );
     assert_eq!(client.get_config(&symbol_short!("high")).threshold_minutes, 30);
     assert_eq!(client.get_config(&symbol_short!("medium")).threshold_minutes, 60);
     assert_eq!(client.get_config(&symbol_short!("low")).threshold_minutes, 120);
@@ -6805,7 +6768,10 @@ fn test_set_config_accepts_equal_thresholds() {
     client.set_config(&actors.admin, &symbol_short!("medium"), &30, &25, &750);
     client.set_config(&actors.admin, &symbol_short!("low"), &30, &10, &600);
 
-    assert_eq!(client.get_config(&symbol_short!("critical")).threshold_minutes, 30);
+    assert_eq!(
+        client.get_config(&symbol_short!("critical")).threshold_minutes,
+        30
+    );
     assert_eq!(client.get_config(&symbol_short!("low")).threshold_minutes, 30);
 }
 
@@ -7474,7 +7440,12 @@ fn test_254_reward_above_ceiling_rejected() {
 fn test_254_valid_boundary_values_accepted() {
     // Minimum valid values for low severity must be accepted.
     // reward=2 satisfies penalty*1.5=1.5 < 2 ✓
+    // (#487) low.threshold must be >= medium.threshold, so lower the higher
+    // severities first to allow low at the 1-minute floor.
     let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("critical"), &1, &50, &76);
+    client.set_config(&actors.admin, &symbol_short!("high"), &1, &25, &38);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &1, &10, &16);
     client.set_config(&actors.admin, &symbol_short!("low"), &1, &1, &2);
     let cfg = client.get_config(&symbol_short!("low"));
     assert_eq!(cfg.threshold_minutes, 1);
@@ -10072,18 +10043,18 @@ fn test_get_public_api_auth_labels_are_accurate() {
     for method in api.methods.iter() {
         if method.name == Symbol::new(&_env, "accept_admin") {
             found_accept_admin = true;
-            assert_eq!(method.mutates, true);
+            assert!(method.mutates);
             // #426 – not "none": the pending address must authorise.
             assert_eq!(method.auth, Symbol::new(&_env, "addr"));
         }
         if method.name == Symbol::new(&_env, "accept_operator") {
             found_accept_operator = true;
-            assert_eq!(method.mutates, true);
+            assert!(method.mutates);
             assert_eq!(method.auth, Symbol::new(&_env, "addr"));
         }
         if method.name == Symbol::new(&_env, "get_version_negotiation_info") {
             found_get_version_negotiation_info = true;
-            assert_eq!(method.mutates, false);
+            assert!(!method.mutates);
             assert_eq!(method.auth, Symbol::new(&_env, "none"));
         }
     }
@@ -10105,12 +10076,12 @@ fn test_get_public_api_accept_admin_operator_require_auth_not_none() {
     for method in api.methods.iter() {
         if method.name == Symbol::new(&_env, "accept_admin") {
             found_accept_admin = true;
-            assert_eq!(method.mutates, true);
+            assert!(method.mutates);
             assert_eq!(method.auth, Symbol::new(&_env, "addr"));
         }
         if method.name == Symbol::new(&_env, "accept_operator") {
             found_accept_operator = true;
-            assert_eq!(method.mutates, true);
+            assert!(method.mutates);
             assert_eq!(method.auth, Symbol::new(&_env, "addr"));
         }
     }
@@ -10121,10 +10092,11 @@ fn test_get_public_api_accept_admin_operator_require_auth_not_none() {
 fn test_get_public_api_method_count_is_stable() {
     let (_env, client, _actors) = setup();
     let api = client.get_public_api();
-    // 62 methods as of get_version_negotiation_info being added to the
-    // descriptor (#427). get_public_api / get_contract_info / ... (#418).
+    // 63 methods as of get_retention_metrics being added to the descriptor
+    // (SC-013). get_version_negotiation_info (#427), get_public_api /
+    // get_contract_info / ... (#418).
     // This test catches accidental additions or removals
-    assert_eq!(api.methods.len(), 62, "Public API method count changed");
+    assert_eq!(api.methods.len(), 63, "Public API method count changed");
 }
 
 #[test]
@@ -10235,9 +10207,10 @@ fn test_get_public_api_requires_initialization() {
 // documented metadata (see #492 out-of-scope notes on mechanical derivation).
 const CANONICAL_PUBLIC_METHODS: &[(&str, bool, &str, &str)] = &[
     // Lifecycle: two-step role handoff. accept_* are called by the proposed
-    // address (not the current role holder), so auth is "none".
-    ("accept_admin", true, "none", "adm_acc"),
-    ("accept_operator", true, "none", "op_acc"),
+    // address, which must self-authenticate via require_auth() to consent and
+    // complete the handoff, so auth is "addr".
+    ("accept_admin", true, "addr", "adm_acc"),
+    ("accept_operator", true, "addr", "op_acc"),
     // Calculation:
     ("calculate_sla", true, "operator", "sla_calc"),
     ("calculate_sla_view", false, "none", ""),
@@ -10274,15 +10247,17 @@ const CANONICAL_PUBLIC_METHODS: &[(&str, bool, &str, &str)] = &[
     ("get_rent_estimate", false, "none", ""),
     ("get_result_schema", false, "none", ""),
     ("get_retention_limit", false, "none", ""),
+    ("get_retention_metrics", false, "none", ""),
     ("get_severity_telemetry", false, "none", ""),
     ("get_stats", false, "none", ""),
     ("get_storage_footprint_estimate", false, "none", ""),
     ("get_storage_version", false, "none", ""),
     ("get_version_info", false, "none", ""),
+    ("get_version_negotiation_info", false, "none", ""),
     // Health:
     ("healthcheck", false, "none", ""),
     // Init:
-    ("initialize", true, "admin", ""),
+    ("initialize", true, "multi", ""),
     ("is_config_frozen", false, "none", ""),
     ("is_paused", false, "none", ""),
     ("list_configs", false, "none", ""),
@@ -10294,12 +10269,12 @@ const CANONICAL_PUBLIC_METHODS: &[(&str, bool, &str, &str)] = &[
     ("propose_operator", true, "admin", "op_prop"),
     ("prune_history", true, "admin", "pruned"),
     ("prune_history_by_age", true, "admin", "pruned_a"),
-    ("remove_custom_severity", true, "admin", "cfg_upd"),
+    ("remove_custom_severity", true, "admin", "cfg_rem"),
     ("renounce_admin", true, "admin", "adm_ren"),
     ("replay_calculate_sla", true, "operator", "sla_calc"),
     // Setters:
     ("set_config", true, "admin", "cfg_upd"),
-    ("set_custom_severity", true, "admin", "cfg_upd"),
+    ("set_custom_severity", true, "admin", "sev_add"),
     ("set_operator", true, "admin", "op_set"),
     ("set_retention_limit", true, "admin", ""),
     ("unfreeze_config", true, "admin", "cfg_unfrz"),

@@ -641,11 +641,15 @@ fn generate_ts_parity_fixtures() {
     // one keeps. Walking the cases in descending `min_age` order therefore
     // yields exactly what a freshly seeded contract would return for each,
     // without re-seeding 250 results per case.
+    //
+    // The contract rejects `min_age >= now` (InvalidInput), so the "retain
+    // everything" case is expressed with a large-but-valid age instead of
+    // `u64::MAX`.
     let newest = FIRST_TIMESTAMP + u64::from(HISTORY_ENTRIES - 1) * TIMESTAMP_STEP;
     let admin = client.get_admin();
     env.ledger().set_timestamp(newest);
     let mut prune_cases = StdVec::new();
-    for min_age_seconds in [u64::MAX, 15_000, 3_600, 600, 0] {
+    for min_age_seconds in [newest - 1, 15_000, 3_600, 600, 0] {
         env.budget().reset_unlimited();
         client.prune_history_by_age(&admin, &min_age_seconds);
         let kept = client.get_history_page_with_meta(&0, &1).total;

@@ -56,6 +56,8 @@ export const EVENT_TOPICS = {
   duplicateInput: "dup_input",
   configUpdated: "cfg_upd",
   configRemoved: "cfg_rem",
+  severityAdded: "sev_add",
+  severityUpdated: "sev_upd",
   pruned: "pruned",
   prunedByAge: "pruned_a",
   retentionLimitSet: "ret_lim",

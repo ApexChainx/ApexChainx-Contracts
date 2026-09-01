@@ -225,7 +225,7 @@ mod tests {
     #[test]
     fn test_config_snapshot_schema_field_count_sentinel() {
         use crate::SLAConfigSnapshot;
-        use soroban_sdk::{symbol_short, Env, Vec};
+        use soroban_sdk::{Env, Vec};
 
         let env = Env::default();
         let sample = SLAConfigSnapshot {
@@ -258,12 +258,19 @@ mod tests {
     #[test]
     fn test_multi_arm_migration_chaining_and_idempotency() {
         use crate::STORAGE_VERSION;
-        let (env, client) = setup();
-
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &cid);
         let admin = soroban_sdk::Address::generate(&env);
+        let operator = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin, &operator);
 
-        // 1. Synthesize a v0 contract state by resetting STORAGE_VERSION_KEY to 0
-        env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &0u32);
+        // 1. Synthesize a v0 contract state by resetting STORAGE_VERSION_KEY to 0.
+        //    The write must run inside a contract call frame, hence as_contract.
+        env.as_contract(&cid, || {
+            env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &0u32);
+        });
 
         // Verify pre-migration state reports needs_migration = true
         let mig_state = client.get_migration_state();
@@ -282,7 +289,10 @@ mod tests {
 
         // 4. Idempotency test: calling migrate() again when already current is a safe no-op
         let retry_result = client.try_migrate(&admin);
-        assert!(retry_result.is_ok(), "second migrate() call must be a safe idempotent no-op");
+        assert!(
+            retry_result.is_ok(),
+            "second migrate() call must be a safe idempotent no-op"
+        );
         let retry_state = client.get_migration_state();
         assert_eq!(retry_state.stored_version, STORAGE_VERSION);
         assert!(!retry_state.needs_migration);

@@ -31,7 +31,7 @@ use crate::{
     SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT,
     EVENT_SLA_CALC, EVENT_VERSION, HISTORY_KEY, HISTORY_LEN_KEY, LAST_CALCULATION_TS_KEY,
     LAST_VIOLATION_TS_KEY, MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY,
-    SEVERITY_CALC_COUNTS_KEY, SEVERITY_VIOL_COUNTS_KEY, STATS_KEY,
+    SEVERITY_CALC_COUNTS_KEY, SEVERITY_VIOL_COUNTS_KEY, STATS_KEY, TOTAL_ENTRIES_KEY,
 };
 
 /// Calculate the SLA outcome for an outage event (delegated implementation).
@@ -116,11 +116,7 @@ pub fn calculate_sla(
     history.push_back(result.clone());
 
     // #461 – track total entries ever stored
-    let prev_total: u32 = env
-        .storage()
-        .instance()
-        .get(&TOTAL_ENTRIES_KEY)
-        .unwrap_or(0);
+    let prev_total: u32 = env.storage().instance().get(&TOTAL_ENTRIES_KEY).unwrap_or(0);
     env.storage()
         .instance()
         .set(&TOTAL_ENTRIES_KEY, &prev_total.saturating_add(1));
@@ -247,12 +243,6 @@ fn require_not_paused(env: &Env) -> Result<(), SLAError> {
     Ok(())
 }
 
-/// Maximum allowed MTTR in minutes to prevent arithmetic overflow.
-/// This conservative bound ensures that even with maximum penalty rates,
-/// the calculation cannot overflow i128. 
-/// 525,600 minutes = 365 days, well beyond any realistic outage duration.
-const MAX_MTTR_MINUTES: u32 = 525_600;
-
 /// Computes the SLA result (met/violated, reward/penalty, rating) from inputs.
 /// Pure function — no state reads or writes.
 pub fn compute_result(
@@ -263,11 +253,6 @@ pub fn compute_result(
     recorded_at: u64,
 ) -> Result<SLAResult, SLAError> {
     let threshold = cfg.threshold_minutes;
-    
-    // Validate input range before computation to provide clear error messages
-    if mttr_minutes > MAX_MTTR_MINUTES {
-        return Err(SLAError::InvalidInput);
-    }
 
     if mttr_minutes > threshold {
         let overtime = (mttr_minutes - threshold) as i128;

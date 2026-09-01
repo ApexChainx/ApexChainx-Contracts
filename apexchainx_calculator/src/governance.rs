@@ -1,4 +1,4 @@
-//! Two-step admin and operator transfer governance.//! 
+//! Two-step admin and operator transfer governance.//!
 //! This module implements the two-step handoff pattern for admin and operator
 //! role transfers, plus admin renounce and single-step operator assignment.
 //! All functions require the appropriate role authorization and emit versioned
@@ -69,9 +69,8 @@ use soroban_sdk::{Address, Env, Symbol};
 
 use crate::{
     SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN,
-    EVENT_ADMIN_SUP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_OP_SUP,
-    EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, PENDING_OP_KEY,
-    PENDING_OP_TS_KEY,
+    EVENT_ADMIN_SUP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_OP_SUP, EVENT_VERSION,
+    OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, PENDING_OP_KEY, PENDING_OP_TS_KEY,
 };
 
 /// Window (in ledger seconds) after which a pending proposal expires.

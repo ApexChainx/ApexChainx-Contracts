@@ -31,6 +31,8 @@
     "duplicateInput": "dup_input",
     "configUpdated": "cfg_upd",
     "configRemoved": "cfg_rem",
+    "severityAdded": "sev_add",
+    "severityUpdated": "sev_upd",
     "pruned": "pruned",
     "prunedByAge": "pruned_a",
     "retentionLimitSet": "ret_lim"
@@ -452,7 +454,7 @@
       "limit": 0,
       "pageLength": 0,
       "total": 250,
-      "hasMore": true,
+      "hasMore": false,
       "firstMttr": null,
       "lastMttr": null
     },
@@ -461,7 +463,7 @@
       "limit": 0,
       "pageLength": 0,
       "total": 250,
-      "hasMore": true,
+      "hasMore": false,
       "firstMttr": null,
       "lastMttr": null
     },
@@ -500,7 +502,7 @@
   "pruneByAgeCases": [
     {
       "now": "1700014940",
-      "minAgeSeconds": "18446744073709551615",
+      "minAgeSeconds": "1700014939",
       "keptCount": 250
     },
     {

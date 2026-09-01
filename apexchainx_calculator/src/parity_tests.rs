@@ -695,7 +695,13 @@ fn setup_and_hash(
     let operator = Address::generate(&env);
     client.initialize(&admin, &operator);
 
-    client.set_config(&admin, &symbol_short!("critical"), &critical.0, &critical.1, &critical.2);
+    client.set_config(
+        &admin,
+        &symbol_short!("critical"),
+        &critical.0,
+        &critical.1,
+        &critical.2,
+    );
     client.set_config(&admin, &symbol_short!("high"), &high.0, &high.1, &high.2);
     client.set_config(&admin, &symbol_short!("medium"), &medium.0, &medium.1, &medium.2);
     client.set_config(&admin, &symbol_short!("low"), &low.0, &low.1, &low.2);
@@ -719,18 +725,20 @@ fn setup_and_hash(
 #[test]
 fn parity_config_hash_default_config() {
     let (_env, hash) = setup_and_hash(
-        (15, 100, 750),   // critical
-        (30, 50, 750),    // high
-        (60, 25, 750),    // medium
-        (120, 10, 600),   // low
+        (15, 100, 750), // critical
+        (30, 50, 750),  // high
+        (60, 25, 750),  // medium
+        (120, 10, 600), // low
     );
 
     // Golden vector: the expected hash for the default config.
     // If this changes, verify the change is intentional (algorithm or config
     // change), update this constant, and record in CHANGELOG.md.
     const EXPECTED_HASH: u64 = 1_417_728_228_875_630_226;
-    assert_eq!(hash, EXPECTED_HASH,
-        "config_version_hash diverged for default config — update the golden vector if intentional");
+    assert_eq!(
+        hash, EXPECTED_HASH,
+        "config_version_hash diverged for default config — update the golden vector if intentional"
+    );
 }
 
 /// Config version hash for an alternate config set.
@@ -746,28 +754,28 @@ fn parity_config_hash_default_config() {
 #[test]
 fn parity_config_hash_alternate_config() {
     let (_env, hash) = setup_and_hash(
-        (30, 150, 1000),  // critical
-        (60, 75, 1000),   // high
-        (120, 35, 1000),  // medium
-        (240, 15, 800),   // low
+        (30, 150, 1000), // critical
+        (60, 75, 1000),  // high
+        (120, 35, 1000), // medium
+        (240, 15, 800),  // low
     );
 
     const EXPECTED_HASH: u64 = 4_112_096_853_087_571_798;
-    assert_eq!(hash, EXPECTED_HASH,
-        "config_version_hash diverged for alternate config — update the golden vector if intentional");
+    assert_eq!(
+        hash, EXPECTED_HASH,
+        "config_version_hash diverged for alternate config — update the golden vector if intentional"
+    );
 }
 
 /// The two config hashes must differ (proves the hash is not constant).
 #[test]
 fn parity_config_hash_differs_across_configs() {
-    let (_, hash_default) = setup_and_hash(
-        (15, 100, 750), (30, 50, 750), (60, 25, 750), (120, 10, 600),
+    let (_, hash_default) = setup_and_hash((15, 100, 750), (30, 50, 750), (60, 25, 750), (120, 10, 600));
+    let (_, hash_alt) = setup_and_hash((30, 150, 1000), (60, 75, 1000), (120, 35, 1000), (240, 15, 800));
+    assert_ne!(
+        hash_default, hash_alt,
+        "config_version_hash must differ for different configs — hash is ignoring its inputs"
     );
-    let (_, hash_alt) = setup_and_hash(
-        (30, 150, 1000), (60, 75, 1000), (120, 35, 1000), (240, 15, 800),
-    );
-    assert_ne!(hash_default, hash_alt,
-        "config_version_hash must differ for different configs — hash is ignoring its inputs");
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

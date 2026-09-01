@@ -57,12 +57,7 @@ mod pruning_perf_tests {
         // admin holds the admin role but not the operator role
         let env = Env::default();
         let (admin, _operator, client) = setup_with_history(&env, 0);
-        client.calculate_sla(
-            &admin,
-            &symbol_short!("PR_ADMIN"),
-            &symbol_short!("high"),
-            &1,
-        );
+        client.calculate_sla(&admin, &symbol_short!("PR_ADMIN"), &symbol_short!("high"), &1);
     }
 
     #[test]
@@ -94,12 +89,7 @@ mod pruning_perf_tests {
         let env = Env::default();
         let (admin, operator, client) = setup_with_history(&env, 30);
         client.prune_history(&admin, &12);
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("OUT"),
-            &symbol_short!("high"),
-            &5,
-        );
+        client.calculate_sla(&operator, &symbol_short!("OUT"), &symbol_short!("high"), &5);
         client.prune_history(&admin, &10);
     }
 
@@ -108,12 +98,7 @@ mod pruning_perf_tests {
         let env = Env::default();
         let (_admin, operator, client) = setup_with_history(&env, 1);
         for _ in 0..20 {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("OUT"),
-                &symbol_short!("high"),
-                &10,
-            );
+            client.calculate_sla(&operator, &symbol_short!("OUT"), &symbol_short!("high"), &10);
         }
     }
 }
