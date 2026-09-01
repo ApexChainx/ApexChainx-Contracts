@@ -21,11 +21,11 @@
  *   - `end = min(offset + limit, total)` is computed with saturating
  *     arithmetic on the contract side, so extreme `u32` inputs clamp rather
  *     than wrap. The JavaScript mirror gets this for free from `Math.min`.
- *   - `hasMore` is `end < total` — true exactly when the requested range stops
- *     before the end of history. Note that `limit === 0` with `offset < total`
- *     reports `hasMore: true`: the cursor has not advanced, so entries do
- *     remain. Iterating with `offset += entries.length` therefore only
- *     terminates for a non-zero limit.
+ *   - `hasMore` is `end < total` for a non-zero limit — true exactly when the
+ *     requested range stops before the end of history. A zero limit is a
+ *     degenerate request: it returns an empty page and reports `hasMore:
+ *     false`. Iterating with `offset += entries.length` therefore only
+ *     advances for a non-zero limit.
  *
  * `MAX_PAGE_SIZE` is imported, never re-declared — see `contractSemantics.ts`.
  * This file previously hard-coded 50, which silently truncated every backend
@@ -61,7 +61,7 @@ export interface HistoryPage {
  * @param history - full append-only history array (oldest first)
  * @param offset  - 0-based start index; at or past the end yields an empty page
  * @param limit   - requested page size; clamped to `MAX_PAGE_SIZE`, `0` yields
- *                  an empty page
+ *                  an empty page that reports no more
  */
 export function getHistoryPage(
   history: HistoryEntry[],
@@ -84,8 +84,9 @@ export function getHistoryPage(
     entries,
     offset: safeOffset,
     total,
-    // `end < total`, not `offset + entries.length < total`: the two differ
-    // exactly when `limit === 0`, where the contract reports `true`.
-    hasMore: end < total,
+    // `limit > 0 && end < total`, not `end < total || offset + entries.length
+    // < total`: the first differs exactly when `limit === 0`, where the
+    // contract reports `false`.
+    hasMore: limit > 0 && end < total,
   };
 }

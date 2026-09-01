@@ -247,16 +247,17 @@ test("a limit above MAX_PAGE_SIZE is clamped, not honoured", () => {
   }
 });
 
-test("limit 0 yields an empty page that still reports more to come", () => {
+test("limit 0 yields an empty page and reports no more", () => {
   const zeroLimit = FIXTURE.paginationCases.filter(
     (c) => c.limit === 0 && c.offset < c.total,
   );
   assert.ok(zeroLimit.length > 0, "fixture must probe limit === 0");
   for (const expected of zeroLimit) {
-    // This is the case a `hasMore: offset + entries.length < total` mirror gets
-    // wrong, and the case a `Math.max(1, limit)` mirror gets wrong twice.
+    // The contract treats limit == 0 as a degenerate request: an empty page
+    // that never reports more (has_more is false). A `offset + entries.length
+    // < total` mirror and a `Math.max(1, limit)` mirror both get this wrong.
     assert.equal(expected.pageLength, 0);
-    assert.equal(expected.hasMore, true);
+    assert.equal(expected.hasMore, false);
   }
 });
 
@@ -314,13 +315,20 @@ test("pruneByMinAge reproduces the contract's retained-set sizes", () => {
   }
 });
 
-test("a min age larger than the ledger timestamp keeps everything", () => {
-  // u64::MAX would underflow a naive `now - minAge`; the contract saturates.
-  const saturating = FIXTURE.pruneByAgeCases.find(
-    (c) => BigInt(c.minAgeSeconds) > BigInt(c.now),
+test("min age just below the ledger timestamp keeps the full history", () => {
+  // The contract rejects min_age >= now as InvalidInput, so the largest probed
+  // min-age (strictly below `now`) must still retain every entry.
+  const cases = FIXTURE.pruneByAgeCases;
+  assert.ok(cases.length > 0, "fixture must probe prune-by-age cases");
+  const currentLedger = BigInt(cases[0].now);
+  const largestValid = cases.reduce((a, b) =>
+    BigInt(a.minAgeSeconds) > BigInt(b.minAgeSeconds) ? a : b,
   );
-  assert.ok(saturating, "fixture must probe a saturating min age");
-  assert.equal(saturating!.keptCount, FIXTURE.constants.historyEntries);
+  assert.ok(
+    BigInt(largestValid.minAgeSeconds) < currentLedger,
+    "fixture must probe a min age strictly below the ledger timestamp",
+  );
+  assert.equal(largestValid.keptCount, FIXTURE.constants.historyEntries);
 });
 
 // ─── Config version hash ────────────────────────────────────────────────────
