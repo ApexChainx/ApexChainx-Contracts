@@ -323,8 +323,25 @@ jobs:
       - name: Run event-size regression checks
         run: npx tsx offchain/eventSizeRegression.ts
 
-      - name: Run read-cost regression checks
+      - name: Run read-cost regression checks (baseline-gated)
         run: npx tsx offchain/readCostRegression.ts
+
+      # Issue #614: publish the before/after read-cost measurements so a
+      # regression that sneaks past (or the budget that saved us) is diffable
+      # in the build artifacts instead of living only in the log line.
+      - name: Upload read-cost measurements (before/after)
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-cost-measurements
+          path: offchain/readCostMeasurements.json
+          retention-days: 30
+
+      - name: Upload read-cost baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-cost-baseline
+          path: offchain/readCostBaseline.json
+          retention-days: 30
 
       - name: Run governance consistency checks
         run: npx tsx offchain/governanceConsistency.ts
