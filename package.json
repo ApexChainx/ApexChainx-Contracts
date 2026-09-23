@@ -4,12 +4,12 @@
   "private": true,
   "description": "ApexChainx smart contract tooling — TypeScript scripts for CI, testing, and release validation",
   "scripts": {
-    "test": "tsx --test scripts/release-replay.test.ts ts/parity/readSemanticsParity.test.ts",
-    "test:all": "tsx --test tests/*.test.ts scripts/release-replay.test.ts ts/parity/readSemanticsParity.test.ts",
-    "test:property": "tsx --test tests/*.test.ts",
+    "test": "tsx scripts/run-ts-tests.ts all",
+    "test:all": "tsx scripts/run-ts-tests.ts all",
+    "test:property": "tsx scripts/run-ts-tests.ts property",
     "test:offchain": "tsx offchain/eventSizeRegression.ts && tsx offchain/readCostRegression.ts && tsx offchain/governanceConsistency.ts && tsx offchain/contractMetadata.ts",
     "release-replay": "tsx scripts/release-replay.ts",
-    "test:parity": "tsx --test ts/parity/readSemanticsParity.test.ts",
+    "test:parity": "tsx scripts/run-ts-tests.ts parity",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
