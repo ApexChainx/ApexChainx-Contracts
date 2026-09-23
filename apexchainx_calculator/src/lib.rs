@@ -344,6 +344,9 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 // adm_sup   → (superseded_admin: Address, new_admin: Address)
 //   context: caller Address
 //
+// adm_xp    → (expired_admin: Address,)
+//   context: caller Address
+//
 // op_prop   → (new_operator: Address,)
 //   context: caller Address
 //
@@ -351,6 +354,9 @@ pub use crate::config_metadata::LAST_CFG_UPDATE_KEY;
 //   context: caller Address
 //
 // op_can    → ()
+//   context: caller Address
+//
+// op_xp     → (expired_operator: Address,)
 //   context: caller Address
 //
 // set_int   → (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
@@ -485,6 +491,14 @@ pub(crate) const EVENT_ADMIN_SUP: Symbol = symbol_short!("adm_sup");
 /// irreversible; the empty payload signals the transition without extra data.
 pub(crate) const EVENT_ADMIN_REN: Symbol = symbol_short!("adm_ren");
 
+/// Emitted at most once when a stale (lapsed) admin proposal is first
+/// observed by an accept attempt, immediately before the pending keys are
+/// cleared. (#589)
+///
+/// Compatibility decision: emitted only by the expiry transition; the payload
+/// is `(expired_admin: Address,)` so indexers can alert on the lapsed handoff.
+pub(crate) const EVENT_ADMIN_XP: Symbol = symbol_short!("adm_xp");
+
 /// Emitted when a new operator is proposed. (#64)
 ///
 /// Compatibility decision: payload is `(new_operator: Address,)`. Same rules
@@ -509,6 +523,14 @@ pub(crate) const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
 /// Compatibility decision: payload is `(superseded_operator: Address,
 /// new_operator: Address)`. Additive event name; appending fields is safe.
 pub(crate) const EVENT_OP_SUP: Symbol = symbol_short!("op_sup");
+
+/// Emitted at most once when a stale (lapsed) operator proposal is first
+/// observed by an accept attempt, immediately before the pending keys are
+/// cleared. (#589)
+///
+/// Compatibility decision: emitted only by the expiry transition; the payload
+/// is `(expired_operator: Address,)` so indexers can alert on the stale handoff.
+pub(crate) const EVENT_OP_XP: Symbol = symbol_short!("op_xp");
 
 /// Emitted when the configuration is frozen by admin.
 ///

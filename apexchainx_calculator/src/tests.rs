@@ -2530,6 +2530,123 @@ fn test_set_operator_locks_out_old_operator() {
 }
 
 // ============================================================
+// #589/#590 – Governance proposal expiry and renounce invalidation
+// ============================================================
+
+/// A lapsed operator proposal is first observed by an accept attempt: the
+/// attempt fails with expiry, exactly one `op_xp` event is emitted, and the
+/// pending keys are cleared. A later attempt observes no pending proposal and
+/// emits nothing (idempotent expiry). (#589)
+#[test]
+fn test_operator_proposal_expiry_emits_event_once_and_clears_keys() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    env.ledger().set_timestamp(1_000_000);
+    client.propose_operator(&actors.admin, &new_op);
+    assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
+
+    env.ledger()
+        .set_timestamp(1_000_000 + 90 * 24 * 60 * 60 + 1);
+
+    // First attempt observes the expiry: reject, emit op_xp once, clear keys.
+    assert!(client.try_accept_operator(&new_op).is_err());
+    assert_eq!(client.get_pending_operator(), None);
+
+    let count_xp = |env: &Env| -> u32 {
+        let mut n = 0u32;
+        let events = env.events().all();
+        for i in 0..events.len() {
+            let (_, topics, _) = events.get(i).unwrap();
+            if !topics.is_empty() {
+                let name: Symbol = topics.get(0).unwrap().try_into_val(env).unwrap();
+                if name == EVENT_OP_XP {
+                    n += 1;
+                }
+            }
+        }
+        n
+    };
+    assert_eq!(count_xp(&env), 1, "expiry must emit exactly one op_xp event");
+
+    // Second attempt: keys are already cleared → NoPendingTransfer, no re-emit.
+    assert!(client.try_accept_operator(&new_op).is_err());
+    assert_eq!(count_xp(&env), 1, "expiry must be idempotent — no second op_xp");
+}
+
+/// Mirror of the operator expiry test for the admin handoff (`adm_xp`). (#589)
+#[test]
+fn test_admin_proposal_expiry_emits_adm_xp_and_clears_keys() {
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+
+    env.ledger().set_timestamp(2_000_000);
+    client.propose_admin(&actors.admin, &new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+    env.ledger()
+        .set_timestamp(2_000_000 + 90 * 24 * 60 * 60 + 1);
+
+    assert!(client.try_accept_admin(&new_admin).is_err());
+    assert_eq!(client.get_pending_admin(), None);
+
+    let events = env.events().all();
+    let mut xp_count = 0u32;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        if !topics.is_empty() {
+            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if name == EVENT_ADMIN_XP {
+                xp_count += 1;
+            }
+        }
+    }
+    assert_eq!(xp_count, 1, "admin expiry must emit exactly one adm_xp event");
+}
+
+/// Renouncing admin invalidates a pending operator proposal; the proposed
+/// operator can no longer accept, and both side effects are evented:
+/// `op_can` (cancellation) + `adm_ren`. (#590)
+#[test]
+fn test_renounce_admin_invalidates_pending_operator_and_accept_fails() {
+    let (env, client, actors) = setup();
+    let new_op = soroban_sdk::Address::generate(&env);
+
+    client.propose_operator(&actors.admin, &new_op);
+    assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
+
+    // Renounce invalidates the pending handoff…
+    client.renounce_admin(&actors.admin);
+    assert_eq!(client.get_pending_operator(), None);
+    assert!(client.try_get_admin().is_err());
+
+    // …so the proposed operator can no longer accept.
+    assert!(client.try_accept_operator(&new_op).is_err());
+
+    // The side effects are evented: op_can (cancellation) + adm_ren.
+    let events = env.events().all();
+    let mut op_can_count = 0u32;
+    let mut adm_ren_count = 0u32;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        if !topics.is_empty() {
+            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+            if name == EVENT_OP_CAN {
+                op_can_count += 1;
+            }
+            if name == EVENT_ADMIN_REN {
+                adm_ren_count += 1;
+            }
+        }
+    }
+    assert_eq!(
+        op_can_count, 1,
+        "renounce must emit one op_can for the invalidated operator handoff"
+    );
+    assert_eq!(adm_ren_count, 1, "renounce must emit one adm_ren");
+}
+
+// ============================================================
 // #60 – Contract metadata / capabilities view
 // ============================================================
 

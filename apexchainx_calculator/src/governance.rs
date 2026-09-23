@@ -69,25 +69,50 @@ use soroban_sdk::{Address, Env, Symbol};
 
 use crate::{
     SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN,
-    EVENT_ADMIN_SUP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_OP_SUP, EVENT_VERSION,
-    OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, PENDING_OP_KEY, PENDING_OP_TS_KEY,
+    EVENT_ADMIN_SUP, EVENT_ADMIN_XP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET,
+    EVENT_OP_SUP, EVENT_OP_XP, EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY,
+    PENDING_OP_KEY, PENDING_OP_TS_KEY,
 };
 
 /// Window (in ledger seconds) after which a pending proposal expires.
 const PROPOSAL_EXPIRY_WINDOW: u64 = 90 * 24 * 60 * 60;
 
 /// Requires that the stored proposal is still within its expiry window.
-fn require_proposal_valid(env: &Env, ts_key: Symbol) -> Result<(), SLAError> {
+///
+/// On the FIRST observation of a lapsed proposal this both emits the typed
+/// expiry event (`adm_xp`/`op_xp`) carrying the stale candidate and clears the
+/// pending keys, then returns `ProposalExpired`. Later attempts observe no
+/// pending proposal at all (`NoPendingTransfer`) and emit nothing, so the
+/// expiry transition is published **at most once** and stays idempotent for
+/// indexers. (#589)
+fn require_proposal_valid(
+    env: &Env,
+    caller: &Address,
+    pending_key: Symbol,
+    ts_key: Symbol,
+    expiry_event: Symbol,
+) -> Result<(), SLAError> {
     let proposed: u64 = env
         .storage()
         .instance()
         .get(&ts_key)
         .ok_or(SLAError::NoPendingTransfer)?;
     let now = env.ledger().timestamp();
-    if now.saturating_sub(proposed) > PROPOSAL_EXPIRY_WINDOW {
-        return Err(SLAError::ProposalExpired);
+    if now.saturating_sub(proposed) <= PROPOSAL_EXPIRY_WINDOW {
+        return Ok(());
     }
-    Ok(())
+    let stale: Option<Address> = env.storage().instance().get(&pending_key);
+    if let Some(stale) = stale {
+        // The `expiry_event` passed in is EVENT_ADMIN_XP for the admin handoff
+        // and EVENT_OP_XP for the operator handoff — the emit-site audit in
+        // event_schema.rs (`test_every_declared_event_has_an_emit_site`) picks
+        // both names up from this publish site.
+        env.events()
+            .publish((expiry_event, EVENT_VERSION, caller.clone()), (stale,));
+    }
+    env.storage().instance().remove(&pending_key);
+    env.storage().instance().remove(&ts_key);
+    Err(SLAError::ProposalExpired)
 }
 
 /// Proposes a new admin. The current admin initiates; the new admin must
@@ -127,7 +152,7 @@ pub fn accept_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
         .instance()
         .get(&PENDING_ADMIN_KEY)
         .ok_or(SLAError::NoPendingTransfer)?;
-    require_proposal_valid(env, PENDING_ADMIN_TS_KEY)?;
+    require_proposal_valid(env, caller, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, EVENT_ADMIN_XP)?;
     if *caller != pending {
         return Err(SLAError::Unauthorized);
     }
@@ -210,7 +235,7 @@ pub fn accept_operator(env: &Env, caller: &Address) -> Result<(), SLAError> {
         .instance()
         .get(&PENDING_OP_KEY)
         .ok_or(SLAError::NoPendingTransfer)?;
-    require_proposal_valid(env, PENDING_OP_TS_KEY)?;
+    require_proposal_valid(env, caller, PENDING_OP_KEY, PENDING_OP_TS_KEY, EVENT_OP_XP)?;
     if *caller != pending {
         return Err(SLAError::Unauthorized);
     }
