@@ -2482,6 +2482,16 @@ impl SLACalculatorContract {
     /// Recalculates SLA deterministically without mutating any state or emitting events.
     /// Can be called by anyone for verification and audit purposes.
     ///
+    /// # Access control
+    ///
+    /// **Public, read-only** — this endpoint performs **no** operator
+    /// authorization and no pause check. It only computes over the current
+    /// config, so anyone may call it for verification and audit. It belongs to
+    /// the *public-view* tier of the auth model (see `docs/AUTH_MODEL.md`):
+    /// `calculate_sla` requires the operator, `calculate_sla_view` does not,
+    /// and `replay_calculate_sla` is also public but replays a stored/ledgered
+    /// evaluation rather than a live one.
+    ///
     /// # Input constraints
     ///
     /// - `mttr_minutes` must be ≤ 525,600 (365 days). Values exceeding this bound are rejected with `InvalidInput`.
@@ -2537,6 +2547,22 @@ impl SLACalculatorContract {
     /// Returns the same `(SLAResult, config_version_hash)` pair that the
     /// mutating `calculate_sla` path would have produced, without writing
     /// state or emitting events.
+    ///
+    /// # Access control
+    ///
+    /// **Public, read-only** — this endpoint intentionally performs **no**
+    /// operator authorization and no pause check. It is a pure replay helper:
+    /// it never writes state, emits no events, and can only recompute a
+    /// decision over the current config. Anyone may invoke it to learn SLA
+    /// math over arbitrary inputs. This is the *public-replay* tier of the
+    /// auth model documented in `docs/AUTH_MODEL.md`:
+    ///
+    /// - `calculate_sla`: operator-mutating (requires the operator role).
+    /// - `calculate_sla_view`: public-view (no auth, live evaluation).
+    /// - `replay_calculate_sla`: public-replay (no auth, deterministic replay).
+    ///
+    /// Because it does not enforce operator auth, it must never gain write
+    /// side-effects — `auth_matrix_tests` pins this read-only contract.
     ///
     /// NOTE: The contract does not currently store per-ledger config
     /// snapshots, so `recorded_at_ledger` is stored in the result for

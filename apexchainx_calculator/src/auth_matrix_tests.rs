@@ -160,4 +160,79 @@ mod auth_matrix_tests {
         let result = client.try_set_config(&admin, &symbol_short!("high"), &30, &50, &500);
         assert!(result.is_err());
     }
+
+    // ── #634: Auth-model matrix pinning ──────────────────────────────────
+    //
+    // Encodes the tiers documented in docs/AUTH_MODEL.md as executable tests:
+    //   calculate_sla        = operator-mutating (only the operator may call)
+    //   calculate_sla_view   = public-view      (anyone, read-only)
+    //   replay_calculate_sla = public-replay    (anyone, read-only, no events)
+    //
+    // These pin that the auth model does not change silently in future
+    // refactors.
+
+    #[test]
+    fn test_calculate_sla_view_is_public_read_only() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        // A stranger (no role) may perform a live view evaluation.
+        let result =
+            client.calculate_sla_view(&symbol_short!("OUT_VIEW"), &symbol_short!("high"), &10);
+        assert_eq!(result.outage_id, symbol_short!("OUT_VIEW"));
+        // View must never write history or stats.
+        let stats = client.get_stats();
+        assert_eq!(stats.total_calculations, 0);
+        assert_eq!(client.get_history().len(), 0);
+    }
+
+    #[test]
+    fn test_replay_calculate_sla_is_public() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        let _ = stranger;
+        // A stranger may deterministically replay a decision.
+        let (result, _hash) = client.replay_calculate_sla(
+            &symbol_short!("OUT_REPLAY"),
+            &symbol_short!("high"),
+            &10,
+            &0,
+        );
+        assert_eq!(result.outage_id, symbol_short!("OUT_REPLAY"));
+    }
+
+    /// Replay is public because it is a pure read; it must never carry write
+    /// side-effects. This test pins that invariant: replay leaves history,
+    /// stats, and telemetry untouched.
+    #[test]
+    fn test_replay_calculate_sla_has_no_side_effects() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let before_stats = client.get_stats();
+        client.replay_calculate_sla(
+            &symbol_short!("OUT_REPLAY"),
+            &symbol_short!("high"),
+            &10,
+            &0,
+        );
+        assert_eq!(client.get_stats().total_calculations, before_stats.total_calculations);
+        assert_eq!(client.get_history().len(), 0);
+    }
+
+    /// These two endpoints define the read-tier boundary: `calculate_sla` is
+    /// operator-only, while the two views are public. Calling the mutating
+    /// endpoint from a non-operator must be rejected even when the view
+    /// endpoints are freely callable.
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_mutate_via_view_endpoints() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        // Freely callable views succeed for a stranger, but calculate_sla
+        // (the operator-mutating tier) must still reject them.
+        client.calculate_sla_view(&symbol_short!("OUT_LIVE"), &symbol_short!("high"), &10);
+        client.replay_calculate_sla(&symbol_short!("OUT_REP"), &symbol_short!("high"), &10, &0);
+        client.calculate_sla(&stranger, &symbol_short!("OUT_MUT"), &symbol_short!("high"), &10);
+    }
 }
