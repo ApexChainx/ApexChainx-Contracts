@@ -36,6 +36,10 @@ pub mod audit_state;
 /// versioning, outage-id, pruning performance) are actually compiled and run.
 #[cfg(test)]
 mod auth_matrix_tests;
+
+/// #610 – severity-curve boundary fixtures (see docs/SEVERITY_CURVES.md).
+#[cfg(test)]
+mod severity_curve_tests;
 pub mod calculation;
 pub mod config;
 pub mod config_bundle;
@@ -2312,7 +2316,10 @@ impl SLACalculatorContract {
         methods.push_back(method("prune_history_by_age", true, "admin", "pruned_a"));
         methods.push_back(method("remove_custom_severity", true, "admin", "cfg_rem"));
         methods.push_back(method("renounce_admin", true, "admin", "adm_ren"));
-        methods.push_back(method("replay_calculate_sla", true, "operator", "sla_calc"));
+        // replay_calculate_sla is a public, read-only, event-less replay of
+        // a prior decision — keep descriptor metadata aligned with the
+        // compiled surface (see tests.rs CANONICAL_PUBLIC_METHODS, #633).
+        methods.push_back(method("replay_calculate_sla", false, "none", ""));
         // Setters:
         methods.push_back(method("set_config", true, "admin", "cfg_upd"));
         methods.push_back(method("set_custom_severity", true, "admin", "sev_add"));

@@ -10271,7 +10271,7 @@ const CANONICAL_PUBLIC_METHODS: &[(&str, bool, &str, &str)] = &[
     ("prune_history_by_age", true, "admin", "pruned_a"),
     ("remove_custom_severity", true, "admin", "cfg_rem"),
     ("renounce_admin", true, "admin", "adm_ren"),
-    ("replay_calculate_sla", true, "operator", "sla_calc"),
+    ("replay_calculate_sla", false, "none", ""),
     // Setters:
     ("set_config", true, "admin", "cfg_upd"),
     ("set_custom_severity", true, "admin", "sev_add"),
