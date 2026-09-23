@@ -10,7 +10,7 @@
 > and any integrator who needs to subscribe to the contract without reading
 > Rust.
 >
-> **Coverage:** All 19 events currently emitted by the contract, including the
+> **Coverage:** All events currently emitted by the contract, including the
 > canonical calculation/config/governance lifecycle, the storage-migration
 > lifecycle, and the running-stats saturation signal.
 
@@ -84,7 +84,7 @@ If you maintain the contract, when you add or break an event:
 
 ### Universal topic layout
 
-All 19 events use **exactly three topics**, in this order:
+All events use **exactly three topics**, in this order:
 
 | Index | Name | Type | Meaning |
 |-------|------|------|---------|
@@ -189,10 +189,12 @@ These invariants are locked by
    emitted before blocked operations resume.** Backends can use these as
    hard "calculation slot" delimiters.
 5. **Two-step governance lifecycle events** (`adm_prop`, `adm_acc`,
-   `adm_can`, `adm_ren`, `op_prop`, `op_acc`, `op_can`) are emitted
+   `adm_can`, `adm_ren`, `adm_xp`, `op_prop`, `op_acc`, `op_can`, `op_xp`)
+   are emitted
    strictly in lifecycle order — a backend may treat each cycle's first
    `*_prop` event as the start of a new governance attempt and the next
-   `*_acc` / `*_can` as the terminal event.
+   `*_acc` / `*_can` / `*_xp` as the terminal event (an `*_xp` terminal marks
+   a proposal that lapsed instead of being accepted or cancelled).
 6. **Every `calculate_sla` call emits exactly one `sla_calc` + exactly
    one `set_int`** (subject to the contract not being paused) — there is
    no half-emitted state to reconcile.
@@ -237,14 +239,16 @@ pins the structure so indexers can rely on it:
 | 17 | `pruned_a` | caller `Address` | `prune_history_by_age` | admin |
 | 18 | `stats_sat` | counter-name `Symbol` | `calculate_sla` (via `increment_stats`) | implicit (operator) |
 | 19 | `migrate_done` | caller `Address` | `migrate` | admin |
+| 20 | `adm_xp` | caller `Address` | `accept_admin` (expired proposal) | pending admin |
+| 21 | `op_xp` | caller `Address` | `accept_operator` (expired proposal) | pending operator |
 
 Group by purpose:
 
 - **SLA calculation** — `sla_calc`, `set_int`, `stats_sat`
 - **Configuration** — `cfg_upd`, `cfg_frz`, `cfg_unfrz`
 - **Pause / lifecycle** — `paused`, `unpause`
-- **Operator management** — `op_set`, `op_prop`, `op_acc`, `op_can`
-- **Admin governance** — `adm_prop`, `adm_acc`, `adm_can`, `adm_ren`
+- **Operator management** — `op_set`, `op_prop`, `op_acc`, `op_can`, `op_xp`
+- **Admin governance** — `adm_prop`, `adm_acc`, `adm_can`, `adm_ren`, `adm_xp`
 - **History maintenance** — `pruned`, `pruned_a`
 - **Storage migration** — `migrate_done`
 
@@ -434,42 +438,47 @@ new operator address.
   operator is still governed by the admin role, but the operator
   field is independent).
 
-### Operator two-step handoff: `op_prop`, `op_acc`, `op_can`
+### Operator two-step handoff: `op_prop`, `op_acc`, `op_can`, `op_xp`
 
 | Event | Meaning | Emitter |
 |-------|---------|---------|
 | `op_prop` | Pending operator set | `propose_operator` |
 | `op_acc` | Pending operator accepted (now current) | `accept_operator` |
 | `op_can` | Pending operator proposal cleared | `cancel_operator_proposal` |
+| `op_xp` | Pending operator proposal expired (keys cleared) | `accept_operator` on a lapsed proposal |
 
-All three share the same topic layout:
+All four share the same topic layout:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `topic[0]` | `Symbol` | One of `op_prop` / `op_acc` / `op_can` |
+| `topic[0]` | `Symbol` | One of `op_prop` / `op_acc` / `op_can` / `op_xp` |
 | `topic[1]` | `Symbol` | `v1` |
-| `topic[2]` | `Address` | The caller on the emitting function (admin for `op_prop`/`op_can`, the new operator for `op_acc`) |
+| `topic[2]` | `Address` | The caller on the emitting function (admin for `op_prop`/`op_can`, the new operator for `op_acc`, the caller whose accept observed expiry for `op_xp`) |
 
 **`op_prop` payload:** `(new_operator: Address,)` — the pending
 candidate.
 **`op_acc` payload:** *empty payload tuple* `()` — only the topics
 identify the event.
 **`op_can` payload:** *empty payload tuple* `()`.
+**`op_xp` payload:** `(expired_operator: Address,)` — the stale candidate;
+emitted **at most once** for a given proposal, before its pending keys are
+cleared. (#589)
 
 `op_prop` + a matching `op_acc` is the happy-path lifecycle. `op_prop`
-+ a matching `op_can` is the cancellation lifecycle. Any `op_prop`
-without a matching `op_acc`/`op_can` in the same governance cycle is
-treated as the **pending** state — `get_pending_operator()` returns
-`Some(_)` while the proposal is open.
++ a matching `op_can` is the cancellation lifecycle. A lapsed proposal
+is observed once via `op_prop` + `op_xp` (then cleared). Any `op_prop`
+without a matching `op_acc`/`op_can`/`op_xp` in the same governance
+cycle is treated as the **pending** state — `get_pending_operator()`
+returns `Some(_)` while the proposal is open.
 
 **Recovery / replay implications:**
 
 - **Dedupe** — backends that surface "operator pending" banners can
-  use `op_prop` as enter-pending and either `op_acc` or `op_can` as
-  exit-pending. The pending state is also recoverable from
+  use `op_prop` as enter-pending and either `op_acc`, `op_can`, or
+  `op_xp` as exit-pending. The pending state is also recoverable from
   `get_pending_operator()` if the event stream is incomplete.
 
-### Admin two-step transfer: `adm_prop`, `adm_acc`, `adm_can`, `adm_ren`
+### Admin two-step transfer: `adm_prop`, `adm_acc`, `adm_can`, `adm_ren`, `adm_xp`
 
 Mirror of the operator two-step flow, plus the unique `adm_ren`
 "renounce" event which leaves **no admin at all** (irreversible).
@@ -480,14 +489,15 @@ Mirror of the operator two-step flow, plus the unique `adm_ren`
 | `adm_acc` | Pending admin accepted (now current) | `accept_admin` |
 | `adm_can` | Pending admin proposal cleared | `cancel_admin_proposal` |
 | `adm_ren` | Current admin renounced permanently | `renounce_admin` |
+| `adm_xp` | Pending admin proposal expired (keys cleared) | `accept_admin` on a lapsed proposal |
 
-All four share the same topic layout:
+All five share the same topic layout:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `topic[0]` | `Symbol` | One of `adm_prop` / `adm_acc` / `adm_can` / `adm_ren` |
+| `topic[0]` | `Symbol` | One of `adm_prop` / `adm_acc` / `adm_can` / `adm_ren` / `adm_xp` |
 | `topic[1]` | `Symbol` | `v1` |
-| `topic[2]` | `Address` | The caller on the emitting function (current admin for `adm_prop` / `adm_can` / `adm_ren`; the new admin for `adm_acc`) |
+| `topic[2]` | `Address` | The caller on the emitting function (current admin for `adm_prop` / `adm_can` / `adm_ren`; the new admin for `adm_acc`; the caller whose accept observed expiry for `adm_xp`) |
 
 **Payloads:**
 
@@ -497,6 +507,7 @@ All four share the same topic layout:
 | `adm_acc` | `()` (empty tuple) |
 | `adm_can` | `()` |
 | `adm_ren` | `()` |
+| `adm_xp` | `(expired_admin: Address,)` — at most once per lapsed proposal (#589) |
 
 **Recovery / replay implications:**
 
@@ -504,9 +515,12 @@ All four share the same topic layout:
   admin-gated function will ever succeed again. A backend must
   surface this as **permanent loss of admin capability** on the
   contract — there is no path to recover short of redeploying.
+  Renounce also **invalidates any pending operator proposal**: the
+  pending operator keys are cleared and an `op_can` is emitted for that
+  handoff, so a stale `op_prop` can never complete after `adm_ren`. (#590)
 - **Dedupe** — same pattern as operator transfers: pair `adm_prop`
-  with its terminating `adm_acc` or `adm_can`. An unmatched `adm_prop`
-  is the pending state.
+  with its terminating `adm_acc`, `adm_can`, or `adm_xp`. An unmatched
+  `adm_prop` is the pending state.
 
 ### Configuration freeze: `cfg_frz` and `cfg_unfrz`
 
