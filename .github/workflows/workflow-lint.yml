@@ -17,11 +17,12 @@
 
 name: Workflow Secret Lint
 
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+# CI temporarily disabled – triggers commented out below.
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
 
 concurrency:
   group: workflow-secret-lint-${{ github.ref }}

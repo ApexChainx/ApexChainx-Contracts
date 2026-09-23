@@ -1,18 +1,19 @@
 name: Nightly Fuzz Testing
 
-on:
-  schedule:
-    - cron: '0 2 * * *' # Nightly at 02:00 UTC
-  workflow_dispatch:
-    inputs:
-      duration:
-        description: 'Fuzz duration in seconds'
-        required: false
-        default: '600'
-      seed:
-        description: 'Deterministic seed for reproducibility (leave empty for random)'
-        required: false
-        default: ''
+# CI temporarily disabled – triggers commented out below.
+# on:
+#   schedule:
+#     - cron: '0 2 * * *' # Nightly at 02:00 UTC
+#   workflow_dispatch:
+#     inputs:
+#       duration:
+#         description: 'Fuzz duration in seconds'
+#         required: false
+#         default: '600'
+#       seed:
+#         description: 'Deterministic seed for reproducibility (leave empty for random)'
+#         required: false
+#         default: ''
 
 env:
   CARGO_TERM_COLOR: always

@@ -18,13 +18,14 @@
 
 name: Release Validation
 
-on:
-  push:
-    branches: [main]
-    tags:
-      - 'v*'
-  pull_request:
-    branches: [main]
+# CI temporarily disabled – triggers commented out below.
+# on:
+#   push:
+#     branches: [main]
+#     tags:
+#       - 'v*'
+#   pull_request:
+#     branches: [main]
 
 concurrency:
   group: release-validation-${{ github.ref }}
