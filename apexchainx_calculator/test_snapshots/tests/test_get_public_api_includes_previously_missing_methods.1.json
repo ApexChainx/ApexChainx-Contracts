@@ -2537,7 +2537,7 @@
                               "symbol": "auth"
                             },
                             "val": {
-                              "symbol": "operator"
+                              "symbol": "none"
                             }
                           },
                           {
@@ -2545,7 +2545,7 @@
                               "symbol": "event"
                             },
                             "val": {
-                              "symbol": "sla_calc"
+                              "symbol": ""
                             }
                           },
                           {
@@ -2553,7 +2553,7 @@
                               "symbol": "mutates"
                             },
                             "val": {
-                              "bool": true
+                              "bool": false
                             }
                           },
                           {
