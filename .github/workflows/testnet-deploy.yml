@@ -17,8 +17,9 @@
 
 name: Testnet Deploy & Smoke
 
-on:
-  workflow_dispatch:
+# Workflow temporarily disabled – trigger commented out below.
+# on:
+#   workflow_dispatch:
 
 concurrency:
   group: testnet-deploy-${{ github.ref }}

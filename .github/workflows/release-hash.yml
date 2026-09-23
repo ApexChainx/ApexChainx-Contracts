@@ -9,10 +9,11 @@
 
 name: Release Artifact Hash Manifest
 
-on:
-  push:
-    tags:
-      - 'v*'
+# CI temporarily disabled – triggers commented out below.
+# on:
+#   push:
+#     tags:
+#       - 'v*'
 
 jobs:
   hash-manifest:

@@ -9,9 +9,10 @@
 
 name: Security Audit
 
-on:
-  schedule:
-    - cron: '0 8 * * 1'  # Every Monday 08:00 UTC
+# CI temporarily disabled – triggers commented out below.
+# on:
+#   schedule:
+#     - cron: '0 8 * * 1'  # Every Monday 08:00 UTC
 
 jobs:
   audit:
