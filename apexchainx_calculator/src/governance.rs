@@ -73,8 +73,11 @@ use crate::{
     OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, PENDING_OP_KEY, PENDING_OP_TS_KEY,
 };
 
-/// Window (in ledger seconds) after which a pending proposal expires.
-const PROPOSAL_EXPIRY_WINDOW: u64 = 90 * 24 * 60 * 60;
+/// Window (in ledger seconds) after which a pending admin or operator proposal
+/// expires. Both role handoffs share this single named constant (#572) instead
+/// of duplicating magic values per call site, so the expiry semantic is stated
+/// in exactly one place; boundary tests pin the behavior at window ± 1 second.
+pub(crate) const PROPOSAL_EXPIRY_WINDOW: u64 = 90 * 24 * 60 * 60;
 
 /// Requires that the stored proposal is still within its expiry window.
 fn require_proposal_valid(env: &Env, ts_key: Symbol) -> Result<(), SLAError> {
@@ -90,12 +93,29 @@ fn require_proposal_valid(env: &Env, ts_key: Symbol) -> Result<(), SLAError> {
     Ok(())
 }
 
+/// Two-step admin handoff invariant: the proposed admin must be a party
+/// distinct from the existing admin AND distinct from the caller. Both
+/// violations are rejected by this single guard (#571) so the invariant is
+/// stated once and cannot drift across call sites.
+fn require_new_admin_distinct(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {
+    let current_admin: Address = env
+        .storage()
+        .instance()
+        .get(&ADMIN_KEY)
+        .ok_or(SLAError::NotInitialized)?;
+    if new_admin == &current_admin || new_admin == caller {
+        return Err(SLAError::InvalidInput);
+    }
+    Ok(())
+}
+
 /// Proposes a new admin. The current admin initiates; the new admin must
 /// call `accept_admin` to complete the transfer.
 pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    require_new_admin_distinct(env, caller, new_admin)?;
     let superseded: Option<Address> = env.storage().instance().get(&PENDING_ADMIN_KEY);
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
     env.storage()

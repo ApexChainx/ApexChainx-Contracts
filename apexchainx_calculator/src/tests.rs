@@ -2627,9 +2627,9 @@ fn test_get_contract_metadata_is_deterministic() {
 
 #[test]
 fn test_migrate_done_symbol() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let _sym = soroban_sdk::Symbol::new(&env, "migrate_done");
+    // EVENT_MIGRATE_DONE must be a Symbol like every sibling event-name
+    // constant, usable directly in publish topic tuples (#573).
+    assert_eq!(crate::event_schema::EVENT_MIGRATE_DONE, symbol_short!("mig_done"));
 }
 
 #[test]
@@ -2653,7 +2653,7 @@ fn test_migrate_emits_migrate_done_event() {
         }
 
         let topic0: soroban_sdk::Symbol = topic_tuple.get(0).unwrap().try_into_val(&env).unwrap();
-        if topic0 == soroban_sdk::Symbol::new(&env, "migrate_done") {
+        if topic0 == crate::event_schema::EVENT_MIGRATE_DONE {
             found = true;
             let topic1: soroban_sdk::Symbol = topic_tuple.get(1).unwrap().try_into_val(&env).unwrap();
             assert_eq!(topic1, soroban_sdk::symbol_short!("v1"));
@@ -2665,7 +2665,7 @@ fn test_migrate_emits_migrate_done_event() {
             assert_eq!(payload_tuple, (0, STORAGE_VERSION));
         }
     }
-    assert!(found, "migrate_done event not found");
+    assert!(found, "mig_done event not found");
 }
 
 #[test]
@@ -7055,6 +7055,114 @@ fn test_failed_accept_admin_wrong_caller_leaves_admin_unchanged() {
     assert_eq!(client.get_pending_admin(), Some(new_admin));
 }
 
+// ============================================================
+// #571 – propose_admin guards the distinct-candidate invariant once
+// ============================================================
+
+#[test]
+fn test_propose_admin_rejects_existing_admin_as_new_admin() {
+    // Rejection reason: the candidate equals the existing admin.
+    let (_env, client, actors) = setup();
+    let result = client.try_propose_admin(&actors.admin, &actors.admin);
+    assert!(error_responses::is_invalid_input(&result.unwrap_err().unwrap()));
+}
+
+#[test]
+fn test_propose_admin_rejects_caller_as_new_admin() {
+    // Rejection reason: the candidate equals the caller (self-proposal).
+    let (_env, client, actors) = setup();
+    let result = client.try_propose_admin(&actors.admin, &actors.admin);
+    assert!(error_responses::is_invalid_input(&result.unwrap_err().unwrap()));
+}
+
+#[test]
+fn test_propose_admin_rejects_self_renomination_via_both_arms() {
+    // Rejection reason: the candidate is the caller AND the existing admin at
+    // once — the condition both duplicate guard arms used to check.
+    let (_env, client, actors) = setup();
+    let result = client.try_propose_admin(&actors.admin, &actors.admin);
+    assert!(error_responses::is_invalid_input(&result.unwrap_err().unwrap()));
+}
+
+#[test]
+fn test_propose_admin_distinct_candidate_is_still_accepted() {
+    // A genuinely distinct candidate is unaffected by the collapsed guard.
+    let (env, client, actors) = setup();
+    let new_admin = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&actors.admin, &new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+    client.accept_admin(&new_admin);
+    assert_eq!(client.get_admin(), new_admin);
+}
+
+// ============================================================
+// #572 – Proposal expiry window boundary for both roles
+// ============================================================
+
+#[test]
+fn test_admin_proposal_expires_at_window_plus_one_second() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
+    let new_admin = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&actors.admin, &new_admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+    env.ledger()
+        .set_timestamp(1000 + crate::governance::PROPOSAL_EXPIRY_WINDOW + 1);
+    let result = client.try_accept_admin(&new_admin);
+    assert!(error_responses::is_proposal_expired(
+        &result.unwrap_err().unwrap()
+    ));
+    assert_eq!(client.get_admin(), actors.admin);
+    assert_eq!(client.get_pending_admin(), Some(new_admin));
+}
+
+#[test]
+fn test_admin_proposal_is_valid_at_exactly_the_window() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
+    let new_admin = soroban_sdk::Address::generate(&env);
+    client.propose_admin(&actors.admin, &new_admin);
+
+    env.ledger()
+        .set_timestamp(1000 + crate::governance::PROPOSAL_EXPIRY_WINDOW);
+    client.accept_admin(&new_admin);
+    assert_eq!(client.get_admin(), new_admin);
+    assert_eq!(client.get_pending_admin(), None);
+}
+
+#[test]
+fn test_operator_proposal_expires_at_window_plus_one_second() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
+    let new_op = soroban_sdk::Address::generate(&env);
+    client.propose_operator(&actors.admin, &new_op);
+    assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
+
+    env.ledger()
+        .set_timestamp(1000 + crate::governance::PROPOSAL_EXPIRY_WINDOW + 1);
+    let result = client.try_accept_operator(&new_op);
+    assert!(error_responses::is_proposal_expired(
+        &result.unwrap_err().unwrap()
+    ));
+    assert_eq!(client.get_operator(), actors.operator);
+    assert_eq!(client.get_pending_operator(), Some(new_op));
+}
+
+#[test]
+fn test_operator_proposal_is_valid_at_exactly_the_window() {
+    let (env, client, actors) = setup();
+    env.ledger().set_timestamp(1000);
+    let new_op = soroban_sdk::Address::generate(&env);
+    client.propose_operator(&actors.admin, &new_op);
+
+    env.ledger()
+        .set_timestamp(1000 + crate::governance::PROPOSAL_EXPIRY_WINDOW);
+    client.accept_operator(&new_op);
+    assert_eq!(client.get_operator(), new_op);
+    assert_eq!(client.get_pending_operator(), None);
+}
+
 #[test]
 fn test_failed_set_retention_limit_leaves_limit_unchanged() {
     let (_env, client, actors) = setup();
@@ -10017,7 +10125,7 @@ fn test_get_public_api_includes_all_major_methods() {
             found_migrate = true;
             assert!(method.mutates);
             assert_eq!(method.auth, Symbol::new(&_env, "admin"));
-            assert_eq!(method.event, Symbol::new(&_env, "migrate_done"));
+            assert_eq!(method.event, Symbol::new(&_env, "mig_done"));
         }
     }
 
@@ -10262,7 +10370,7 @@ const CANONICAL_PUBLIC_METHODS: &[(&str, bool, &str, &str)] = &[
     ("is_paused", false, "none", ""),
     ("list_configs", false, "none", ""),
     // Migration:
-    ("migrate", true, "admin", "migrate_done"),
+    ("migrate", true, "admin", "mig_done"),
     // Pause:
     ("pause", true, "admin", "paused"),
     ("propose_admin", true, "admin", "adm_prop"),

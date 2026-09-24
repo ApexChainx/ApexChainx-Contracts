@@ -172,7 +172,7 @@
 //!   `totviol`, `totrew`, `totpen`)
 //! - payload:  (field: Symbol, previous_value: i128, attempted_increment: i128)
 //!
-//! ## migrate_done (`migrate_done`)
+//! ## mig_done (`mig_done`)
 //! Emitted when a storage migration completes successfully.
 //! - topic[2]: caller Address
 //! - payload:  (old_version: u32, new_version: u32)
@@ -298,7 +298,11 @@ pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 pub const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
 /// Emitted on the `DuplicateOutageInput` error path with the stored result. (#385)
 pub const EVENT_DUP_INPUT: Symbol = symbol_short!("dup_input");
-pub const EVENT_MIGRATE_DONE: &str = "migrate_done";
+/// Emitted when a storage migration completes successfully. (#61)
+///
+/// Named `mig_done` (not `migrate_done`) so it fits `symbol_short!`'s 9-byte
+/// limit like every sibling event-name constant (#573).
+pub const EVENT_MIGRATE_DONE: Symbol = symbol_short!("mig_done");
 
 /// Returns the canonical event version string for consumer documentation.
 pub fn current_event_version() -> Symbol {
@@ -359,6 +363,8 @@ mod tests {
             EVENT_CONFIG_UNFREEZE,
             EVENT_STATS_SAT,
             EVENT_DUP_INPUT,
+            EVENT_MIGRATE_DONE,
+            crate::EVENT_RET_LIM,
         ];
 
         for i in 0..names.len() {
@@ -407,7 +413,7 @@ mod tests {
             ("cfg_unfrz", "EVENT_CONFIG_UNFREEZE"),
             ("stats_sat", "EVENT_STATS_SAT"),
             ("dup_input", "EVENT_DUP_INPUT"),
-            ("migrate_done", "EVENT_MIGRATE_DONE"),
+            ("mig_done", "EVENT_MIGRATE_DONE"),
             ("ret_lim", "EVENT_RET_LIM"),
         ];
 
