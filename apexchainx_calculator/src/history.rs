@@ -233,14 +233,14 @@ pub fn get_latest_by_outage(env: &Env, outage_id: Symbol) -> Result<Option<SLARe
 }
 
 /// Returns the number of configured severity levels.
+/// O(1): reads the cached count maintained alongside CONFIG_KEY (#606).
 pub fn get_config_count(env: &Env) -> Result<u32, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let configs: soroban_sdk::Map<Symbol, crate::SLAConfig> = env
+    Ok(env
         .storage()
         .instance()
-        .get(&crate::CONFIG_KEY)
-        .ok_or(SLAError::NotInitialized)?;
-    Ok(configs.len())
+        .get(&crate::CONFIG_COUNT_KEY)
+        .ok_or(SLAError::NotInitialized)?)
 }
 
 /// Sets the retention limit for history entries. Admin only.
