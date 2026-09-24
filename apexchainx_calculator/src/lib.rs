@@ -243,11 +243,6 @@ pub(crate) const CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT: u32 = 2;
 /// Configurable down to 1 via set_retention_limit().
 pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
 
-/// Upper bound on the number of entries a single pagination call may return.
-/// Limits above this are clamped so no single call can read the full retained
-/// history, enforcing the documented pagination policy server-side.
-pub(crate) const MAX_PAGE_SIZE: u32 = 200;
-
 /// Anti-spam cap on how many retained history entries a single `outage_id` may
 /// occupy.
 ///
@@ -2717,8 +2712,13 @@ impl SLACalculatorContract {
             Self::increment_stats(&env, true, result.amount, 0);
         }
 
+        // #566 – generate the workflow's correlation id once (SC-W5-079) so the
+        // settlement-intent event can be joined back to this calculation.
+        let correlation_id =
+            crate::event_correlation::generate_correlation_id(&env, &outage_id, env.ledger().sequence());
+
         Self::publish_sla_event(&env, severity.clone(), &result);
-        Self::publish_settlement_intent_event(&env, severity, &result);
+        Self::publish_settlement_intent_event(&env, severity, &result, correlation_id);
 
         Ok(result)
     }
@@ -2873,7 +2873,7 @@ impl SLACalculatorContract {
         Ok(())
     }
 
-    fn require_not_frozen(env: &Env) -> Result<(), SLAError> {
+    pub(crate) fn require_not_frozen(env: &Env) -> Result<(), SLAError> {
         if config_freeze::is_config_frozen(env) {
             return Err(SLAError::ConfigFrozen);
         }
@@ -3332,10 +3332,15 @@ impl SLACalculatorContract {
         );
     }
 
-    fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult) {
+    fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult, correlation_id: u64) {
         // Canonical decision field order (#429) carrying the full decision
         // (mttr_minutes, threshold_minutes, rating) so a settlement-only
         // consumer can reconstruct the SLA decision (#428).
+        //
+        // #566 – `correlation_id` is a trailing additive field (SC-W5-079):
+        // the first nine fields stay in the canonical order shared with
+        // sla_calc and dup_input, and no version bump is required for an
+        // additive trailing field (event_schema.rs § Schema Versioning).
         env.events().publish(
             (EVENT_SETTLE_INTENT, EVENT_VERSION, severity),
             (
@@ -3348,6 +3353,7 @@ impl SLACalculatorContract {
                 result.rating.clone(),
                 result.config_version_hash,
                 result.recorded_at,
+                correlation_id,
             ),
         );
     }
@@ -3375,44 +3381,13 @@ impl SLACalculatorContract {
 
     /// Returns the raw log of recent SLA calculations stored on-chain.
     pub fn get_history(env: Env) -> Result<Vec<SLAResult>, SLAError> {
-        Self::check_version(&env)?;
-        Ok(env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env)))
+        history::get_history(&env)
     }
 
     /// Prunes the SLA calculation history to prevent indefinite storage growth.
     /// `keep_latest` dictates how many of the most recent records to retain.
     pub fn prune_history(env: Env, caller: Address, keep_latest: u32) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-
-        let history: Vec<SLAResult> = env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env));
-        let len = history.len();
-
-        let remove_count = if len > keep_latest {
-            let remove_count = len - keep_latest;
-            let mut new_history = Vec::new(&env);
-
-            // Rebuild the vector keeping only the most recent entries
-            for i in remove_count..len {
-                new_history.push_back(history.get(i).unwrap());
-            }
-
-            Self::update_history_and_cache(&env, &new_history);
-            remove_count
-        } else {
-            0
-        };
-        env.events()
-            .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, keep_latest));
-        Ok(())
+        history::prune_history(&env, &caller, keep_latest)
     }
 
     /// SC-063 – Prune history entries older than `min_age_seconds` before the
@@ -3424,42 +3399,7 @@ impl SLACalculatorContract {
     /// time. View-mode results (from `calculate_sla_view`) are never stored to history,
     /// so the empty-edge case of `recorded_at == 0` does not occur in practice.
     pub fn prune_history_by_age(env: Env, caller: Address, min_age_seconds: u64) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-
-        let now = env.ledger().timestamp();
-        if min_age_seconds >= now {
-            return Err(SLAError::InvalidInput);
-        }
-        let cutoff = now.saturating_sub(min_age_seconds);
-
-        let history: Vec<SLAResult> = env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env));
-
-        let mut new_history = Vec::new(&env);
-        let mut removed: u32 = 0;
-
-        for i in 0..history.len() {
-            let entry = history.get(i).unwrap();
-            // Keep entries that are recent enough
-            if entry.recorded_at >= cutoff {
-                new_history.push_back(entry);
-            } else {
-                removed += 1;
-            }
-        }
-
-        if removed > 0 {
-            Self::update_history_and_cache(&env, &new_history);
-        }
-        let kept = new_history.len();
-        env.events()
-            .publish((EVENT_PRUNED_AGE, EVENT_VERSION, caller), (removed, kept));
-
-        Ok(())
+        history::prune_history_by_age(&env, &caller, min_age_seconds)
     }
 
     // -------------------------------------------------------------------
@@ -3478,7 +3418,7 @@ impl SLACalculatorContract {
     /// - `offset` is the 0-based index of the first entry to return. History is
     ///   stored oldest-first, so `offset = 0` is the earliest recorded result.
     /// - `limit` is the maximum number of entries returned per page. It is clamped
-    ///   to an upper bound (`MAX_PAGE_SIZE`): the effective page is
+    ///   to an upper bound (`history::MAX_PAGE_SIZE`): the effective page is
     ///   `min(min(limit, MAX_PAGE_SIZE), len - offset)`, so a page shorter than the
     ///   requested `limit` signals end-of-history. A `limit` larger than the
     ///   remaining history simply returns everything that remains.
@@ -3493,14 +3433,7 @@ impl SLACalculatorContract {
     ///
     /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
     pub fn get_history_page(env: Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
-        Self::check_version(&env)?;
-        let history: Vec<SLAResult> = env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env));
-        let (_end, page) = Self::compute_page_slice(&env, &history, offset, limit);
-        Ok(page)
+        history::get_history_page(&env, offset, limit)
     }
 
     /// Returns a bounded page of history entries together with pagination
@@ -3518,23 +3451,7 @@ impl SLACalculatorContract {
     /// identical to `get_history_page` — see
     /// `docs/HISTORY_PAGINATION_POLICY.md`.
     pub fn get_history_page_with_meta(env: Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
-        Self::check_version(&env)?;
-        let history: Vec<SLAResult> = env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env));
-        let total = history.len();
-        let (end, items) = Self::compute_page_slice(&env, &history, offset, limit);
-        // `has_more` is true when the requested range stops before the end of
-        // history and limit > 0. When limit == 0, the empty page signals
-        // end-of-history per docs/HISTORY_PAGINATION_POLICY.md.
-        let has_more = if limit == 0 { false } else { end < total };
-        Ok(HistoryPage {
-            items,
-            total,
-            has_more,
-        })
+        history::get_history_page_with_meta(&env, offset, limit)
     }
 
     // -------------------------------------------------------------------
@@ -3549,20 +3466,7 @@ impl SLACalculatorContract {
     /// so consumers can match records to specific config generations. The final
     /// entry in the returned array represents the latest decision.
     pub fn get_history_by_outage(env: Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
-        Self::check_version(&env)?;
-        let history: Vec<SLAResult> = env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env));
-        let mut matches = Vec::new(&env);
-        for i in 0..history.len() {
-            let entry = history.get(i).unwrap();
-            if entry.outage_id == outage_id {
-                matches.push_back(entry);
-            }
-        }
-        Ok(matches)
+        history::get_history_by_outage(&env, outage_id)
     }
 
     // -------------------------------------------------------------------
@@ -3572,21 +3476,7 @@ impl SLACalculatorContract {
     /// Returns the most recent history entry for the given `outage_id`, or `None`
     /// if no entry exists for that outage.
     pub fn get_latest_by_outage(env: Env, outage_id: Symbol) -> Result<Option<SLAResult>, SLAError> {
-        Self::check_version(&env)?;
-        let history: Vec<SLAResult> = env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env));
-        let mut latest: Option<SLAResult> = None;
-        for i in (0..history.len()).rev() {
-            let entry = history.get(i).unwrap();
-            if entry.outage_id == outage_id {
-                latest = Some(entry);
-                break;
-            }
-        }
-        Ok(latest)
+        history::get_latest_by_outage(&env, outage_id)
     }
 
     // -------------------------------------------------------------------
@@ -3596,13 +3486,7 @@ impl SLACalculatorContract {
     /// Returns the number of severity tiers currently configured.
     /// Off-chain consumers can inspect retention state without fetching the full map.
     pub fn get_config_count(env: Env) -> Result<u32, SLAError> {
-        Self::check_version(&env)?;
-        let configs: Map<Symbol, SLAConfig> = env
-            .storage()
-            .instance()
-            .get(&CONFIG_KEY)
-            .ok_or(SLAError::NotInitialized)?;
-        Ok(configs.len())
+        history::get_config_count(&env)
     }
 
     /// Returns the current storage schema version so off-chain consumers can
@@ -3622,43 +3506,13 @@ impl SLACalculatorContract {
     /// Must be between 1 and MAX_HISTORY_SIZE (1000). Admin only.
     /// The new limit takes effect on the next `calculate_sla` call.
     pub fn set_retention_limit(env: Env, caller: Address, limit: u32) -> Result<(), SLAError> {
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
-        Self::require_not_frozen(&env)?;
-        if limit == 0 || limit > MAX_HISTORY_SIZE {
-            return Err(SLAError::RetentionLimitOutOfRange);
-        }
-        env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
-        env.events()
-            .publish((EVENT_RET_LIM, EVENT_VERSION, caller.clone()), (limit,));
-        let history: Vec<SLAResult> = env
-            .storage()
-            .instance()
-            .get(&HISTORY_KEY)
-            .unwrap_or_else(|| Vec::new(&env));
-        let len = history.len();
-        if len > limit {
-            let remove_count = len - limit;
-            let mut new_history = Vec::new(&env);
-            for i in remove_count..len {
-                new_history.push_back(history.get(i).unwrap());
-            }
-            Self::update_history_and_cache(&env, &new_history);
-            env.events()
-                .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, limit));
-        }
-        Ok(())
+        history::set_retention_limit(&env, &caller, limit)
     }
 
     /// Returns the current configurable retention limit.
     /// Defaults to MAX_HISTORY_SIZE (1000) if never explicitly set.
     pub fn get_retention_limit(env: Env) -> Result<u32, SLAError> {
-        Self::check_version(&env)?;
-        Ok(env
-            .storage()
-            .instance()
-            .get(&RETENTION_LIMIT_KEY)
-            .unwrap_or(MAX_HISTORY_SIZE))
+        history::get_retention_limit(&env)
     }
 
     /// Internal helper to update history and maintain cached length atomically.
@@ -3667,32 +3521,6 @@ impl SLACalculatorContract {
     fn update_history_and_cache(env: &Env, history: &Vec<SLAResult>) {
         env.storage().instance().set(&HISTORY_KEY, history);
         env.storage().instance().set(&HISTORY_LEN_KEY, &history.len());
-    }
-
-    /// Internal helper for pagination slice computation (issue #264).
-    /// Returns the clamped end index and the slice items for a page.
-    /// Encapsulates the pagination policy defined in HISTORY_PAGINATION_POLICY.md.
-    fn compute_page_slice(
-        env: &Env,
-        history: &Vec<SLAResult>,
-        offset: u32,
-        limit: u32,
-    ) -> (u32, Vec<SLAResult>) {
-        let limit = limit.min(MAX_PAGE_SIZE);
-        let len = history.len();
-        let mut page = Vec::new(env);
-
-        if offset < len && limit > 0 {
-            // Saturating arithmetic: offset + limit could wrap for extreme u32 inputs.
-            // Saturation clamps to the real history length, ensuring correct slicing.
-            let end = offset.saturating_add(limit).min(len);
-            for i in offset..end {
-                page.push_back(history.get(i).unwrap());
-            }
-            (end, page)
-        } else {
-            (offset.min(len), page)
-        }
     }
 
     /// SC-021 – Migration state read helper

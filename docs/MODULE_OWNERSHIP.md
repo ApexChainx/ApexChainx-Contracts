@@ -84,7 +84,7 @@ All paths are relative to `apexchainx_calculator/src/`.
 |------|-------|-----------------|-----------|
 | `event_schema.rs` | Event System | `current_event_version` | **High** |
 | `event.rs` | Event System | `publish_calculation_executed` (2 overloads) | **Medium** |
-| `event_correlation.rs` | Event System | `generate_correlation_id`, `correlation_event_topics` | **Medium** |
+| `event_correlation.rs` | Event System | `generate_correlation_id` | **Medium** |
 | `event_ordering_tests.rs` | Event System | (test-only) | **Low** |
 | `event_state_tests.rs` | Event System | (test-only) | **Low** |
 | `topic_stability_tests.rs` | Event System | (test-only) | **Low** |

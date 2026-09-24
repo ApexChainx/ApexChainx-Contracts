@@ -1,8 +1,13 @@
 //! SLA calculation history storage, pruning, and pagination.
 //!
-//! This module manages the on-chain history of SLA calculation results,
-//! supporting full retrieval, retention-limited pruning, age-based pruning,
-//! paginated access, and per-outage lookup.
+//! This module is the **single implementation** of every history concern the
+//! contract exposes (`get_history`, pagination, per-outage lookup, retention
+//! limit, pruning). [`crate::SLACalculatorContract`] delegates its history
+//! methods here so there is no second copy that can drift (#563); fuzz and
+//! parity targets therefore exercise exactly the code the contract runs.
+//!
+//! Supported operations: full retrieval, retention-limited pruning, age-based
+//! pruning, paginated access, and per-outage lookup.
 
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
@@ -17,29 +22,22 @@ use crate::{
 /// used to bound legacy full-history reads. (#409)
 pub const MAX_PAGE_SIZE: u32 = 200;
 
-/// Returns a bounded slice of the SLA history (the most recent entries).
+/// Returns the raw log of recent SLA calculations stored on-chain.
 ///
-/// LEGACY / EXPENSIVE: this returns at most [`MAX_PAGE_SIZE`] entries and is
-/// retained for backwards compatibility. New consumers should prefer the
-/// paginated [`get_history_page_with_meta`] accessor to bound reads explicitly.
+/// The full retained history is returned oldest-first. This is the deployed
+/// contract behaviour. Consumers that wish to bound the number of entries read
+/// should use the paginated [`get_history_page_with_meta`] accessor instead.
 pub fn get_history(env: &Env) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let history: Vec<SLAResult> = env
+    Ok(env
         .storage()
         .instance()
         .get(&HISTORY_KEY)
-        .unwrap_or_else(|| Vec::new(env));
-    let len = history.len();
-    let start = len.saturating_sub(MAX_PAGE_SIZE);
-    let mut bounded = Vec::new(env);
-    for i in start..len {
-        bounded.push_back(history.get(i).unwrap());
-    }
-    Ok(bounded)
+        .unwrap_or_else(|| Vec::new(env)))
 }
 
 /// Prunes history to retain only the most recent `keep_latest` entries.
-/// Admin only. Emits a `pruned` event.
+/// Admin only. Emits a `pruned` event with `(remove_count, keep_latest)`.
 pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
@@ -51,7 +49,7 @@ pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<()
         .unwrap_or_else(|| Vec::new(env));
     let len = history.len();
 
-    if len > keep_latest {
+    let remove_count = if len > keep_latest {
         let remove_count = len - keep_latest;
         let mut new_history = Vec::new(env);
 
@@ -62,13 +60,15 @@ pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<()
         // Issue #463: maintain cached history length alongside history
         env.storage().instance().set(&HISTORY_KEY, &new_history);
         env.storage().instance().set(&HISTORY_LEN_KEY, &new_history.len());
-        let kept = new_history.len();
-        env.events().publish(
-            (EVENT_PRUNED, EVENT_VERSION, caller.clone()),
-            (remove_count, kept),
-        );
-    }
-
+        remove_count
+    } else {
+        0
+    };
+    // Always emitted so a downstream indexer sees the (possibly no-op) prune.
+    env.events().publish(
+        (EVENT_PRUNED, EVENT_VERSION, caller.clone()),
+        (remove_count, keep_latest),
+    );
     Ok(())
 }
 
@@ -105,13 +105,15 @@ pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -
     }
 
     if removed > 0 {
-        let kept = new_history.len();
         // Issue #463: maintain cached history length alongside history
         env.storage().instance().set(&HISTORY_KEY, &new_history);
         env.storage().instance().set(&HISTORY_LEN_KEY, &new_history.len());
-        env.events()
-            .publish((EVENT_PRUNED_AGE, EVENT_VERSION, caller.clone()), (removed, kept));
     }
+    // Always emitted so a downstream indexer sees the (possibly no-op) prune.
+    env.events().publish(
+        (EVENT_PRUNED_AGE, EVENT_VERSION, caller.clone()),
+        (removed, new_history.len()),
+    );
 
     Ok(())
 }
@@ -141,26 +143,43 @@ pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -
 /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
 pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let limit = limit.min(MAX_PAGE_SIZE);
     let history: Vec<SLAResult> = env
         .storage()
         .instance()
         .get(&HISTORY_KEY)
         .unwrap_or_else(|| Vec::new(env));
+    let (_end, page) = page_slice(env, &history, offset, limit);
+    Ok(page)
+}
+
+/// Shared pagination slice computation (issue #264).
+///
+/// Returns the clamped end index and the slice items for a page, and
+/// encapsulates the pagination policy defined in
+/// `docs/HISTORY_PAGINATION_POLICY.md`:
+///
+/// - `limit` is clamped to [`MAX_PAGE_SIZE`].
+/// - `offset >= len` (or `limit == 0`) yields an empty page; the returned end
+///   index is clamped to the real history length so consumers can derive
+///   `has_more` from it without re-deriving the policy.
+/// - The end index uses saturating arithmetic so extreme `u32` inputs cannot
+///   wrap into a wrong slice.
+fn page_slice(env: &Env, history: &Vec<SLAResult>, offset: u32, limit: u32) -> (u32, Vec<SLAResult>) {
+    let limit = limit.min(MAX_PAGE_SIZE);
     let len = history.len();
     let mut page = Vec::new(env);
-    if offset >= len || limit == 0 {
-        return Ok(page);
+
+    if offset < len && limit > 0 {
+        // Saturating arithmetic: offset + limit could wrap for extreme u32 inputs.
+        // Saturation clamps to the real history length, ensuring correct slicing.
+        let end = offset.saturating_add(limit).min(len);
+        for i in offset..end {
+            page.push_back(history.get(i).unwrap());
+        }
+        (end, page)
+    } else {
+        (offset.min(len), page)
     }
-    // Saturating arithmetic: `offset + limit` could otherwise wrap for extreme
-    // `u32` inputs (e.g. offset near `u32::MAX`), silently slicing the wrong
-    // range. Saturation clamps the end index to the real history length, which
-    // is the correct behaviour for any page that asks for more than remains.
-    let end = offset.saturating_add(limit).min(len);
-    for i in offset..end {
-        page.push_back(history.get(i).unwrap());
-    }
-    Ok(page)
 }
 
 /// Returns a paginated slice of the SLA history with pagination metadata.
@@ -178,26 +197,19 @@ pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLARes
 /// `docs/HISTORY_PAGINATION_POLICY.md`.
 pub fn get_history_page_with_meta(env: &Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let limit = limit.min(MAX_PAGE_SIZE);
     let history: Vec<SLAResult> = env
         .storage()
         .instance()
         .get(&HISTORY_KEY)
         .unwrap_or_else(|| Vec::new(env));
     let total = history.len();
-    let mut items = Vec::new(env);
-    // Saturating arithmetic mirrors `get_history_page`: clamp the end index to
-    // the real history length so extreme `u32` inputs can never wrap into a
-    // wrong slice. `end` also drives `has_more`: entries remain whenever the
-    // requested range stops short of the end of history and limit > 0.
-    let end = offset.saturating_add(limit).min(total);
-    if offset < total && limit != 0 {
-        for i in offset..end {
-            items.push_back(history.get(i).unwrap());
-        }
-    }
-    // When limit == 0, the page is empty by request, which signals end-of-history
-    // per the pagination policy. This ensures consistency with get_history_page.
+    // Both paginators derive their slice from the same `page_slice` helper, so
+    // `items` can never diverge from `get_history_page` (issue #464). `end`
+    // comes from the same helper so `has_more` and the page share one source.
+    let (end, items) = page_slice(env, &history, offset, limit);
+    // `has_more` is true when the requested range stops before the end of
+    // history and limit > 0. When limit == 0, the empty page signals
+    // end-of-history per docs/HISTORY_PAGINATION_POLICY.md.
     let has_more = if limit == 0 { false } else { end < total };
     Ok(HistoryPage {
         items,
@@ -259,15 +271,37 @@ pub fn get_config_count(env: &Env) -> Result<u32, SLAError> {
 }
 
 /// Sets the retention limit for history entries. Admin only.
+///
+/// The new limit is persisted immediately and the retained history is trimmed
+/// to it in the same call (a `pruned` event is emitted when entries are
+/// dropped). Rejected while the configuration is frozen.
 pub fn set_retention_limit(env: &Env, caller: &Address, limit: u32) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::SLACalculatorContract::require_admin(env, caller)?;
+    crate::SLACalculatorContract::require_not_frozen(env)?;
     if limit == 0 || limit > MAX_HISTORY_SIZE {
         return Err(SLAError::RetentionLimitOutOfRange);
     }
     env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
     env.events()
         .publish((EVENT_RET_LIM, EVENT_VERSION, caller.clone()), (limit,));
+    let history: Vec<SLAResult> = env
+        .storage()
+        .instance()
+        .get(&HISTORY_KEY)
+        .unwrap_or_else(|| Vec::new(env));
+    let len = history.len();
+    if len > limit {
+        let remove_count = len - limit;
+        let mut new_history = Vec::new(env);
+        for i in remove_count..len {
+            new_history.push_back(history.get(i).unwrap());
+        }
+        env.storage().instance().set(&HISTORY_KEY, &new_history);
+        env.storage().instance().set(&HISTORY_LEN_KEY, &new_history.len());
+        env.events()
+            .publish((EVENT_PRUNED, EVENT_VERSION, caller), (remove_count, limit));
+    }
     Ok(())
 }
 
