@@ -73,6 +73,18 @@ pub const REWARD_MIN: i128 = 1;
 /// Largest accepted `reward_base`.
 pub const REWARD_MAX: i128 = 100_000;
 
+// ─── MTTR input bound (calculate_sla / calculate_sla_view / replay) ─────────
+
+/// Upper bound on `mttr_minutes` accepted by the calculation entry points.
+///
+/// 525,600 minutes = 365 days. This is the input bound already documented on
+/// `SLACalculatorContract::calculate_sla_view` ("values exceeding this bound
+/// are rejected with `InvalidInput`"). The entry points reject a larger value
+/// *before* any arithmetic runs, so overtime scaling (and thus penalty/reward
+/// magnitude and the work the entry path performs) stays bounded regardless of
+/// the configured penalty/reward caps (#593).
+pub const MAX_MTTR_MINUTES: u32 = 525_600;
+
 // ─── Severity-specific bounds (validate_config, step 5) ─────────────────────
 
 /// `critical` may not exceed a one-hour threshold.
