@@ -98,3 +98,59 @@ silent role grant. (#590)
 3. `adm_ren` is terminal and invalidates all pending proposals.
 4. Expiry events (`adm_xp`/`op_xp`) are emitted **at most once** per proposal;
    a subsequent accept attempt emits nothing.
+
+---
+
+## Operational Guards: Pause vs Freeze
+
+> **Issue:** [#666](https://github.com/ApexChainx/ApexChainx-Contracts/issues/666)
+
+The contract provides two independent guards that operators must distinguish
+during incident response or compliance windows.
+
+### Quick-reference table
+
+| Guard | Contract method | Storage flag | What it blocks | What it allows |
+|---|---|---|---|---|
+| **Pause** | `pause` / `unpause` | `PAUSED_KEY` | All state-changing calls: `calculate_sla`, config writes, governance transitions | Read-only queries (`get_*`, `is_*`, view functions) |
+| **Freeze** | `freeze_config` / `unfreeze_config` | `FREEZE_KEY` | Config writes: `set_config`, governance proposals and accepts, operator changes | `calculate_sla`, all read queries, non-config operations |
+
+### When to use Pause
+
+Use `pause` when you need the contract in a **fully read-only state**, typically
+during a live incident. It halts `calculate_sla`, config writes, and governance
+transitions simultaneously. No mutations of any kind are possible while paused.
+
+**Recovery:** call `unpause` once the incident is resolved.
+
+### When to use Freeze
+
+Use `freeze_config` when you want to **lock config parameters** during a
+compliance review, audit window, or between a config migration commit and its
+verification. SLA calculations and operator activity continue normally; only
+the config-write paths are blocked.
+
+**Recovery:** call `unfreeze_config` once the review is complete.
+
+### Audit trail
+
+Both transitions emit versioned events so the event stream provides an
+unambiguous audit trail:
+
+| Event | Emitted by | Payload |
+|---|---|---|
+| `paused` | `pause(caller, reason)` | `(true,)` |
+| `unpause` | `unpause(caller)` | `(false,)` |
+| `cfg_frz` | `freeze_config(caller)` | `()` |
+| `cfg_unfrz` | `unfreeze_config(caller)` | `()` |
+
+In all cases `topic[2]` is the `caller` address. An indexer receiving a
+`ContractPaused` guard error scans for the latest `paused` event; one
+receiving `ConfigFrozen` scans for `cfg_frz`. The names are distinct so
+neither is ambiguous.
+
+### Guard asymmetry test
+
+The invariant is enforced by `test_freeze_does_not_block_calculate_sla` in
+`config_freeze.rs`: a frozen contract must still accept `calculate_sla`
+calls, confirming freeze is strictly narrower than pause.

@@ -2725,7 +2725,7 @@ impl SLACalculatorContract {
                     // #385 – publish the stored result alongside the rejection so
                     // consumers can reconcile the conflict from this transaction's
                     // event log without a second get_latest_by_outage read.
-                    Self::publish_duplicate_input_event(&env, severity.clone(), &prev);
+                    Self::publish_duplicate_input_event(&env, severity.clone(), &prev, mttr_minutes, cfg.threshold_minutes);
                     return Err(SLAError::DuplicateOutageInput);
                 }
                 // Replay: return the stored decision without touching state.
@@ -3407,7 +3407,23 @@ impl SLACalculatorContract {
         );
     }
 
-    fn publish_duplicate_input_event(env: &Env, severity: Symbol, existing: &SLAResult) {
+    /// Emits the duplicate-input rejection event.
+    ///
+    /// Issue #667: include the attempted (rejected) mttr and threshold alongside
+    /// the stored decision so reconcilers are self-contained in a single event
+    /// read rather than needing a follow-up get_latest_by_outage call.
+    ///
+    /// Payload field order (stored decision first, attempted inputs appended):
+    ///   (outage_id, status, mttr_minutes, threshold_minutes, amount,
+    ///    payment_type, rating, config_version_hash, recorded_at,
+    ///    attempted_mttr_minutes, attempted_threshold_minutes)
+    fn publish_duplicate_input_event(
+        env: &Env,
+        severity: Symbol,
+        existing: &SLAResult,
+        attempted_mttr_minutes: u32,
+        attempted_threshold_minutes: u32,
+    ) {
         env.events().publish(
             (EVENT_DUP_INPUT, EVENT_VERSION, severity),
             (
@@ -3420,6 +3436,8 @@ impl SLACalculatorContract {
                 existing.rating.clone(),
                 existing.config_version_hash,
                 existing.recorded_at,
+                attempted_mttr_minutes,
+                attempted_threshold_minutes,
             ),
         );
     }
