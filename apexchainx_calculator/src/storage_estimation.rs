@@ -69,6 +69,8 @@ pub(crate) const BYTES_LAST_CALC_TS_KEY: u64 = 32;
 pub(crate) const BYTES_LAST_VIOL_TS_KEY: u64 = 32;
 /// Overhead for the STORAGE_VERSION key (u32).
 pub(crate) const BYTES_STORAGE_VERSION_KEY: u64 = 16;
+/// Overhead for the CONFIG_COUNT key (u32, cached config count added at v3).
+pub(crate) const BYTES_CFGCNT_KEY: u64 = 16;
 /// Overhead for the HISTORY key (Vec<SLAResult> — base Vec overhead only;
 /// element sizes are counted separately via `BYTES_PER_HISTORY_ENTRY`).
 pub(crate) const BYTES_HISTORY_KEY_BASE: u64 = 32;
@@ -133,6 +135,7 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     footprint += BYTES_LAST_CALC_TS_KEY;
     footprint += BYTES_LAST_VIOL_TS_KEY;
     footprint += BYTES_STORAGE_VERSION_KEY;
+    footprint += BYTES_CFGCNT_KEY;
     footprint += BYTES_HISTORY_KEY_BASE;
     footprint += history_len * BYTES_PER_HISTORY_ENTRY;
 

@@ -527,6 +527,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
     //   LAST_VIOLATION_TS_KEY       = "VIOLTS"
     //   HISTORY_KEY                = "HIST"
     //   HISTORY_LEN_KEY            = "HISTLEN"  (cached history length for issue #463)
+    //   CONFIG_COUNT_KEY           = "CFGCNT"   (cached config count for issue #606)
     //   STORAGE_VERSION_KEY        = "VER"
     //   RETENTION_LIMIT_KEY        = "RETLIM"
     //   TOTAL_PRUNED_KEY           = "TPRUNED"
@@ -551,6 +552,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         LAST_VIOLATION_TS_KEY,
         HISTORY_KEY,
         HISTORY_LEN_KEY,
+        CONFIG_COUNT_KEY,
         STORAGE_VERSION_KEY,
         RETENTION_LIMIT_KEY,
         TOTAL_PRUNED_KEY,
@@ -5015,6 +5017,44 @@ fn test_migrate_v1_backfills_cached_history_length() {
 }
 
 #[test]
+fn test_migrate_v2_backfills_cached_config_count() {
+    // Issue #606 – a v2 deployment has the config map but no cached count key.
+    // The v2 -> v3 migration arm must derive the counter from the actual map
+    // once, so a trimmed configuration still reports the correct count.
+    let (env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
+
+    // A v2 deployment lacks CONFIG_COUNT_KEY; simulate one whose map only ever
+    // registered a single tier (e.g. retention/lowering trimmed the others).
+    env.as_contract(&client.address, || {
+        env.storage().instance().remove(&CONFIG_COUNT_KEY);
+        env.storage().instance().set(&STORAGE_VERSION_KEY, &2u32);
+        let mut configs: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CONFIG_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+        for tier in [
+            symbol_short!("high"),
+            symbol_short!("medium"),
+            symbol_short!("low"),
+        ] {
+            configs.remove(tier);
+        }
+        env.storage().instance().set(&CONFIG_KEY, &configs);
+    });
+
+    client.migrate(&actors.admin);
+
+    assert_eq!(client.get_storage_version(), STORAGE_VERSION);
+    assert_eq!(
+        client.get_config_count(),
+        1,
+        "v2 -> v3 backfill must derive the cached count from the actual map"
+    );
+}
+
+#[test]
 fn test_get_storage_version_pre_initialize_returns_zero_baseline() {
     // (#599) A fresh, never-initialised contract reads back a readable 0
     // baseline ("no schema, nothing to migrate") instead of NotInitialized,
@@ -6120,6 +6160,43 @@ fn test_storage_growth_config_map_stays_fixed_size() {
         4,
         "Config map must always have exactly 4 entries"
     );
+}
+
+#[test]
+fn test_config_count_cached_stays_correct_across_updates() {
+    // Issue #606 – get_config_count must be an O(1) read of the cached count
+    // and must stay correct across initialize and set_config writes.
+    let (_env, client, actors) = setup();
+
+    // Fresh contract: the four canonical tiers are seeded and counted at
+    // initialize, before any count endpoint is called.
+    assert_eq!(client.get_config_count(), 4);
+
+    // Update path: reconfiguring existing tiers never changes the count, and
+    // every write refreshes the cached counter in lockstep.
+    for _ in 0..25u32 {
+        client.set_config(&actors.admin, &symbol_short!("critical"), &15, &100, &750);
+        client.set_config(&actors.admin, &symbol_short!("low"), &120, &10, &600);
+    }
+    assert_eq!(
+        client.get_config_count(),
+        4,
+        "Cached config count drifted from the map after set_config updates"
+    );
+}
+
+#[test]
+fn test_config_count_pre_initialize_returns_not_initialized() {
+    // Issue #606 – the O(1) read must preserve the pre-initialization error
+    // posture of the descriptor (a contract with no schema reports
+    // NotInitialized rather than a fabricated 0).
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+
+    let result = client.try_get_config_count();
+    assert!(result.is_err());
 }
 
 #[test]

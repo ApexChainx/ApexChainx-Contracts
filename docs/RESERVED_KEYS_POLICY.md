@@ -19,7 +19,7 @@ Storage keys are strictly partitioned by prefix to prevent data collision betwee
 The set of on-chain instance-storage keys is a schema contract for backend
 migrations. Two guards keep it honest:
 
-* `api_stability::storage_key_symbols()` lists the authoritative set (now 22
+* `api_stability::storage_key_symbols()` lists the authoritative set (now 23
   keys) and `assess_stability()` fails CI on any drift from that count.
 * `storage_key_invariant_tests::test_storage_key_set_pinned_to_version_snapshot_or_newer`
   pins the set observed at each `STORAGE_VERSION` and fails CI if the set
