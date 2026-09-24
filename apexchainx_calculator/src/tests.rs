@@ -9365,6 +9365,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         pending_admin: None,
         pending_operator,
         paused: true,
+        config_frozen: true,
         pause_info,
         config_snapshot: SLAConfigSnapshot {
             version: symbol_short!("v1"),

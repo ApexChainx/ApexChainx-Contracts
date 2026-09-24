@@ -57,6 +57,11 @@ pub(crate) const BYTES_OPERATOR_KEY: u64 = 80;
 pub(crate) const BYTES_CONFIG_KEY: u64 = 800;
 /// Overhead for the PAUSED key (boolean SCVal).
 pub(crate) const BYTES_PAUSED_KEY: u64 = 20;
+/// Overhead for the FREEZE key (boolean SCVal, first written by `freeze_config`).
+/// Modeled on the PAUSED key: a 5-char Symbol key plus a boolean value. Counted
+/// only while the contract is frozen, so the footprint tracks the actual
+/// freeze posture rather than a persistent key (#578).
+pub(crate) const BYTES_FREEZE_KEY: u64 = 20;
 /// Overhead for the STATS key (SLAStats struct: 4 fields).
 pub(crate) const BYTES_STATS_KEY: u64 = 160;
 /// Overhead for the SEVERITY_CALC_COUNTS key (u128).
@@ -69,6 +74,11 @@ pub(crate) const BYTES_LAST_CALC_TS_KEY: u64 = 32;
 pub(crate) const BYTES_LAST_VIOL_TS_KEY: u64 = 32;
 /// Overhead for the STORAGE_VERSION key (u32).
 pub(crate) const BYTES_STORAGE_VERSION_KEY: u64 = 16;
+/// Overhead for the HISTORY_LEN key (u32, eagerly written by `initialize` since
+/// #463). Equivalent to RETENTION_LIMIT/LCFGUPD (short Symbol key + u32 value);
+/// always counted so the footprint reflects `HISTLEN`'s presence immediately
+/// after initialize (#578).
+pub(crate) const BYTES_HISTORY_LEN_KEY: u64 = 16;
 /// Overhead for the HISTORY key (Vec<SLAResult> — base Vec overhead only;
 /// element sizes are counted separately via `BYTES_PER_HISTORY_ENTRY`).
 pub(crate) const BYTES_HISTORY_KEY_BASE: u64 = 32;
@@ -133,10 +143,14 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     footprint += BYTES_LAST_CALC_TS_KEY;
     footprint += BYTES_LAST_VIOL_TS_KEY;
     footprint += BYTES_STORAGE_VERSION_KEY;
+    footprint += BYTES_HISTORY_LEN_KEY;
     footprint += BYTES_HISTORY_KEY_BASE;
     footprint += history_len * BYTES_PER_HISTORY_ENTRY;
 
     // ── Lazily-created keys (counted only when present) ─────────────────
+    if crate::config_freeze::is_config_frozen(env) {
+        footprint += BYTES_FREEZE_KEY;
+    }
     if inst.has(&crate::PENDING_ADMIN_KEY) {
         footprint += BYTES_PENDING_ADMIN_KEY;
     }
@@ -211,12 +225,30 @@ mod tests {
 
     #[test]
     fn test_storage_footprint_estimate_grows_with_history() {
-        let (_env, client, _admin, operator) = setup();
+        let (_env, client, admin, operator) = setup();
 
         let initial_footprint = client.get_storage_footprint_estimate();
-        // After initialize: sum of all eagerly-written keys
-        // 80+80+800+20+160+32+32+32+32+16+32 = 1316
-        assert!(initial_footprint >= 1000);
+        // After initialize: every eagerly-written key plus the seeded (empty)
+        // CUSTOM_CONFIG base. `HISTLEN` is written by initialize since #463 so
+        // it is counted here even before any calculations (#578).
+        // 80+80+800+20+160+32+32+32+32+16+16+32 = 1332 (+48 CUSTCFG base = 1380)
+        let expected_initial: u64 = BYTES_ADMIN_KEY
+            + BYTES_OPERATOR_KEY
+            + BYTES_CONFIG_KEY
+            + BYTES_PAUSED_KEY
+            + BYTES_STATS_KEY
+            + BYTES_CALC_COUNTS_KEY
+            + BYTES_VIOL_COUNTS_KEY
+            + BYTES_LAST_CALC_TS_KEY
+            + BYTES_LAST_VIOL_TS_KEY
+            + BYTES_STORAGE_VERSION_KEY
+            + BYTES_HISTORY_KEY_BASE
+            + BYTES_HISTORY_LEN_KEY
+            + BYTES_CUSTOM_CONFIG_KEY_BASE;
+        assert_eq!(
+            initial_footprint, expected_initial,
+            "post-init footprint must include the HISTORY_LEN key and CUSTOM_CONFIG base (#578)"
+        );
 
         let initial_rent = client.get_rent_estimate();
         assert!(initial_rent > 0);
@@ -247,6 +279,21 @@ mod tests {
 
         let updated_rent = client.get_rent_estimate();
         assert!(updated_rent >= initial_rent);
+
+        // #578 – Freeze state must inflate the footprint only while frozen.
+        client.freeze_config(&admin);
+        assert_eq!(
+            client.get_storage_footprint_estimate(),
+            updated_footprint + BYTES_FREEZE_KEY,
+            "freeze state must add the FREEZE key overhead (#578)"
+        );
+
+        client.unfreeze_config(&admin);
+        assert_eq!(
+            client.get_storage_footprint_estimate(),
+            updated_footprint,
+            "thawed footprint must match the pre-freeze estimate (#578)"
+        );
     }
 
     /// Validate that the measured byte constants are within a reasonable range

@@ -135,7 +135,8 @@ mod coordination_harness_tests {
         // The correlation ID should be stable and propagate to downstream contracts
         assert_ne!(corr_id, 0, "Correlation ID must be non-zero");
 
-        // Verify the correlation topics structure (3-topic arity)
+        // Verify the correlation topics structure (4-topic arity: name, version,
+        // context, and the correlation id as the join key)
         let topics = event_correlation::correlation_event_topics(
             symbol_short!("sla_calc"),
             symbol_short!("v1"),
@@ -145,6 +146,7 @@ mod coordination_harness_tests {
         assert_eq!(topics.0, symbol_short!("sla_calc"));
         assert_eq!(topics.1, symbol_short!("v1"));
         assert_eq!(topics.2, symbol_short!("critical"));
+        assert_eq!(topics.3, corr_id, "topic[3] must carry the correlation id");
 
         // The same correlation ID should be passed to downstream contract events
         let downstream_topics = event_correlation::correlation_event_topics(
@@ -155,6 +157,10 @@ mod coordination_harness_tests {
         );
         assert_eq!(topics.1, downstream_topics.1, "Event version must match");
         assert_eq!(topics.2, downstream_topics.2, "Context must match");
+        assert_eq!(
+            topics.3, downstream_topics.3,
+            "trace join key must match across contract boundaries (#576)"
+        );
     }
 
     // ===================================================================
@@ -271,7 +277,7 @@ mod coordination_harness_tests {
         let safety = CrossContractSafety::new(&env);
         assert!(!safety.has_pending(), "Step 3: Safety tracker starts empty");
 
-        // Step 4: Verify correlation topics propagate (3-topic arity)
+        // Step 4: Verify correlation topics propagate (4-topic arity)
         let sla_topic = event_correlation::correlation_event_topics(
             symbol_short!("sla_calc"),
             symbol_short!("v1"),
@@ -286,6 +292,10 @@ mod coordination_harness_tests {
         );
         assert_eq!(sla_topic.1, settle_topic.1, "Step 4: Event version must match");
         assert_eq!(sla_topic.2, settle_topic.2, "Step 4: Context must match");
+        assert_eq!(
+            sla_topic.3, settle_topic.3,
+            "Step 4: Correlation id must match across contracts (#576)"
+        );
     }
 
     // ===================================================================
