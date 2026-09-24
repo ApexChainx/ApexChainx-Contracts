@@ -4933,6 +4933,19 @@ fn test_migrate_v1_backfills_cached_history_length() {
     assert_eq!(client.get_full_audit_state().history_len, 2);
 }
 
+#[test]
+fn test_get_storage_version_pre_initialize_returns_zero_baseline() {
+    // (#599) A fresh, never-initialised contract reads back a readable 0
+    // baseline ("no schema, nothing to migrate") instead of NotInitialized,
+    // so startup probes don't need a second call to disambiguate state.
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+
+    assert_eq!(client.get_storage_version(), 0);
+}
+
 // ============================================================
 // SC-011 – Latest result by outage (issue #131) – additional coverage
 // ============================================================
@@ -9416,6 +9429,8 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         min_compatible_protocol: 1,
         is_paused: false,
         needs_migration: false,
+        result_schema_version: RESULT_SCHEMA_VERSION,
+        event_version: symbol_short!("v1"),
     };
     let scval_version_info: soroban_sdk::Val = version_info.clone().try_into_val(&env).unwrap();
     let restored_version_info: VersionNegotiationInfo = scval_version_info.try_into_val(&env).unwrap();
@@ -9435,6 +9450,7 @@ fn test_240_all_contracttype_structures_round_trip_serialization() {
         contract_name: symbol_short!("sla_calc"),
         reported_protocol: 1,
         required_min: 1,
+        dimension: symbol_short!("protocol"),
     };
     let scval_mismatch: soroban_sdk::Val = mismatch_detail.clone().try_into_val(&env).unwrap();
     let restored_mismatch: VersionMismatchDetail = scval_mismatch.try_into_val(&env).unwrap();

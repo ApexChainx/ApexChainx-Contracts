@@ -48,6 +48,7 @@ pub mod config_metadata;
 pub mod contract_info;
 pub mod coordination_harness;
 pub mod cross_contract_safety;
+pub mod defaults;
 pub mod deployment_policy;
 pub mod error_responses;
 pub mod event;
@@ -89,6 +90,8 @@ mod prune_benchmark;
 mod pruning_perf;
 #[cfg(test)]
 mod schema_migration_tests;
+#[cfg(test)]
+mod storage_key_invariant_tests;
 /// Executable restatement of the contract's documented pure semantics —
 /// the single source of truth imported by tests, the fuzz targets, and the
 /// TypeScript parity fixtures instead of being re-derived in each.
@@ -3662,11 +3665,19 @@ impl SLACalculatorContract {
 
     /// Returns the current storage schema version so off-chain consumers can
     /// detect whether a migration has occurred.
+    ///
+    /// A stored `STORAGE_VERSION_KEY` is always `>= 1`, so a fresh contract
+    /// that has not been initialised reads back `0` — a readable baseline
+    /// meaning "no schema yet, nothing to migrate" rather than an error. This
+    /// keeps pre-initialisation probing (per the startup-handshake docs) on
+    /// the happy path; callers that need to distinguish a genuinely broken
+    /// deployment use `get_migration_state` (#599).
     pub fn get_storage_version(env: Env) -> Result<u32, SLAError> {
-        env.storage()
+        Ok(env
+            .storage()
             .instance()
             .get(&STORAGE_VERSION_KEY)
-            .ok_or(SLAError::NotInitialized)
+            .unwrap_or(0))
     }
 
     // -------------------------------------------------------------------
@@ -3831,8 +3842,8 @@ impl SLACalculatorContract {
 
     /// Returns the `VersionNegotiationInfo` for this contract, exposing the
     /// version-negotiation protocol data (`protocol_version`,
-    /// `min_compatible_protocol`, storage version, pause & migration state)
-    /// over a live contract method.
+    /// `min_compatible_protocol`, storage/result-schema/event versions, pause
+    /// & migration state) over a live contract method.
     ///
     /// This makes the multi-contract handshake documented in
     /// `version_negotiation.rs` and `docs/VERSION_NEGOTIATION_CONTRIBUTOR_GUIDE.md`

@@ -43,6 +43,8 @@ mod coordination_harness_tests {
             min_compatible_protocol: min_compat,
             is_paused: false,
             needs_migration: false,
+            result_schema_version: crate::RESULT_SCHEMA_VERSION,
+            event_version: crate::event_schema::EVENT_VERSION,
         }
     }
 
@@ -367,6 +369,8 @@ mod coordination_harness_tests {
                 min_compatible_protocol: 1,
                 is_paused: false,
                 needs_migration: false,
+                result_schema_version: crate::RESULT_SCHEMA_VERSION,
+                event_version: crate::event_schema::EVENT_VERSION,
             });
         }
 
