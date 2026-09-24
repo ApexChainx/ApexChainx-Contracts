@@ -250,7 +250,12 @@ pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
 /// Upper bound on the number of entries a single pagination call may return.
 /// Limits above this are clamped so no single call can read the full retained
 /// history, enforcing the documented pagination policy server-side.
-pub(crate) const MAX_PAGE_SIZE: u32 = 200;
+///
+/// Single definition: the spec-backed constant lives in `history::MAX_PAGE_SIZE`
+/// (#409), where the pagination spec and fuzz-spec invariants read it from.
+/// Re-exported here so the crate root keeps one stable name for it and no
+/// second value can drift (#597).
+pub(crate) use crate::history::MAX_PAGE_SIZE;
 
 /// Anti-spam cap on how many retained history entries a single `outage_id` may
 /// occupy.
@@ -3745,7 +3750,9 @@ impl SLACalculatorContract {
     /// Internal helper for pagination slice computation (issue #264).
     /// Returns the clamped end index and the slice items for a page.
     /// Encapsulates the pagination policy defined in HISTORY_PAGINATION_POLICY.md.
-    fn compute_page_slice(
+    /// `pub(crate)` so the free-form `history` module accessors route through
+    /// the same implementation instead of re-rolling the math (#598).
+    pub(crate) fn compute_page_slice(
         env: &Env,
         history: &Vec<SLAResult>,
         offset: u32,

@@ -1,0 +1,694 @@
+{
+  "$comment": "GENERATED FILE - do not edit by hand. Regenerate with `npx tsx pers-store/generate-fixtures.ts` (or `just pers-store-check`). Deterministic scenario fixtures for the persistent-store replay scripts (pers-store/sc004-sc009). CI's offchain-checks job regenerates this and fails on any diff (issue #631).",
+  "generator": "pers-store/generate-fixtures.ts",
+  "schema": {
+    "schemaVersion": 1,
+    "severities": [
+      "critical",
+      "high",
+      "medium",
+      "low"
+    ],
+    "standardThresholds": {
+      "critical": 60,
+      "high": 120,
+      "medium": 240,
+      "low": 480
+    },
+    "asymmetricThresholds": {
+      "critical": 15,
+      "high": 45,
+      "medium": 300,
+      "low": 1440
+    },
+    "ratings": [
+      "top",
+      "excellent",
+      "good",
+      "violated"
+    ],
+    "standardPayouts": {
+      "top": 100,
+      "excellent": 80,
+      "good": 60,
+      "violated": 0
+    },
+    "asymmetricPayouts": {
+      "top": 120,
+      "excellent": 90,
+      "good": 50,
+      "violated": 0
+    }
+  },
+  "scenarios": {
+    "sc004": {
+      "monotonicitySamples": [
+        10,
+        30,
+        50,
+        70,
+        100,
+        150,
+        200,
+        300,
+        500
+      ],
+      "passed": 4,
+      "total": 4
+    },
+    "sc005": {
+      "seed": 42,
+      "iterations": 1000,
+      "failures": []
+    },
+    "sc006": {
+      "count": 16,
+      "fixtures": [
+        {
+          "severity": "critical",
+          "mttr": 15,
+          "expectedTier": "top",
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 36,
+          "expectedTier": "excellent",
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 54,
+          "expectedTier": "good",
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 90,
+          "expectedTier": "violated",
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 30,
+          "expectedTier": "top",
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 72,
+          "expectedTier": "excellent",
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 108,
+          "expectedTier": "good",
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 180,
+          "expectedTier": "violated",
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 60,
+          "expectedTier": "top",
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 144,
+          "expectedTier": "excellent",
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 216,
+          "expectedTier": "good",
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 360,
+          "expectedTier": "violated",
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 120,
+          "expectedTier": "top",
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 288,
+          "expectedTier": "excellent",
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 432,
+          "expectedTier": "good",
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 720,
+          "expectedTier": "violated",
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        }
+      ]
+    },
+    "sc007": {
+      "count": 36,
+      "fixtures": [
+        {
+          "severity": "critical",
+          "mttr": 29,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 30,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 31,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 44,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 45,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 46,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 59,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 60,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 61,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 59,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 60,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 61,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 89,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 90,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 91,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 119,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 120,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 121,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 119,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 120,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 121,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 179,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 180,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 181,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 239,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 240,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 241,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 239,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 240,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 241,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 359,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 360,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 361,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 479,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 480,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 481,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        }
+      ]
+    },
+    "sc008": {
+      "count": 16,
+      "fixtures": [
+        {
+          "severity": "critical",
+          "mttr": 3,
+          "result": {
+            "rating": "top",
+            "payout": 120
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 7,
+          "result": {
+            "rating": "excellent",
+            "payout": 90
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 12,
+          "result": {
+            "rating": "good",
+            "payout": 50
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 18,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 9,
+          "result": {
+            "rating": "top",
+            "payout": 120
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 22,
+          "result": {
+            "rating": "excellent",
+            "payout": 90
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 36,
+          "result": {
+            "rating": "good",
+            "payout": 50
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 54,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 60,
+          "result": {
+            "rating": "top",
+            "payout": 120
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 150,
+          "result": {
+            "rating": "excellent",
+            "payout": 90
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 240,
+          "result": {
+            "rating": "good",
+            "payout": 50
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 360,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 288,
+          "result": {
+            "rating": "top",
+            "payout": 120
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 720,
+          "result": {
+            "rating": "excellent",
+            "payout": 90
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 1152,
+          "result": {
+            "rating": "good",
+            "payout": 50
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 1728,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        }
+      ]
+    },
+    "sc009": {
+      "count": 6,
+      "totalPayout": 340,
+      "fixtures": [
+        {
+          "severity": "critical",
+          "mttr": 45,
+          "result": {
+            "rating": "excellent",
+            "payout": 80
+          }
+        },
+        {
+          "severity": "high",
+          "mttr": 130,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 20,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "medium",
+          "mttr": 100,
+          "result": {
+            "rating": "top",
+            "payout": 100
+          }
+        },
+        {
+          "severity": "low",
+          "mttr": 400,
+          "result": {
+            "rating": "good",
+            "payout": 60
+          }
+        },
+        {
+          "severity": "critical",
+          "mttr": 70,
+          "result": {
+            "rating": "violated",
+            "payout": 0
+          }
+        }
+      ]
+    }
+  }
+}

@@ -349,6 +349,14 @@ jobs:
       - name: Run contract metadata checks
         run: npx tsx offchain/contractMetadata.ts
 
+      # Issue #631: the persistence scenario fixtures must regenerate
+      # deterministically and stay in lockstep with the schema that produces
+      # them. generate-fixtures.ts exits non-zero when the committed
+      # pers-store/fixtures/persistence-fixtures.json is stale, so a schema
+      # change that never reached the fixtures fails this job.
+      - name: Verify persistence scenario fixtures are fresh
+        run: npx tsx pers-store/generate-fixtures.ts
+
   release-tests:
     name: Release Tests (#90)
     runs-on: ubuntu-latest
