@@ -5066,18 +5066,27 @@ fn test_event_replay_view_function_produces_same_result_as_stored() {
 }
 
 #[test]
-fn test_calculation_result_is_bound_to_current_config_hash() {
+fn test_calculation_result_is_bound_to_severity_config_generation() {
+    // The result's config_version_hash binds to the *submitted severity's*
+    // config generation, not the whole bundle. (#568)
     let (_env, client, actors) = setup();
 
-    let expected_hash = client.get_config_version_hash();
-    let result = client.calculate_sla(
-        &actors.operator,
-        &symbol_short!("BIND1"),
-        &symbol_short!("critical"),
-        &10,
-    );
+    let outage_id = symbol_short!("BIND1");
+    let severity = symbol_short!("critical");
 
-    assert_eq!(result.config_version_hash, expected_hash);
+    let r1 = client.calculate_sla(&actors.operator, &outage_id, &severity, &10);
+    let h1 = r1.config_version_hash;
+    assert_ne!(h1, client.get_config_version_hash());
+
+    // Tuning an unrelated tier must not move this tier's generation hash.
+    client.set_config(&actors.admin, &symbol_short!("low"), &200, &10, &600);
+    let r2 = client.calculate_sla(&actors.operator, &outage_id, &severity, &10);
+    assert_eq!(r2.config_version_hash, h1);
+
+    // Tuning this tier opens a new generation.
+    client.set_config(&actors.admin, &severity, &20, &200, &1000);
+    let r3 = client.calculate_sla(&actors.operator, &outage_id, &severity, &10);
+    assert_ne!(r3.config_version_hash, h1);
 }
 
 #[test]
@@ -5099,9 +5108,11 @@ fn test_stored_result_retains_original_config_binding_after_config_change() {
     let replayed_after_change =
         client.calculate_sla_view(&symbol(&env, "BIND2"), &symbol_short!("critical"), &10);
 
+    // The stored entry keeps the generation hash it was computed under; the
+    // replayed view now reflects the new critical-tier generation.
     assert_eq!(stored_after_change.config_version_hash, original_hash);
     assert_ne!(original_hash, after_hash);
-    assert_eq!(replayed_after_change.config_version_hash, after_hash);
+    assert_ne!(original_hash, replayed_after_change.config_version_hash);
     assert_eq!(stored_after_change.recorded_at, replayed_after_change.recorded_at);
 }
 
@@ -7967,8 +7978,9 @@ fn test_257_config_version_hash_stable_after_no_op_read() {
 }
 
 #[test]
-fn test_257_sla_result_config_version_hash_matches_standalone() {
-    // The config_version_hash embedded in SLAResult must equal get_config_version_hash().
+fn test_257_sla_result_config_version_hash_is_severity_scoped() {
+    // The hash embedded in SLAResult is the *severity-scoped* generation hash,
+    // not the full-bundle get_config_version_hash(). (#567, #568)
     let (_env, client, actors) = setup();
     let result = client.calculate_sla(
         &actors.operator,
@@ -7977,19 +7989,38 @@ fn test_257_sla_result_config_version_hash_matches_standalone() {
         &10,
     );
     let standalone_hash = client.get_config_version_hash();
-    assert_eq!(
-        result.config_version_hash, standalone_hash,
-        "embedded hash must match standalone hash"
-    );
+    assert_ne!(result.config_version_hash, standalone_hash);
+
+    // Tuning an unrelated tier keeps the result's generation hash stable even
+    // though the bundle hash moves.
+    client.set_config(&actors.admin, &symbol_short!("low"), &200, &10, &600);
+    assert_ne!(client.get_config_version_hash(), standalone_hash);
+    let replayed = client.calculate_sla_view(&symbol_short!("O1"), &symbol_short!("high"), &10);
+    assert_eq!(replayed.config_version_hash, result.config_version_hash);
+
+    // Tuning the result's own tier opens a new generation.
+    client.set_config(&actors.admin, &symbol_short!("high"), &35, &55, &775);
+    let view2 = client.calculate_sla_view(&symbol_short!("O1"), &symbol_short!("high"), &10);
+    assert_ne!(view2.config_version_hash, result.config_version_hash);
 }
 
 #[test]
-fn test_257_calculate_sla_view_hash_matches_standalone() {
-    // calculate_sla_view must embed the same config_version_hash.
-    let (_env, client, _actors) = setup();
-    let view_result = client.calculate_sla_view(&symbol_short!("O1"), &symbol_short!("high"), &10);
-    let standalone_hash = client.get_config_version_hash();
-    assert_eq!(view_result.config_version_hash, standalone_hash);
+fn test_257_calculate_sla_view_hash_tracks_submitted_severity() {
+    // calculate_sla_view embeds the same severity-scoped hash as the mutating
+    // path, scoped to the severity the caller submits. (#568)
+    let (_env, client, actors) = setup();
+    let mutating = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("O1"),
+        &symbol_short!("medium"),
+        &30,
+    );
+    let view = client.calculate_sla_view(&symbol_short!("O1"), &symbol_short!("medium"), &30);
+    assert_eq!(view.config_version_hash, mutating.config_version_hash);
+
+    // A different tier with a different config has a different generation.
+    let other = client.calculate_sla_view(&symbol_short!("O1"), &symbol_short!("low"), &30);
+    assert_ne!(other.config_version_hash, view.config_version_hash);
 }
 
 #[test]
@@ -8455,17 +8486,42 @@ fn test_canonical_snapshot_unaffected_by_custom_severity() {
 }
 
 #[test]
-fn test_config_version_hash_unaffected_by_custom_severity() {
+fn test_config_version_hash_tracks_custom_severity() {
+    // (#567) Custom severities now participate in the config version hash:
+    // adding, editing or removing a registered tier moves the bundle hash so
+    // reconciliation tooling keyed on it detects the change.
     let (_env, client, actors) = setup();
+    let sev = symbol(&_env, "gold");
 
-    let before = client.get_config_version_hash();
-    client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
-    let after = client.get_config_version_hash();
+    let base = client.get_config_version_hash();
+    client.set_custom_severity(&actors.admin, &sev, &90, &40, &900);
+    let after_add = client.get_config_version_hash();
+    assert_ne!(base, after_add);
 
-    assert_eq!(
-        before, after,
-        "Config version hash must be derived only from canonical severities"
-    );
+    client.set_custom_severity(&actors.admin, &sev, &90, &45, &900);
+    let after_edit = client.get_config_version_hash();
+    assert_ne!(after_add, after_edit);
+
+    client.remove_custom_severity(&actors.admin, &sev);
+    assert_eq!(base, client.get_config_version_hash());
+}
+
+#[test]
+fn test_config_version_hash_is_order_stable_with_multiple_custom_severities() {
+    // (#567) The hash folds custom severities in canonical (sorted) map order,
+    // not insertion order, so the result is deterministic per config set.
+    let (_env, client, actors) = setup();
+    let a = symbol(&_env, "alpha");
+    let b = symbol(&_env, "beta");
+    client.set_custom_severity(&actors.admin, &a, &90, &40, &900);
+    client.set_custom_severity(&actors.admin, &b, &180, &20, &400);
+
+    let h1 = client.get_config_version_hash();
+    client.remove_custom_severity(&actors.admin, &a);
+    client.remove_custom_severity(&actors.admin, &b);
+    client.set_custom_severity(&actors.admin, &b, &180, &20, &400);
+    client.set_custom_severity(&actors.admin, &a, &90, &40, &900);
+    assert_eq!(h1, client.get_config_version_hash());
 }
 
 #[test]
@@ -8539,6 +8595,87 @@ fn test_calculate_sla_view_with_custom_severity() {
 
     // 200 > 180 threshold → violated
     assert_eq!(result.status, symbol_short!("viol"));
+}
+
+// ============================================================
+// #567 – Custom severities participate in the config hash and
+// generation policy
+// ============================================================
+
+#[test]
+fn test_567_custom_severity_edit_unlocks_recalc() {
+    // A custom-tier edit changes that tier's generation hash, so the next
+    // submission is a fresh calculation rather than a same-version replay.
+    // Before #567 custom severities were excluded from the hash, making the
+    // duplicate-detection policy treat them as permanently unchanged.
+    let (env, client, actors) = setup();
+    let sev = symbol(&env, "gold");
+    client.set_custom_severity(&actors.admin, &sev, &90, &40, &900);
+
+    let outage = symbol(&env, "CUST1");
+    let r1 = client.calculate_sla(&actors.operator, &outage, &sev, &50);
+    assert_eq!(client.get_history().len(), 1);
+
+    // Same-version replay returns the stored decision.
+    let replay = client.calculate_sla(&actors.operator, &outage, &sev, &50);
+    assert_eq!(replay.config_version_hash, r1.config_version_hash);
+    assert_eq!(client.get_history().len(), 1);
+
+    // Editing the custom tier opens a new generation for it.
+    client.set_custom_severity(&actors.admin, &sev, &90, &50, &900);
+    let r2 = client.calculate_sla(&actors.operator, &outage, &sev, &50);
+    assert_ne!(r2.config_version_hash, r1.config_version_hash);
+    assert_eq!(client.get_history().len(), 2);
+}
+
+// ============================================================
+// #568 – Per-severity generation hashing preserves the recalc
+// budget across unrelated config edits
+// ============================================================
+
+#[test]
+fn test_568_unrelated_tier_edits_preserve_outage_recalc_budget() {
+    // Tuning one tier must not invalidate outstanding entries in another:
+    // churning `low` config neither consumes a `high` outage's recalc budget
+    // nor bounces it into DuplicateOutageInput. (#568)
+    let (env, client, actors) = setup();
+    env.budget().reset_unlimited();
+    let outage = symbol(&env, "BUDGET_A");
+    let severity = symbol_short!("high");
+
+    let r1 = client.calculate_sla(&actors.operator, &outage, &severity, &10);
+    assert_eq!(client.get_history().len(), 1);
+
+    // Churn an unrelated tier well past the per-outage recalc cap.
+    for i in 0..(MAX_RECALCS_PER_OUTAGE + 2) {
+        client.set_config(&actors.admin, &symbol_short!("low"), &(120 + i), &10, &600);
+    }
+
+    // The high-tier outage replays under its unchanged generation: same hash,
+    // no new entry, no budget consumed.
+    let r2 = client.calculate_sla(&actors.operator, &outage, &severity, &10);
+    assert_eq!(r2.config_version_hash, r1.config_version_hash);
+    assert_eq!(client.get_history().len(), 1);
+
+    // A real change to *this* tier still opens a generation (budget intact).
+    client.set_config(&actors.admin, &severity, &35, &55, &775);
+    let r3 = client.calculate_sla(&actors.operator, &outage, &severity, &10);
+    assert_ne!(r3.config_version_hash, r1.config_version_hash);
+    assert_eq!(client.get_history().len(), 2);
+
+    // The full recalc cap survived the unrelated churn: the outage can still
+    // accumulate entries up to MAX_RECALCS_PER_OUTAGE on its own tier's churn.
+    // (Two entries already exist from the phase above, so only 14 more fit.)
+    for i in 1..(MAX_RECALCS_PER_OUTAGE as u32 - 1) {
+        client.set_config(&actors.admin, &severity, &(35 + i), &55, &775);
+        let _ = client.calculate_sla(&actors.operator, &outage, &severity, &10);
+    }
+    assert_eq!(client.get_history().len(), MAX_RECALCS_PER_OUTAGE);
+
+    // One more own-tier change now exhausts the cap.
+    client.set_config(&actors.admin, &severity, &60, &55, &775);
+    let res = client.try_calculate_sla(&actors.operator, &outage, &severity, &10);
+    assert_eq!(res, Err(Ok(SLAError::OutageRecalcLimit)));
 }
 
 #[test]

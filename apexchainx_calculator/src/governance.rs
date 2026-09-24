@@ -23,6 +23,8 @@
 //! ## Single-step (legacy break-glass)
 //!
 //! Admin calls `set_operator` → emits `op_set` event, operator is set immediately.
+//! If an operator proposal is pending, it is cancelled first (with an `op_can`
+//! event) so the stale handoff can never override the single-step decision. (#569)
 //!
 //! This path does **not** require the new operator's consent or signature. It was
 //! introduced in the #28-era before the two-step handoff (#64) existed and is
@@ -53,6 +55,8 @@
 //! ## Single-step (legacy break-glass)
 //!
 //! Admin calls `set_operator` → emits `op_set` event, operator is set immediately.
+//! If an operator proposal is pending, it is cancelled first (with an `op_can`
+//! event) so the stale handoff can never override the single-step decision. (#569)
 //!
 //! This path does **not** require the new operator's consent or signature. It was
 //! introduced in the #28-era before the two-step handoff (#64) existed and is
@@ -169,7 +173,11 @@ pub fn get_pending_admin(env: &Env) -> Result<Option<Address>, SLAError> {
 /// operator agrees to assume the role.
 ///
 /// Emits an `op_prop` event carrying `(new_operator,)` in the payload.
-/// If a previous proposal exists, it is silently overwritten.
+/// If a previous proposal exists, it is **superseded** rather than silently
+/// overwritten: an `op_sup` event carrying `(superseded_operator,
+/// new_operator)` is published first, then the `op_prop` event follows. This
+/// lets indexers key on `op_sup` so the pending-slot history stays fully
+/// reconstructable. (#570)
 pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
@@ -298,11 +306,14 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
 ///
 /// ## Pending-slot interaction
 ///
-/// This function does **not** clear or interact with any pending operator
-/// proposal (`PENDING_OP_KEY`). If a two-step proposal is pending when
-/// `set_operator` is called, the pending proposal remains in storage and
-/// can still be accepted. Admins should explicitly cancel any pending
-/// proposal before using this path to avoid ambiguity.
+/// A direct assignment **cancels** any pending operator proposal: if
+/// `PENDING_OP_KEY` holds a proposal, `set_operator` clears it (and its
+/// timestamp) before installing the new operator and emits an `op_can`
+/// event so indexers can observe the cancellation. This guarantees a stale
+/// handoff can never override the admin's single-step decision and that the
+/// pending slot is left empty for the next two-step attempt. (#569)
+///
+/// Pending *admin* proposals are unaffected.
 ///
 /// ## Gating
 ///

@@ -248,15 +248,27 @@ pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
 /// history, enforcing the documented pagination policy server-side.
 pub(crate) const MAX_PAGE_SIZE: u32 = 200;
 
+/// Polynomial base for config version hashing (`compute_config_version_hash`,
+/// `compute_severity_config_hash`). (#567, #568)
+const CONFIG_HASH_BASE: u64 = 91138233;
+
+/// Prime modulus a little under 2^63, applied after every folded field.
+const CONFIG_HASH_MODULUS: u64 = (1u64 << 63) - 25;
+
+/// Final avalanche constant mixed in after the last folded severity.
+const CONFIG_HASH_FINAL_MIX: u64 = 0x9e3779b97f4a7c15;
+
 /// Anti-spam cap on how many retained history entries a single `outage_id` may
 /// occupy.
 ///
-/// `calculate_sla` is idempotent while the config hash is unchanged, so the only
-/// way one outage can accumulate entries is a config change between submissions
-/// (each change opens a new "generation" for that outage). Left uncapped, an
-/// operator that resubmits the same outage after every config update can evict
-/// every other outage from the retained window, so this bounds a single outage's
-/// share of it.
+/// `calculate_sla` is idempotent while the submitted severity's config hash is
+/// unchanged, so the only way one outage can accumulate entries is a config
+/// change to *that severity* between submissions (each change opens a new
+/// "generation" for that outage). A change to an unrelated tier leaves the
+/// generation hash — and therefore the outage's respected entries and recalc
+/// budget — untouched. (#568) Left uncapped, an operator that resubmits the
+/// same outage after every config update can evict every other outage from the
+/// retained window, so this bounds a single outage's share of it.
 ///
 /// Counted from the history scan `calculate_sla` already performs: no extra
 /// storage key, no migration, and no dependency on call ordering. Admin pruning
@@ -711,7 +723,11 @@ pub struct SLAResult {
     pub payment_type: Symbol,
     /// Performance rating: "top" | "excel" | "good" | "poor".
     pub rating: Symbol,
-    /// Deterministic hash of the config used for this evaluation.
+    /// Generation hash of the severity-scoped config used for this evaluation.
+    /// Two results computed under identical parameters for the *same severity*
+    /// share a hash (underpinning severity-blind duplicate detection); a change
+    /// to this severity's config opens a new generation, while changes to
+    /// unrelated tiers leave the hash untouched. (#568)
     pub config_version_hash: u64,
     /// Ledger timestamp at calculation time. (SC-063)
     pub recorded_at: u64,
@@ -1508,7 +1524,9 @@ impl SLACalculatorContract {
     /// This is the legacy break-glass path. It does **not** require the new
     /// operator's consent — only the admin authorizes the change. Emits an
     /// `op_set` event (distinguishable from the two-step `op_prop`/`op_acc`
-    /// trail). For routine rotations, prefer `propose_operator` +
+    /// trail). If a pending operator proposal exists, it is cancelled first,
+    /// with an `op_can` event, so a stale handoff can never override this
+    /// decision. (#569) For routine rotations, prefer `propose_operator` +
     /// `accept_operator`.
     pub fn set_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         governance::set_operator(&env, &caller, &new_operator)
@@ -1560,7 +1578,9 @@ impl SLACalculatorContract {
 
     /// Propose a new operator (step 1 of the canonical two-step handoff).
     /// The current admin initiates; the new operator must call `accept_operator`
-    /// to consent and complete the transfer. Emits `op_prop`.
+    /// to consent and complete the transfer. Emits `op_prop`. Re-proposing
+    /// supersedes any prior pending proposal, emitting `op_sup` first so
+    /// indexers can reconstruct the pending-slot history. (#570)
     pub fn propose_operator(env: Env, caller: Address, new_operator: Address) -> Result<(), SLAError> {
         governance::propose_operator(&env, &caller, &new_operator)
     }
@@ -1962,8 +1982,13 @@ impl SLACalculatorContract {
     /// The hash uses a polynomial rolling hash with a prime base and modulus
     /// to provide strong collision resistance while remaining deterministic.
     /// It processes all severity config fields in canonical order
-    /// (critical → high → medium → low) and is stable across repeated reads
-    /// when config is unchanged.
+    /// (critical → high → medium → low) followed by every registered custom
+    /// severity, so adjusting a custom tier also moves the hash. (#567)
+    /// It is stable across repeated reads when config is unchanged.
+    ///
+    /// This is the *bundle* fingerprint. The hash embedded in each
+    /// `SLAResult::config_version_hash` is the narrower, severity-scoped
+    /// generation hash (see `compute_severity_config_hash`). (#568)
     pub fn get_config_version_hash(env: Env) -> Result<u64, SLAError> {
         Self::check_version(&env)?;
         Self::compute_config_version_hash(&env)
@@ -2494,7 +2519,7 @@ impl SLACalculatorContract {
         Self::check_version(&env)?;
         // We bypass pause and operator checks to allow continuous, public verification
         let cfg = Self::load_config(&env, &severity)?;
-        let config_version_hash = Self::compute_config_version_hash(&env)?;
+        let config_version_hash = Self::compute_severity_config_hash(&env, &severity)?;
 
         // Apply duplicate/replay policy read-only against recorded history
         let history: Vec<SLAResult> = env
@@ -2536,7 +2561,8 @@ impl SLACalculatorContract {
     ///
     /// Returns the same `(SLAResult, config_version_hash)` pair that the
     /// mutating `calculate_sla` path would have produced, without writing
-    /// state or emitting events.
+    /// state or emitting events. The hash is the severity-scoped generation
+    /// hash for the submitted tier. (#568)
     ///
     /// NOTE: The contract does not currently store per-ledger config
     /// snapshots, so `recorded_at_ledger` is stored in the result for
@@ -2552,7 +2578,7 @@ impl SLACalculatorContract {
     ) -> Result<(SLAResult, u64), SLAError> {
         Self::check_version(&env)?;
         let cfg = Self::load_config(&env, &severity)?;
-        let config_version_hash = Self::compute_config_version_hash(&env)?;
+        let config_version_hash = Self::compute_severity_config_hash(&env, &severity)?;
 
         let result = Self::compute_result(
             outage_id,
@@ -2606,21 +2632,25 @@ impl SLACalculatorContract {
     ///
     /// # Repeated submissions for the same outage_id
     ///
-    /// Anti-spam policy, applied in this order:
+    /// Anti-spam policy, applied in this order. The "config hash" compared here
+    /// is the severity-scoped generation hash (see
+    /// `compute_severity_config_hash`), so a change to an *unrelated* tier does
+    /// not disturb an outage submitted under another severity. (#568)
     ///
-    /// 1. **Replay** — an unchanged config hash with identical inputs returns the
+    /// 1. **Replay** — an unchanged generation hash with identical inputs returns the
     ///    stored result and writes nothing at all: no history entry, no stats, no
     ///    telemetry, no events. Retrying a call whose response was lost is
     ///    therefore free of state drift, however many times it is repeated.
-    /// 2. **Conflict** — an unchanged config hash with a different MTTR or
+    /// 2. **Conflict** — an unchanged generation hash with a different MTTR or
     ///    threshold is rejected with `DuplicateOutageInput`, so a stored decision
     ///    can never be silently restated. The rejection is accompanied by a
     ///    `dup_input` event carrying the stored result, so consumers need no
     ///    follow-up `get_latest_by_outage` read.
-    /// 3. **Recalculation** — a changed config hash opens a new generation for the
-    ///    outage, capped at `MAX_RECALCS_PER_OUTAGE` retained entries. Beyond that
-    ///    the call is rejected with `OutageRecalcLimit`, bounding how much of the
-    ///    retained window one outage can occupy. Admin pruning frees headroom.
+    /// 3. **Recalculation** — a changed generation hash (a config edit to *this*
+    ///    severity) opens a new generation for the outage, capped at
+    ///    `MAX_RECALCS_PER_OUTAGE` retained entries. Beyond that the call is
+    ///    rejected with `OutageRecalcLimit`, bounding how much of the retained
+    ///    window one outage can occupy. Admin pruning frees headroom.
     ///
     /// Telemetry is recorded only once the calculation is certain to be stored, so
     /// neither a replay nor a rejected submission can inflate the per-severity
@@ -2637,7 +2667,7 @@ impl SLACalculatorContract {
         Self::require_operator(&env, &caller)?; // #28
 
         let cfg = Self::load_config(&env, &severity)?;
-        let config_version_hash = Self::compute_config_version_hash(&env)?;
+        let config_version_hash = Self::compute_severity_config_hash(&env, &severity)?;
         let result = Self::compute_result(
             outage_id.clone(),
             mttr_minutes,
@@ -2728,9 +2758,10 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Pure helper to generate the SLAResult deterministically.
-    /// `config_version_hash` binds the result to the exact config snapshot used
-    /// during evaluation. `recorded_at` is the ledger timestamp at call time
-    /// for both mutating and view paths (see issue #465 for audit-mode semantics).
+    /// `config_version_hash` binds the result to the severity-scoped config
+    /// generation used during evaluation. `recorded_at` is the ledger timestamp
+    /// at call time for both mutating and view paths (see issue #465 for
+    /// audit-mode semantics).
     ///
     /// # Timestamp Semantics (Issue #465)
     ///
@@ -3112,47 +3143,80 @@ impl SLACalculatorContract {
         Ok(())
     }
 
-    /// Shared config lookup that borrows env (avoids consuming it).
+    /// Folds the full config bundle into a version hash.
+    ///
+    /// The four canonical severities contribute in fixed order, and every
+    /// registered custom severity (iterated in the map's canonical, sorted
+    /// order) contributes as well — so adjusting a custom tier moves the
+    /// bundle hash and reconciliation tooling keyed on it can detect the
+    /// change. (#567)
     pub(crate) fn compute_config_version_hash(env: &Env) -> Result<u64, SLAError> {
-        let severities = [
+        let mut hash: u64 = 1;
+        let mut power: u64 = 1;
+
+        for sev in [
             symbol_short!("critical"),
             symbol_short!("high"),
             symbol_short!("medium"),
             symbol_short!("low"),
-        ];
-
-        const BASE: u64 = 91138233;
-        const MODULUS: u64 = (1u64 << 63) - 25;
-
-        let mut hash: u64 = 1;
-        let mut power: u64 = 1;
-
-        for sev in severities {
+        ] {
             let cfg = Self::load_config(env, &sev)?;
-
-            hash = hash
-                .wrapping_mul(BASE)
-                .wrapping_add(cfg.threshold_minutes as u64)
-                .wrapping_mul(power)
-                % MODULUS;
-            power = power.wrapping_mul(BASE) % MODULUS;
-
-            hash = hash
-                .wrapping_mul(BASE)
-                .wrapping_add(cfg.penalty_per_minute as u64)
-                .wrapping_mul(power)
-                % MODULUS;
-            power = power.wrapping_mul(BASE) % MODULUS;
-
-            hash = hash
-                .wrapping_mul(BASE)
-                .wrapping_add(cfg.reward_base as u64)
-                .wrapping_mul(power)
-                % MODULUS;
-            power = power.wrapping_mul(BASE) % MODULUS;
+            (hash, power) = Self::fold_config_hash_fields(hash, power, &cfg);
         }
 
-        Ok(hash.wrapping_mul(BASE).wrapping_add(0x9e3779b97f4a7c15u64) % MODULUS)
+        let custom: Map<Symbol, SLAConfig> = env
+            .storage()
+            .instance()
+            .get(&CUSTOM_CONFIG_KEY)
+            .unwrap_or_else(|| Map::new(env));
+        for (_sev, cfg) in custom.iter() {
+            (hash, power) = Self::fold_config_hash_fields(hash, power, &cfg);
+        }
+
+        Ok(Self::finish_config_hash(hash))
+    }
+
+    /// Hashes a single severity's configuration for generation-scoped replay
+    /// and recalc policy.
+    ///
+    /// Unlike [`SLACalculatorContract::compute_config_version_hash`], this is
+    /// scoped to the *one* severity being submitted: editing some other tier
+    /// leaves the hash — and therefore every recorded result for this tier —
+    /// untouched, so an unrelated admin edit neither consumes this outage's
+    /// recalc budget nor bounces it into `DuplicateOutageInput`. (#568)
+    ///
+    /// Only the severity's config values (not its symbol) are folded, so two
+    /// tiers with identical parameters share one generation, preserving the
+    /// severity-blind duplicate-detection contract. (#568)
+    pub(crate) fn compute_severity_config_hash(env: &Env, severity: &Symbol) -> Result<u64, SLAError> {
+        let cfg = Self::load_config(env, severity)?;
+        let (hash, _power) = Self::fold_config_hash_fields(1, 1, &cfg);
+        Ok(Self::finish_config_hash(hash))
+    }
+
+    /// Rolls one severity's three config fields into the polynomial hash,
+    /// advancing the field-position multiplier after each.
+    fn fold_config_hash_fields(mut hash: u64, mut power: u64, cfg: &SLAConfig) -> (u64, u64) {
+        for field in [
+            cfg.threshold_minutes as u64,
+            cfg.penalty_per_minute as u64,
+            cfg.reward_base as u64,
+        ] {
+            hash = hash
+                .wrapping_mul(CONFIG_HASH_BASE)
+                .wrapping_add(field)
+                .wrapping_mul(power)
+                % CONFIG_HASH_MODULUS;
+            power = power.wrapping_mul(CONFIG_HASH_BASE) % CONFIG_HASH_MODULUS;
+        }
+        (hash, power)
+    }
+
+    /// Final avalanche step shared by every config-hash flavour.
+    fn finish_config_hash(hash: u64) -> u64 {
+        hash.wrapping_mul(CONFIG_HASH_BASE)
+            .wrapping_add(CONFIG_HASH_FINAL_MIX)
+            % CONFIG_HASH_MODULUS
     }
 
     /// Config lookup used by calculate_sla / calculate_sla_view / get_config.
