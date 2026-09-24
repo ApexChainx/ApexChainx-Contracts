@@ -6,6 +6,42 @@
 //! that SLA parameters remain stable during audit periods or incident
 //! response.
 //!
+//! # Pause vs Freeze — Operational Semantics (Issue #666)
+//!
+//! The contract exposes **two independent** operational guards. Operators
+//! choosing the right tool during incident response must understand the
+//! distinction:
+//!
+//! | Guard     | Storage flag | Blocks                                        | Allows                          | Who triggers |
+//! |-----------|--------------|-----------------------------------------------|---------------------------------|--------------|
+//! | **Pause** | `PAUSED_KEY` | All state-changing calls: calculate_sla,      | Read-only queries (`get_*`,     | Admin        |
+//! |           |              | config writes, governance transitions         | `is_*`, view functions)         |              |
+//! | **Freeze**| `FREEZE_KEY` | Config writes only: `set_config`,             | calculate_sla, read queries,    | Admin        |
+//! |           |              | governance proposals/accepts, operator changes| governance non-config calls     |              |
+//!
+//! ## When to use Pause
+//! Use `pause` when you need to **halt all mutations** — typically during a live
+//! incident where the contract must be fully read-only while you diagnose. Pause
+//! blocks `calculate_sla`, config writes, AND governance transitions.
+//!
+//! ## When to use Freeze
+//! Use `freeze_config` when you want to **hold config writes stable** during a
+//! compliance review, audit window, or config migration review, while still
+//! allowing normal SLA calculations and operator activity to continue. Freeze is
+//! the narrower, scalpel-like tool: it gates only `require_not_frozen` call sites.
+//!
+//! ## Audit trail events
+//! Both transitions emit versioned events so the event stream carries a complete
+//! audit trail identifying which guard caused a rejection:
+//!
+//! - `paused` / `unpause` — emitted by `metadata::pause` / `metadata::unpause`
+//! - `cfg_frz` / `cfg_unfrz` — emitted by the `freeze_config` / `unfreeze_config`
+//!   contract methods in `lib.rs` (after require_admin, before returning)
+//!
+//! The event names are distinct, so an indexer receiving a guard-failure can
+//! determine unambiguously which guard fired by scanning for the most recent
+//! `paused` or `cfg_frz` event.
+//!
 //! # State Machine
 //!
 //! ```text
@@ -39,6 +75,8 @@ const FREEZE_KEY: Symbol = symbol_short!("FREEZE");
 /// Freezes the configuration, blocking further config updates.
 /// Idempotent: when the config is already frozen this is a silent no-op.
 /// Returns `true` when the state actually transitioned thawed → frozen.
+/// Event emission (`cfg_frz`) is handled by the contract method in `lib.rs`,
+/// and is emitted only on a real transition (#592, #666).
 pub fn freeze_config(env: &Env) -> bool {
     if is_config_frozen(env) {
         return false;
@@ -50,6 +88,8 @@ pub fn freeze_config(env: &Env) -> bool {
 /// Unfreezes the configuration, re-allowing config updates.
 /// Idempotent: when the config is already thawed this is a silent no-op.
 /// Returns `true` when the state actually transitioned frozen → thawed.
+/// Event emission (`cfg_unfrz`) is handled by the contract method in `lib.rs`,
+/// and is emitted only on a real transition (#592, #666).
 pub fn unfreeze_config(env: &Env) -> bool {
     if !is_config_frozen(env) {
         return false;
@@ -190,5 +230,16 @@ mod tests {
         let new_op = Address::generate(&_env);
         client.freeze_config(&admin);
         client.set_operator(&admin, &new_op);
+    }
+
+    /// Issue #666: guard asymmetry test — freeze must NOT block calculate_sla,
+    /// confirming freeze is narrower than pause.
+    #[test]
+    fn test_freeze_does_not_block_calculate_sla() {
+        let (_env, client, admin, operator) = setup();
+        client.freeze_config(&admin);
+        // calculate_sla is only guarded by require_not_paused, not require_not_frozen.
+        let result = client.calculate_sla(&operator, &soroban_sdk::symbol_short!("INC001"), &30u32);
+        assert_eq!(result.mttr_minutes, 30, "freeze must not block calculate_sla");
     }
 }

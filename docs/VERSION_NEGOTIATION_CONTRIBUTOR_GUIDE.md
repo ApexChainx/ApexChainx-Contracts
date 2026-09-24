@@ -47,6 +47,14 @@ are `#[contracttype]` structs crossing contract boundaries.
 - A new field must never be *required* for a correct negotiation decision until
   every deployed peer emits it.
 
+> **#601** appended `result_schema_version` and `event_version` to
+> `VersionNegotiationInfo` and `dimension` to `VersionMismatchDetail`.
+> These are exact-match dimensions (see §2.7): a peer that does **not** yet
+> emit them reports an undeclared default under the Go-style zero-value rule,
+> which will mismatch and fail closed. Treat that as the intended behaviour —
+> the handshake must not silently interoperate with a peer whose schema/event
+> ABI is unverified.
+
 ### 2.2 `NegotiationOutcome` variants are ordinal
 
 The enum is compared by variant across contracts. Adding a variant in the middle
@@ -91,6 +99,25 @@ influence the outcome (see `test_paused_contract_still_negotiates` and
 `test_needs_migration_still_negotiates`). Version compatibility answers "can
 these contracts talk to each other", not "is it a good moment to deploy".
 Operational gating belongs in the deployment checklist, not in negotiation.
+
+### 2.7 Schema/event dimensions are exact-match (#601)
+
+Three dimensions — `storage_version`, `result_schema_version`, and
+`event_version` — must match **exactly** between peers, and their
+`VersionMismatchDetail` records the failing `dimension` (`"storage"`,
+`"result_schema"`, `"event"`). A compatible protocol handshake never tolerates
+drift on these: a peer that speaks the same protocol but a newer storage
+layout, a different result schema, or an older event ABI is exactly the
+broken-deployment scenario negotiation exists to prevent (the co-bump invariant
+is now enforced in the handshake, not just in tests).
+
+- Protocol skew within `min_compatible` is still `Negotiated`; schema/event
+  skew is always `Incompatible`.
+- On an `"event"` mismatch the numeric fields of `VersionMismatchDetail` carry
+  `0` — event versions are symbols and are compared directly.
+- Fixtures: `test_storage_schema_mismatch_is_incompatible`,
+  `test_result_schema_mismatch_is_incompatible`,
+  `test_event_version_mismatch_is_incompatible` cover each dimension.
 
 ---
 

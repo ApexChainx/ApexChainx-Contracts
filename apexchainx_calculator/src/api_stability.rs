@@ -97,11 +97,11 @@ pub fn canonical_field_counts() -> [(&'static str, u32); 31] {
         ("PublicApiDescriptor", 3),
         ("SeverityAliasMapping", 4),
         ("ContractStateFingerprint", 8),
-        ("VersionNegotiationInfo", 6),
+        ("VersionNegotiationInfo", 8),
         // NegotiationOutcome is a fieldless enum; the count tracks its
         // variant count instead so a new outcome still trips the guardrail.
         ("NegotiationOutcome", 3),
-        ("VersionMismatchDetail", 3),
+        ("VersionMismatchDetail", 4),
         ("VersionNegotiationResult", 3),
         ("HistoryRetentionMetrics", 6),
         ("CompensationAction", 2),
@@ -151,10 +151,14 @@ pub fn event_name_symbols() -> [&'static str; 25] {
 
 /// Returns the storage key namespace symbols.
 /// Changing any of these breaks storage layout and requires migration.
-pub fn storage_key_symbols() -> [&'static str; 17] {
+/// Additions to this set MUST coincide with a `STORAGE_VERSION` bump —
+/// enforced by `storage_key_invariant_tests::`
+/// `test_storage_key_set_pinned_to_version_snapshot_or_newer` (#602).
+pub fn storage_key_symbols() -> [&'static str; 23] {
     [
-        "ADMIN", "OPERATOR", "PADMIN", "POP", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF", "STATS", "CALCCNT",
-        "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "VER", "RETLIM", "LCFGUPD",
+        "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED",
+        "PAUSEINF", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT",
+        "VER", "RETLIM", "TPRUNED", "TTOTENT", "LCFGUPD",
     ]
 }
 
@@ -175,7 +179,7 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check storage key symbols are at expected count.
-    if storage_key_symbols().len() != 17 {
+    if storage_key_symbols().len() != 23 {
         return StabilityScore::C;
     }
 
@@ -224,7 +228,7 @@ mod tests {
         );
         assert_eq!(
             contract_info.unwrap().1,
-            11,
+            12,
             "ContractInfo field count changed — bump CONTRACT_INFO_SCHEMA_VERSION"
         );
 
@@ -329,7 +333,7 @@ mod tests {
     #[test]
     fn test_225_storage_keys_are_distinct() {
         let keys = storage_key_symbols();
-        let expected = 17;
+        let expected = 22;
 
         assert_eq!(
             keys.len(),
