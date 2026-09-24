@@ -20,6 +20,12 @@
 //!         unfreeze_config()
 //! ```
 //!
+//! Transitions are **state-transition-safe**: calling `freeze_config` on an
+//! already-frozen config (or `unfreeze_config` on an already-thawed one) is a
+//! silent no-op that returns `false`, so callers can emit an event only on a
+//! real transition and an audit system can reconstruct the frozen window
+//! exactly from the event stream (#592).
+//!
 //! # Default State
 //!
 //! Config starts in the **thawed** state after initialization. Freezing is
@@ -31,15 +37,25 @@ use soroban_sdk::{symbol_short, Env, Symbol};
 const FREEZE_KEY: Symbol = symbol_short!("FREEZE");
 
 /// Freezes the configuration, blocking further config updates.
-/// After calling this, `set_config` will reject changes.
-pub fn freeze_config(env: &Env) {
+/// Idempotent: when the config is already frozen this is a silent no-op.
+/// Returns `true` when the state actually transitioned thawed → frozen.
+pub fn freeze_config(env: &Env) -> bool {
+    if is_config_frozen(env) {
+        return false;
+    }
     env.storage().instance().set(&FREEZE_KEY, &true);
+    true
 }
 
 /// Unfreezes the configuration, re-allowing config updates.
-/// Restores normal operation after a freeze.
-pub fn unfreeze_config(env: &Env) {
+/// Idempotent: when the config is already thawed this is a silent no-op.
+/// Returns `true` when the state actually transitioned frozen → thawed.
+pub fn unfreeze_config(env: &Env) -> bool {
+    if !is_config_frozen(env) {
+        return false;
+    }
     env.storage().instance().set(&FREEZE_KEY, &false);
+    true
 }
 
 /// Returns `true` if the configuration is currently frozen.

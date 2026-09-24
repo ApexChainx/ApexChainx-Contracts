@@ -1677,24 +1677,30 @@ impl SLACalculatorContract {
     // -------------------------------------------------------------------
 
     /// Freezes the configuration, blocking further config updates.
-    /// Admin only. Emits a `cfg_frz` event.
+    /// Admin only. Emits a `cfg_frz` event only on a real thawed → frozen
+    /// transition; a repeated freeze on an already-frozen config is a silent
+    /// no-op (#592).
     pub fn freeze_config(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
-        config_freeze::freeze_config(&env);
-        env.events()
-            .publish((EVENT_CONFIG_FREEZE, EVENT_VERSION, caller), ());
+        if config_freeze::freeze_config(&env) {
+            env.events()
+                .publish((EVENT_CONFIG_FREEZE, EVENT_VERSION, caller), ());
+        }
         Ok(())
     }
 
     /// Unfreezes the configuration, re-allowing config updates.
-    /// Admin only. Emits a `cfg_unfrz` event.
+    /// Admin only. Emits a `cfg_unfrz` event only on a real frozen → thawed
+    /// transition; a repeated unfreeze on an already-thawed config is a silent
+    /// no-op (#592).
     pub fn unfreeze_config(env: Env, caller: Address) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
-        config_freeze::unfreeze_config(&env);
-        env.events()
-            .publish((EVENT_CONFIG_UNFREEZE, EVENT_VERSION, caller), ());
+        if config_freeze::unfreeze_config(&env) {
+            env.events()
+                .publish((EVENT_CONFIG_UNFREEZE, EVENT_VERSION, caller), ());
+        }
         Ok(())
     }
 
@@ -2508,6 +2514,22 @@ impl SLACalculatorContract {
     // #31 - SLA Audit Mode (View-only calculation)
     // -------------------------------------------------------------------
 
+    /// Rejects `mttr_minutes` values above the documented 365-day input bound.
+    ///
+    /// Enforced at every calculation entry point — `calculate_sla_view`,
+    /// `replay_calculate_sla`, and `calculate_sla` — *before* any overtime
+    /// arithmetic or history scanning runs. This is the gas/DoS guard for the
+    /// implicit i128 margin described in #593: the bound itself, not an
+    /// incidental arithmetic ceiling, is what keeps the worst-case execution
+    /// cost (and the magnitude of any penalty/reward) finite even if the
+    /// configured caps grow.
+    fn validate_mttr_bound(mttr_minutes: u32) -> Result<(), SLAError> {
+        if mttr_minutes > crate::spec::MAX_MTTR_MINUTES {
+            return Err(SLAError::InvalidInput);
+        }
+        Ok(())
+    }
+
     /// Recalculates SLA deterministically without mutating any state or emitting events.
     /// Can be called by anyone for verification and audit purposes.
     ///
@@ -2531,6 +2553,7 @@ impl SLACalculatorContract {
         mttr_minutes: u32,
     ) -> Result<SLAResult, SLAError> {
         Self::check_version(&env)?;
+        Self::validate_mttr_bound(mttr_minutes)?;
         // We bypass pause and operator checks to allow continuous, public verification
         let cfg = Self::load_config(&env, &severity)?;
         let config_version_hash = Self::compute_config_version_hash(&env)?;
@@ -2606,6 +2629,7 @@ impl SLACalculatorContract {
         recorded_at_ledger: u64,
     ) -> Result<(SLAResult, u64), SLAError> {
         Self::check_version(&env)?;
+        Self::validate_mttr_bound(mttr_minutes)?;
         let cfg = Self::load_config(&env, &severity)?;
         let config_version_hash = Self::compute_config_version_hash(&env)?;
 
@@ -2688,6 +2712,7 @@ impl SLACalculatorContract {
         mttr_minutes: u32,
     ) -> Result<SLAResult, SLAError> {
         Self::check_version(&env)?;
+        Self::validate_mttr_bound(mttr_minutes)?;
         Self::require_not_paused(&env)?; // #27
         Self::require_operator(&env, &caller)?; // #28
 
@@ -3051,6 +3076,27 @@ impl SLACalculatorContract {
     /// tiers (critical ≥ high ≥ medium). The low severity is exempt from
     /// the upper-direction check because its per-severity cap (100) can
     /// exceed medium's minimum (10) by design.
+    ///
+    /// # Low-severity exemption (#594)
+    ///
+    /// This is an **explicit, documented carve-out**, not a bug: `low.cap` is
+    /// 100 while `medium` may be configured as low as 10, so `low.penalty >
+    /// medium.penalty` is a *reachable and accepted* configuration today. The
+    /// exemption is directional, not total:
+    ///
+    /// - Updating **low** performs no upper check at all, so `low.penalty` may
+    ///   sit above `medium.penalty` (or even `high`/`critical`) — it is bounded
+    ///   only by its own per-severity cap (100).
+    /// - Updating **medium** (or any higher tier) still enforces
+    ///   `medium.penalty >= low.penalty` via the next-lower check, so an
+    ///   inverted segment can persist but can never be *re-applied* through a
+    ///   medium update. Reverting it requires updating low first.
+    /// - Equality (`low.penalty == medium.penalty`) is always allowed.
+    ///
+    /// Backend implementers consuming `get_config_bundle` must **not** treat a
+    /// low-below-medium segment as a config error; it is a state the contract
+    /// intentionally admits. See `docs/config-validation.md` ("Penalty ladder &
+    /// the low-severity exemption").
     ///
     /// The rule is: for critical, high, and medium, we enforce
     /// `higher.penalty >= lower.penalty`. This prevents accidental

@@ -805,6 +805,79 @@ fn test_unfreeze_emits_event() {
     assert_eq!(version, symbol_short!("v1"));
 }
 
+#[test]
+fn test_repeat_freeze_is_idempotent_and_emits_once() {
+    // (#592) freeze/unfreeze are state-transition-safe: a repeated freeze on
+    // an already-frozen config is a silent no-op, so the event stream carries
+    // exactly one cfg_frz per real transition.
+    let (env, client, actors) = setup();
+    client.freeze_config(&actors.admin);
+    client.freeze_config(&actors.admin);
+    let events = env.events().all();
+    let mut cfg_frz_count: u32 = 0;
+    let mut cfg_unfrz_count: u32 = 0;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if name == symbol_short!("cfg_frz") {
+            cfg_frz_count += 1;
+        } else if name == symbol_short!("cfg_unfrz") {
+            cfg_unfrz_count += 1;
+        }
+    }
+    assert_eq!(cfg_frz_count, 1);
+    assert_eq!(cfg_unfrz_count, 0);
+    assert!(client.is_config_frozen());
+}
+
+#[test]
+fn test_unfreeze_when_thawed_is_noop_and_emits_nothing() {
+    // (#592) A thawed contract answering an unfreeze must neither write nor
+    // emit, so an audit system can reconstruct the frozen window purely from
+    // the event stream.
+    let (env, client, actors) = setup();
+    client.unfreeze_config(&actors.admin);
+    let events = env.events().all();
+    let mut cfg_unfrz_count: u32 = 0;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if name == symbol_short!("cfg_unfrz") {
+            cfg_unfrz_count += 1;
+        }
+    }
+    assert_eq!(cfg_unfrz_count, 0);
+    assert!(!client.is_config_frozen());
+}
+
+#[test]
+fn test_freeze_unfreeze_refreeze_full_lifecycle() {
+    // (#592) The full lifecycle freeze → unfreeze → re-freeze emits one event
+    // per real transition (2 cfg_frz + 1 cfg_unfrz), fully reconstructable
+    // from the stream; no-op calls in between add nothing.
+    let (env, client, actors) = setup();
+    client.freeze_config(&actors.admin);
+    client.freeze_config(&actors.admin); // no-op
+    client.unfreeze_config(&actors.admin);
+    client.unfreeze_config(&actors.admin); // no-op
+    client.freeze_config(&actors.admin);
+    let events = env.events().all();
+    let mut cfg_frz_count: u32 = 0;
+    let mut cfg_unfrz_count: u32 = 0;
+    for i in 0..events.len() {
+        let (_, topics, _) = events.get(i).unwrap();
+        let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
+        if name == symbol_short!("cfg_frz") {
+            cfg_frz_count += 1;
+        } else if name == symbol_short!("cfg_unfrz") {
+            cfg_unfrz_count += 1;
+        }
+    }
+    assert_eq!(cfg_frz_count, 2);
+    assert_eq!(cfg_unfrz_count, 1);
+    assert!(client.is_config_frozen());
+}
+
 // ============================================================
 // SLA business logic correctness
 // ============================================================
@@ -6379,10 +6452,13 @@ fn test_invariance_boundary_mttr_zero() {
 // ============================================================
 
 #[test]
+#[should_panic(expected = "#17")]
 fn test_extreme_mttr_at_max_u32_violates_and_does_not_overflow() {
-    // mttr = u32::MAX with default critical config (threshold=15, penalty=100/min).
-    // overtime = u32::MAX - 15 ≈ 4.29e9; penalty = overtime * 100 as i128.
-    // i128 can hold up to ~1.7e38, so no overflow.
+    // mttr = u32::MAX exceeds the documented 365-day input bound
+    // (MAX_MTTR_MINUTES), so calculate_sla_view must reject it with
+    // InvalidInput (#17) *before* any overtime arithmetic runs. The guard is
+    // the gas/DoS protection of #593: rejection happens at the boundary, so
+    // no penalizing arithmetic is ever attempted on an out-of-range input.
     let env = Env::default();
     env.mock_all_auths();
     env.budget().reset_unlimited();
@@ -6393,14 +6469,24 @@ fn test_extreme_mttr_at_max_u32_violates_and_does_not_overflow() {
     client.initialize(&admin, &op);
 
     let mttr = u32::MAX;
-    let result = client.calculate_sla_view(&symbol_short!("XMTTR"), &symbol_short!("critical"), &mttr);
+    let _ = client.calculate_sla_view(&symbol_short!("XMTTR"), &symbol_short!("critical"), &mttr);
+}
 
-    assert_eq!(result.status, symbol_short!("viol"));
-    assert_eq!(result.payment_type, symbol_short!("pen"));
-    // overtime = (u32::MAX - 15) as i128; penalty = overtime * 100
-    let expected_penalty = -((u32::MAX - 15) as i128 * 100);
-    assert_eq!(result.amount, expected_penalty);
-    assert!(result.amount < 0);
+#[test]
+fn test_mttr_at_max_boundary_accepted_all_entry_points() {
+    // (#593) The documented input bound is MAX_MTTR_MINUTES (365 days). Exactly
+    // at the boundary every calculation entry point computes normally (no
+    // rejection); values above it are rejected with InvalidInput before any
+    // arithmetic runs (asserted by the should_panic case above and the shared
+    // validate_mttr_bound helper in lib.rs).
+    let (env, client, actors) = setup();
+    let m = crate::spec::MAX_MTTR_MINUTES;
+    let view = client.calculate_sla_view(&symbol_short!("M0"), &symbol_short!("critical"), &m);
+    assert_eq!(view.status, symbol_short!("viol"));
+    let (replay, _hash) = client.replay_calculate_sla(&symbol_short!("M1"), &symbol_short!("critical"), &m, &1);
+    assert_eq!(replay.status, symbol_short!("viol"));
+    let calc = client.calculate_sla(&actors.operator, &symbol_short!("M2"), &symbol_short!("critical"), &m);
+    assert_eq!(calc.status, symbol_short!("viol"));
 }
 
 #[test]
@@ -6457,9 +6543,10 @@ fn test_extreme_config_max_valid_low_threshold() {
 
 #[test]
 fn test_extreme_penalty_large_overtime_no_i128_overflow() {
-    // Worst-case: low threshold=1, penalty=100 (max for low), mttr=u32::MAX
-    // overtime = u32::MAX - 1 ≈ 4.29e9; penalty = 4.29e9 * 100 ≈ 4.29e11
-    // i128 max ≈ 1.7e38 — no overflow possible.
+    // Worst-case accepted input: low threshold=1, penalty=100 (max for low),
+    // mttr = MAX_MTTR_MINUTES (525,600, the 365-day input bound of #593).
+    // overtime = MAX_MTTR_MINUTES - 1 ≈ 5.3e5; penalty = 5.3e5 * 100 ≈ 5.3e7.
+    // i128 max ≈ 1.7e38 — no overflow possible at the largest accepted mttr.
     let (_env, client, actors) = setup();
     // reward=151 ensures penalty*1.5=150 < 151 ✓
     // (#487) low.threshold must be >= medium, so lower all severities' thresholds
@@ -6482,9 +6569,10 @@ fn test_extreme_penalty_large_overtime_no_i128_overflow() {
     client2.set_config(&admin2, &symbol_short!("medium"), &1, &10000, &100000);
     client2.set_config(&admin2, &symbol_short!("low"), &1, &100, &151);
 
-    let result = client2.calculate_sla_view(&symbol_short!("OVF"), &symbol_short!("low"), &u32::MAX);
+    let result = client2.calculate_sla_view(&symbol_short!("OVF"), &symbol_short!("low"), &crate::spec::MAX_MTTR_MINUTES);
     assert_eq!(result.status, symbol_short!("viol"));
-    let expected = -((u32::MAX - 1) as i128 * 100);
+    // Largest accepted mttr: overtime = MAX_MTTR_MINUTES - 1; penalty = that * 100.
+    let expected = -((crate::spec::MAX_MTTR_MINUTES - 1) as i128 * 100);
     assert_eq!(result.amount, expected);
 }
 
@@ -6751,6 +6839,43 @@ fn test_set_config_low_accepts_penalty_100() {
     client.set_config(&actors.admin, &symbol_short!("low"), &120, &100, &600);
     let cfg = client.get_config(&symbol_short!("low"));
     assert_eq!(cfg.penalty_per_minute, 100);
+}
+
+#[test]
+fn test_penalty_ladder_low_above_medium_is_intentional_and_accepted() {
+    // (#594) Low is exempt from the cross-severity penalty ladder: its cap
+    // (100) intentionally exceeds medium's minimum (10), so low.penalty >
+    // medium.penalty is a documented, accepted configuration — not an error
+    // (docs/config-validation.md "Penalty ladder & the low-severity exemption").
+    let (_env, client, actors) = setup();
+    // low threshold must be >= medium threshold (240) per threshold ordering.
+    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &90, &151);
+    let low = client.get_config(&symbol_short!("low"));
+    let medium = client.get_config(&symbol_short!("medium"));
+    assert!(low.penalty_per_minute > medium.penalty_per_minute);
+}
+
+#[test]
+#[should_panic(expected = "#9")]
+fn test_penalty_ladder_medium_below_low_rejected() {
+    // (#594) The exemption is directional: updating medium still enforces
+    // medium.penalty >= low.penalty, so a medium value below an existing low
+    // penalty is rejected with InvalidPenalty (#9).
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &90, &151);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &240, &50, &750);
+}
+
+#[test]
+fn test_penalty_ladder_medium_equal_low_accepted() {
+    // (#594) Equality never inverts the ladder: low == medium is allowed, and
+    // the medium update respects medium.penalty >= low.penalty.
+    let (_env, client, actors) = setup();
+    client.set_config(&actors.admin, &symbol_short!("low"), &1440, &25, &151);
+    client.set_config(&actors.admin, &symbol_short!("medium"), &240, &25, &750);
+    let low = client.get_config(&symbol_short!("low"));
+    let medium = client.get_config(&symbol_short!("medium"));
+    assert!(medium.penalty_per_minute >= low.penalty_per_minute);
 }
 
 // --- Rejection does not corrupt existing state ---

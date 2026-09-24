@@ -23,6 +23,15 @@
 //! `ConfigBundle` would fail to compile, and any cross-boundary usage would
 //! surface as a type mismatch at the host boundary – the root cause tracked
 //! in issue #1.
+//!
+//! # Low-severity exemption for consumers (#594)
+//!
+//! When reading a bundle, do **not** flag or reject a configuration where
+//! `low.penalty > medium.penalty`. Low is intentionally exempt from the
+//! cross-severity penalty ladder (its cap of 100 exceeds medium's minimum of
+//! 10), so an inverted low segment is a state the contract deliberately
+//! admits. See `docs/config-validation.md` ("Penalty ladder & the
+//! low-severity exemption").
 
 use soroban_sdk::contracttype;
 
