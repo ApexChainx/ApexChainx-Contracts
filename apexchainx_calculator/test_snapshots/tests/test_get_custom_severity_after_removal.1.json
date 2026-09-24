@@ -592,6 +592,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "HISTLEN"
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "LCFGUPD"
                         },
                         "val": {
@@ -666,7 +674,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 2
                         }
                       },
                       {
@@ -968,7 +976,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "cfg_upd"
+                "symbol": "sev_add"
               },
               {
                 "symbol": "v1"

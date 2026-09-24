@@ -278,10 +278,26 @@
                       },
                       {
                         "key": {
+                          "symbol": "CUSTCFG"
+                        },
+                        "val": {
+                          "map": []
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "HIST"
                         },
                         "val": {
                           "vec": []
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTLEN"
+                        },
+                        "val": {
+                          "u32": 0
                         }
                       },
                       {
@@ -352,7 +368,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 2
                         }
                       },
                       {
@@ -593,7 +609,7 @@
                               "symbol": "auth"
                             },
                             "val": {
-                              "symbol": "none"
+                              "symbol": "addr"
                             }
                           },
                           {
@@ -629,7 +645,7 @@
                               "symbol": "auth"
                             },
                             "val": {
-                              "symbol": "none"
+                              "symbol": "addr"
                             }
                           },
                           {
@@ -1913,6 +1929,42 @@
                               "symbol": "name"
                             },
                             "val": {
+                              "symbol": "get_retention_metrics"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "auth"
+                            },
+                            "val": {
+                              "symbol": "none"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "event"
+                            },
+                            "val": {
+                              "symbol": ""
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "mutates"
+                            },
+                            "val": {
+                              "bool": false
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "name"
+                            },
+                            "val": {
                               "symbol": "get_severity_telemetry"
                             }
                           }
@@ -2093,6 +2145,42 @@
                               "symbol": "name"
                             },
                             "val": {
+                              "symbol": "get_version_negotiation_info"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "map": [
+                          {
+                            "key": {
+                              "symbol": "auth"
+                            },
+                            "val": {
+                              "symbol": "none"
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "event"
+                            },
+                            "val": {
+                              "symbol": ""
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "mutates"
+                            },
+                            "val": {
+                              "bool": false
+                            }
+                          },
+                          {
+                            "key": {
+                              "symbol": "name"
+                            },
+                            "val": {
                               "symbol": "healthcheck"
                             }
                           }
@@ -2105,7 +2193,7 @@
                               "symbol": "auth"
                             },
                             "val": {
-                              "symbol": "admin"
+                              "symbol": "multi"
                             }
                           },
                           {
@@ -2473,7 +2561,7 @@
                               "symbol": "event"
                             },
                             "val": {
-                              "symbol": "cfg_upd"
+                              "symbol": "cfg_rem"
                             }
                           },
                           {
@@ -2617,7 +2705,7 @@
                               "symbol": "event"
                             },
                             "val": {
-                              "symbol": "cfg_upd"
+                              "symbol": "sev_add"
                             }
                           },
                           {

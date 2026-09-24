@@ -7,8 +7,8 @@
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
-    HistoryPage, SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_RET_LIM, EVENT_VERSION,
-    HISTORY_KEY, HISTORY_LEN_KEY, MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
+    HistoryPage, SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_VERSION, HISTORY_KEY,
+    HISTORY_LEN_KEY, MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
 };
 
 /// Upper bound on the number of entries a single pagination call may return.
@@ -258,18 +258,11 @@ pub fn get_config_count(env: &Env) -> Result<u32, SLAError> {
     Ok(configs.len())
 }
 
-/// Sets the retention limit for history entries. Admin only.
-pub fn set_retention_limit(env: &Env, caller: &Address, limit: u32) -> Result<(), SLAError> {
-    crate::SLACalculatorContract::check_version(env)?;
-    crate::SLACalculatorContract::require_admin(env, caller)?;
-    if limit == 0 || limit > MAX_HISTORY_SIZE {
-        return Err(SLAError::RetentionLimitOutOfRange);
-    }
-    env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
-    env.events()
-        .publish((EVENT_RET_LIM, EVENT_VERSION, caller.clone()), (limit,));
-    Ok(())
-}
+/// NOTE (#562): The canonical `set_retention_limit` contract method lives in
+/// `lib.rs` (SC-013). It runs the full policy — `require_not_frozen`, bounds
+/// validation `1..=MAX_HISTORY_SIZE`, the `ret_lim` event, immediate trim on
+/// lowering, and the `pruned` event. This module intentionally exposes only
+/// read-only retention helpers; do NOT re-introduce a retention mutator here.
 
 /// Returns the current retention limit (defaults to MAX_HISTORY_SIZE).
 pub fn get_retention_limit(env: &Env) -> Result<u32, SLAError> {

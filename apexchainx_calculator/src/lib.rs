@@ -183,6 +183,22 @@ pub(crate) const LAST_CALCULATION_TS_KEY: Symbol = symbol_short!("CALCTS");
 /// Per-severity last violation timestamp for weekly windowing. (#101)
 pub(crate) const LAST_VIOLATION_TS_KEY: Symbol = symbol_short!("VIOLTS");
 
+/// Dedicated telemetry lane for custom-severity activity. (#559)
+/// Custom severities are not representable in the four canonical lanes of
+/// `SEVERITY_*_COUNTS_KEY` (a packed `u128` holds exactly 4×32-bit lanes), so
+/// their calculations and violations are recorded here instead of being
+/// misattributed to the critical lane. Layout (packed `u128`):
+///   lane 0 = calculation count, lane 1 = violation count,
+///   lane 2 = last calculation timestamp, lane 3 = last violation timestamp.
+/// The key is lazily created on first custom-severity calculation and absent
+/// keys read as zero, so pre-existing deployments behave correctly untouched.
+pub(crate) const CUSTOM_TELEMETRY_KEY: Symbol = symbol_short!("CUSTEL");
+
+/// Bucket symbol for custom-severity activity in `get_severity_telemetry`.
+/// (#559) All custom severities aggregate into a single trailing bucket so the
+/// four canonical lanes report canonical severities only.
+pub const CUSTOM_TELEMETRY_SEVERITY: Symbol = symbol_short!("custom");
+
 /// Ordered list of historical SLAResult entries.
 pub(crate) const HISTORY_KEY: Symbol = symbol_short!("HIST");
 
@@ -242,6 +258,13 @@ pub(crate) const CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT: u32 = 2;
 /// Hard upper bound on retained history entries. (SC-062)
 /// Configurable down to 1 via set_retention_limit().
 pub(crate) const MAX_HISTORY_SIZE: u32 = 1000;
+
+/// Hard upper bound on `mttr_minutes` accepted by `calculate_sla`,
+/// `calculate_sla_view`, and `replay_calculate_sla`. (#560)
+/// 525,600 minutes = 365 days. Values above this bound are rejected with
+/// `InvalidInput` so estimates and projections stay within a sane range and
+/// the documented error contract is honoured by all three SLA paths.
+pub const MAX_MTTR: u32 = 525_600;
 
 /// Upper bound on the number of entries a single pagination call may return.
 /// Limits above this are clamped so no single call can read the full retained
@@ -2434,6 +2457,12 @@ impl SLACalculatorContract {
     }
 
     /// #101 – Returns per-severity weekly violation-rate telemetry.
+    ///
+    /// Returns one entry per canonical severity in canonical order, plus a
+    /// single trailing `custom` bucket (severity symbol `"custom"`) that
+    /// aggregates all custom-severity activity. The custom bucket is present
+    /// only when custom severities are registered or have recorded counters.
+    /// (#559)
     pub fn get_severity_telemetry(env: Env) -> Result<Vec<SeverityTelemetry>, SLAError> {
         Self::check_version(&env)?;
         let mut telemetry = Vec::new(&env);
@@ -2463,12 +2492,25 @@ impl SLACalculatorContract {
             .instance()
             .get(&CUSTOM_CONFIG_KEY)
             .unwrap_or_else(|| Map::new(&env));
-        for (severity, _) in custom.iter() {
+        // (#559) Custom severities aggregate into a single trailing `custom`
+        // bucket instead of per-severity zero rows, so the canonical lanes
+        // stay canonical and custom activity is still observable. The bucket
+        // is only appended when trailing a registered custom severity or when
+        // the dedicated `CUSTEL` lane carries any counters.
+        let custom_counters = Self::load_counts(&env, &CUSTOM_TELEMETRY_KEY);
+        if custom.len() > 0 || custom_counters != 0 {
+            let calc_count = Self::count_lane(custom_counters, 0);
+            let violation_count = Self::count_lane(custom_counters, 1);
+            let violation_rate = if calc_count == 0 {
+                0u32
+            } else {
+                (violation_count.saturating_mul(100) / calc_count).min(100)
+            };
             telemetry.push_back(SeverityTelemetry {
-                severity,
-                calculations: 0,
-                violations: 0,
-                violation_rate: 0,
+                severity: CUSTOM_TELEMETRY_SEVERITY,
+                calculations: calc_count,
+                violations: violation_count,
+                violation_rate,
             });
         }
 
@@ -2484,7 +2526,8 @@ impl SLACalculatorContract {
     ///
     /// # Input constraints
     ///
-    /// - `mttr_minutes` must be ≤ 525,600 (365 days). Values exceeding this bound are rejected with `InvalidInput`.
+    /// - `mttr_minutes` must be ≤ `MAX_MTTR` (525,600 minutes / 365 days). Values
+    ///   exceeding this bound are rejected with `InvalidInput`.
     pub fn calculate_sla_view(
         env: Env,
         outage_id: Symbol,
@@ -2492,6 +2535,9 @@ impl SLACalculatorContract {
         mttr_minutes: u32,
     ) -> Result<SLAResult, SLAError> {
         Self::check_version(&env)?;
+        if mttr_minutes > MAX_MTTR {
+            return Err(SLAError::InvalidInput);
+        }
         // We bypass pause and operator checks to allow continuous, public verification
         let cfg = Self::load_config(&env, &severity)?;
         let config_version_hash = Self::compute_config_version_hash(&env)?;
@@ -2543,6 +2589,11 @@ impl SLACalculatorContract {
     /// audit purposes but the current config is used for evaluation.
     /// Once per-ledger config snapshots are added, this function will
     /// look up the config active at `recorded_at_ledger`.
+    ///
+    /// # Input constraints
+    ///
+    /// - `mttr_minutes` must be ≤ `MAX_MTTR` (525,600 minutes / 365 days).
+    ///   Values exceeding this bound are rejected with `InvalidInput`. (#560)
     pub fn replay_calculate_sla(
         env: Env,
         outage_id: Symbol,
@@ -2551,6 +2602,9 @@ impl SLACalculatorContract {
         recorded_at_ledger: u64,
     ) -> Result<(SLAResult, u64), SLAError> {
         Self::check_version(&env)?;
+        if mttr_minutes > MAX_MTTR {
+            return Err(SLAError::InvalidInput);
+        }
         let cfg = Self::load_config(&env, &severity)?;
         let config_version_hash = Self::compute_config_version_hash(&env)?;
 
@@ -2593,16 +2647,18 @@ impl SLACalculatorContract {
     /// | `Unauthorized` | Caller is not the operator |
     /// | `ConfigNotFound` | No configuration exists for the requested severity |
     /// | `DuplicateOutageInput` | Same `outage_id` submitted with conflicting inputs; emits a `dup_input` event carrying the stored result |
-    /// | `InvalidInput` | Input parameter violates documented constraints (e.g., mttr_minutes exceeds maximum allowed) |
+    /// | `InvalidInput` | Input parameter violates documented constraints (e.g., mttr_minutes exceeds MAX_MTTR of 525,600) |
     /// | `InvalidPenaltyAmount` | Penalty computation overflowed or produced a non-negative value |
     /// | `InvalidRewardAmount` | Reward computation overflowed or produced a non-positive value |
     /// Records an SLA decision for `outage_id`. Operator only.
     ///
     /// # Input constraints
     ///
-    /// - `mttr_minutes` is an unsigned minute count; penalties and rewards are
-    ///   computed with checked arithmetic so an overflowing amount surfaces as
-    ///   `InvalidPenaltyAmount` / `InvalidRewardAmount` rather than panicking.
+    /// - `mttr_minutes` must be ≤ `MAX_MTTR` (525,600 minutes / 365 days).
+    ///   Values exceeding this bound are rejected with `InvalidInput`.
+    ///   Penalties and rewards are computed with checked arithmetic so an
+    ///   overflowing amount surfaces as `InvalidPenaltyAmount` /
+    ///   `InvalidRewardAmount` rather than panicking.
     ///
     /// # Repeated submissions for the same outage_id
     ///
@@ -2633,6 +2689,9 @@ impl SLACalculatorContract {
         mttr_minutes: u32,
     ) -> Result<SLAResult, SLAError> {
         Self::check_version(&env)?;
+        if mttr_minutes > MAX_MTTR {
+            return Err(SLAError::InvalidInput);
+        }
         Self::require_not_paused(&env)?; // #27
         Self::require_operator(&env, &caller)?; // #28
 
@@ -3257,7 +3316,13 @@ impl SLACalculatorContract {
     /// (release) or panicking (debug). A saturated lane is treated as "many"
     /// and is never reset to zero by overflow.
     fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
-        let index = Self::canonical_severity_index(severity).unwrap_or(0);
+        // Custom severities have no canonical lane; route them to the dedicated
+        // `CUSTEL` bucket so a custom calculation can never pollute the
+        // critical (index 0) lane. (#559)
+        let Some(index) = Self::canonical_severity_index(severity) else {
+            Self::record_custom_severity_telemetry(env, met);
+            return;
+        };
         let mut calculations = Self::load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
         let mut violations = Self::load_counts(env, &SEVERITY_VIOL_COUNTS_KEY);
         let mut last_calculations = Self::load_counts(env, &LAST_CALCULATION_TS_KEY);
@@ -3311,6 +3376,50 @@ impl SLACalculatorContract {
         env.storage()
             .instance()
             .set(&LAST_VIOLATION_TS_KEY, &last_violations);
+    }
+
+    /// Records telemetry for a custom-severity calculation in the dedicated
+    /// `CUSTEL` lane. (#559)
+    ///
+    /// Mirrors the canonical weekly-reset semantics on a single packed `u128`:
+    ///  - lane 0 = calculation count
+    ///  - lane 1 = violation count
+    ///  - lane 2 = last calculation timestamp
+    ///  - lane 3 = last violation timestamp
+    ///
+    /// Counters are `u32` lanes incremented with `saturating_add(1)` and reset
+    /// lazily once 7 days (604,800 s) elapse since the lane's own timestamp.
+    fn record_custom_severity_telemetry(env: &Env, met: bool) {
+        let mut counters = Self::load_counts(env, &CUSTOM_TELEMETRY_KEY);
+        let now = env.ledger().timestamp();
+        let week_seconds = 7u64 * 24u64 * 60u64 * 60u64;
+        let last_calc = Self::count_lane(counters, 2) as u64;
+        let last_violation = Self::count_lane(counters, 3) as u64;
+        let calc_stale = last_calc != 0 && now.saturating_sub(last_calc) >= week_seconds;
+        let violation_stale = last_violation != 0 && now.saturating_sub(last_violation) >= week_seconds;
+        if calc_stale {
+            counters = Self::set_count_lane(counters, 0, 0);
+        }
+        if violation_stale {
+            counters = Self::set_count_lane(counters, 1, 0);
+        }
+
+        counters = Self::set_count_lane(counters, 0, Self::count_lane(counters, 0).saturating_add(1));
+        if !met {
+            counters = Self::set_count_lane(counters, 1, Self::count_lane(counters, 1).saturating_add(1));
+        }
+
+        let current_ts = if now > u64::from(u32::MAX) {
+            u32::MAX
+        } else {
+            now as u32
+        };
+        counters = Self::set_count_lane(counters, 2, current_ts);
+        if !met {
+            counters = Self::set_count_lane(counters, 3, current_ts);
+        }
+
+        env.storage().instance().set(&CUSTOM_TELEMETRY_KEY, &counters);
     }
 
     fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
@@ -3620,7 +3729,10 @@ impl SLACalculatorContract {
 
     /// Set the maximum number of history entries to retain.
     /// Must be between 1 and MAX_HISTORY_SIZE (1000). Admin only.
-    /// The new limit takes effect on the next `calculate_sla` call.
+    ///
+    /// The limit takes effect **immediately** in the same call: lowering it
+    /// below the current history length prunes the oldest entries right away
+    /// (emitting a `pruned` event after `ret_lim`); raising it never trims.
     pub fn set_retention_limit(env: Env, caller: Address, limit: u32) -> Result<(), SLAError> {
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;

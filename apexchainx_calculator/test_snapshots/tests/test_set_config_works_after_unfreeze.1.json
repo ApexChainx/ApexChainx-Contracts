@@ -591,6 +591,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "CUSTCFG"
+                        },
+                        "val": {
+                          "map": []
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "FREEZE"
                         },
                         "val": {
@@ -603,6 +611,14 @@
                         },
                         "val": {
                           "vec": []
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTLEN"
+                        },
+                        "val": {
+                          "u32": 0
                         }
                       },
                       {
@@ -681,7 +697,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 2
                         }
                       },
                       {

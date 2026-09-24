@@ -59,6 +59,117 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
+                  "symbol": "low"
+                },
+                {
+                  "u32": 1440
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 10
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 600
+                  }
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "set_config",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "symbol": "medium"
+                },
+                {
+                  "u32": 240
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 25
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 750
+                  }
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "set_config",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "symbol": "high"
+                },
+                {
+                  "u32": 120
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 50
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 750
+                  }
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "function_name": "set_config",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
                   "symbol": "critical"
                 },
                 {
@@ -156,7 +267,7 @@
                           "map": [
                             {
                               "key": {
-                                "u64": 5548536733440986697
+                                "u64": 1398455012542980242
                               },
                               "val": {
                                 "map": [
@@ -181,7 +292,7 @@
                                                     "val": {
                                                       "i128": {
                                                         "hi": 0,
-                                                        "lo": 10000
+                                                        "lo": 100
                                                       }
                                                     }
                                                   },
@@ -192,7 +303,7 @@
                                                     "val": {
                                                       "i128": {
                                                         "hi": 0,
-                                                        "lo": 100000
+                                                        "lo": 750
                                                       }
                                                     }
                                                   },
@@ -201,7 +312,7 @@
                                                       "symbol": "threshold_minutes"
                                                     },
                                                     "val": {
-                                                      "u32": 60
+                                                      "u32": 15
                                                     }
                                                   }
                                                 ]
@@ -354,7 +465,697 @@
                                                       "symbol": "threshold_minutes"
                                                     },
                                                     "val": {
+                                                      "u32": 1440
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "low"
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "version"
+                                    },
+                                    "val": {
+                                      "symbol": "v1"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "u64": 3534722400334475983
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "entries"
+                                    },
+                                    "val": {
+                                      "vec": [
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 100
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 750
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 15
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "critical"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 50
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 750
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
                                                       "u32": 120
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "high"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 25
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 750
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 240
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "medium"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 10
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 600
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 1440
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "low"
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "version"
+                                    },
+                                    "val": {
+                                      "symbol": "v1"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "u64": 3719113818550552639
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "entries"
+                                    },
+                                    "val": {
+                                      "vec": [
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 10000
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 100000
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 60
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "critical"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 50
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 750
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 120
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "high"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 25
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 750
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 240
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "medium"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 10
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 600
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 1440
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "low"
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  {
+                                    "key": {
+                                      "symbol": "version"
+                                    },
+                                    "val": {
+                                      "symbol": "v1"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            {
+                              "key": {
+                                "u64": 5408460446131561902
+                              },
+                              "val": {
+                                "map": [
+                                  {
+                                    "key": {
+                                      "symbol": "entries"
+                                    },
+                                    "val": {
+                                      "vec": [
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 100
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 750
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 15
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "critical"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 50
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 750
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 30
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "high"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 25
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 750
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 240
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            },
+                                            {
+                                              "key": {
+                                                "symbol": "severity"
+                                              },
+                                              "val": {
+                                                "symbol": "medium"
+                                              }
+                                            }
+                                          ]
+                                        },
+                                        {
+                                          "map": [
+                                            {
+                                              "key": {
+                                                "symbol": "config"
+                                              },
+                                              "val": {
+                                                "map": [
+                                                  {
+                                                    "key": {
+                                                      "symbol": "penalty_per_minute"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 10
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "reward_base"
+                                                    },
+                                                    "val": {
+                                                      "i128": {
+                                                        "hi": 0,
+                                                        "lo": 600
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "key": {
+                                                      "symbol": "threshold_minutes"
+                                                    },
+                                                    "val": {
+                                                      "u32": 1440
                                                     }
                                                   }
                                                 ]
@@ -465,7 +1266,7 @@
                                       "symbol": "threshold_minutes"
                                     },
                                     "val": {
-                                      "u32": 30
+                                      "u32": 120
                                     }
                                   }
                                 ]
@@ -504,7 +1305,7 @@
                                       "symbol": "threshold_minutes"
                                     },
                                     "val": {
-                                      "u32": 120
+                                      "u32": 1440
                                     }
                                   }
                                 ]
@@ -543,7 +1344,7 @@
                                       "symbol": "threshold_minutes"
                                     },
                                     "val": {
-                                      "u32": 60
+                                      "u32": 240
                                     }
                                   }
                                 ]
@@ -554,10 +1355,26 @@
                       },
                       {
                         "key": {
+                          "symbol": "CUSTCFG"
+                        },
+                        "val": {
+                          "map": []
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "HIST"
                         },
                         "val": {
                           "vec": []
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTLEN"
+                        },
+                        "val": {
+                          "u32": 0
                         }
                       },
                       {
@@ -636,7 +1453,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 2
                         }
                       },
                       {
@@ -726,6 +1543,105 @@
                 "key": {
                   "ledger_key_nonce": {
                     "nonce": 1033654523790656264
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 2032731177588607455
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 2032731177588607455
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 4270020994084947596
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 4270020994084947596
+                  }
+                },
+                "durability": "temporary",
+                "val": "void"
+              }
+            },
+            "ext": "v0"
+          },
+          6311999
+        ]
+      ],
+      [
+        {
+          "contract_data": {
+            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+            "key": {
+              "ledger_key_nonce": {
+                "nonce": 4837995959683129791
+              }
+            },
+            "durability": "temporary"
+          }
+        },
+        [
+          {
+            "last_modified_ledger_seq": 0,
+            "data": {
+              "contract_data": {
+                "ext": "v0",
+                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+                "key": {
+                  "ledger_key_nonce": {
+                    "nonce": 4837995959683129791
                   }
                 },
                 "durability": "temporary",
@@ -840,6 +1756,339 @@
               },
               {
                 "symbol": "initialize"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "set_config"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "symbol": "low"
+                },
+                {
+                  "u32": 1440
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 10
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 600
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "cfg_upd"
+              },
+              {
+                "symbol": "v1"
+              },
+              {
+                "symbol": "low"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 1440
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 10
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 600
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "set_config"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "set_config"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "symbol": "medium"
+                },
+                {
+                  "u32": 240
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 25
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 750
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "cfg_upd"
+              },
+              {
+                "symbol": "v1"
+              },
+              {
+                "symbol": "medium"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 240
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 25
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 750
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "set_config"
+              }
+            ],
+            "data": "void"
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": null,
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_call"
+              },
+              {
+                "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
+              },
+              {
+                "symbol": "set_config"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                },
+                {
+                  "symbol": "high"
+                },
+                {
+                  "u32": 120
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 50
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 750
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "contract",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "cfg_upd"
+              },
+              {
+                "symbol": "v1"
+              },
+              {
+                "symbol": "high"
+              }
+            ],
+            "data": {
+              "vec": [
+                {
+                  "u32": 120
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 50
+                  }
+                },
+                {
+                  "i128": {
+                    "hi": 0,
+                    "lo": 750
+                  }
+                }
+              ]
+            }
+          }
+        }
+      },
+      "failed_call": false
+    },
+    {
+      "event": {
+        "ext": "v0",
+        "contract_id": "0000000000000000000000000000000000000000000000000000000000000001",
+        "type_": "diagnostic",
+        "body": {
+          "v0": {
+            "topics": [
+              {
+                "symbol": "fn_return"
+              },
+              {
+                "symbol": "set_config"
               }
             ],
             "data": "void"
@@ -1028,7 +2277,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 5548536733440986697
+                    "u64": 3719113818550552639
                   }
                 },
                 {
