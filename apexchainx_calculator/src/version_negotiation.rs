@@ -14,10 +14,13 @@
 //!
 //! # Compatibility Rules
 //!
-//! - Contracts with the same `protocol_version` and `storage_version` are
-//!   fully compatible.
+//! - Contracts with the same `protocol_version`, `storage_version`,
+//!   `result_schema_version`, and `event_version` are fully compatible.
 //! - If `protocol_version` differs but both are within the `min_compatible`
 //!   range, they are backward-compatible (negotiated).
+//! - `storage_version`, `result_schema_version`, and `event_version` must
+//!   match exactly (schema/event drift is never negotiable — #601); any
+//!   mismatch fails the handshake and a deployment should be blocked.
 //! - If any contract's version is outside the acceptable range, negotiation
 //!   fails and a deployment should be blocked.
 //!
@@ -67,6 +70,10 @@ pub struct VersionNegotiationInfo {
     pub is_paused: bool,
     /// Whether the contract requires storage migration.
     pub needs_migration: bool,
+    /// The result-schema version this contract serializes (#601).
+    pub result_schema_version: u32,
+    /// The event ABI version this contract emits (#601).
+    pub event_version: Symbol,
 }
 
 /// The outcome of a version negotiation between multiple contracts.
@@ -93,6 +100,11 @@ pub struct VersionMismatchDetail {
     pub reported_protocol: u32,
     /// The minimum compatible version required by another contract.
     pub required_min: u32,
+    /// Which version dimension mismatched: "protocol", "storage",
+    /// "result_schema", or "event" (#601). For the "event" dimension the two
+    /// numeric fields carry `0` (event versions are symbols compared
+    /// directly; the involved versions are in the peer/self infos).
+    pub dimension: Symbol,
 }
 
 /// Full result of a version negotiation across a set of contracts.
@@ -136,6 +148,8 @@ pub fn build_negotiation_info(
         min_compatible_protocol: MIN_COMPATIBLE_PROTOCOL,
         is_paused,
         needs_migration: storage_version != expected_version,
+        result_schema_version: crate::RESULT_SCHEMA_VERSION,
+        event_version: crate::event_schema::EVENT_VERSION,
     }
 }
 
@@ -162,6 +176,7 @@ pub fn negotiate_contract_versions(
                 contract_name: peer.contract_name.clone(),
                 reported_protocol: peer.protocol_version,
                 required_min: our_info.min_compatible_protocol,
+                dimension: Symbol::new(env, "protocol"),
             });
             outcome = NegotiationOutcome::Incompatible;
         }
@@ -172,6 +187,42 @@ pub fn negotiate_contract_versions(
                 contract_name: our_info.contract_name.clone(),
                 reported_protocol: our_info.protocol_version,
                 required_min: peer.min_compatible_protocol,
+                dimension: Symbol::new(env, "protocol"),
+            });
+            outcome = NegotiationOutcome::Incompatible;
+        }
+
+        // Schema/event dimensions are exact-match: a compatible protocol
+        // handshake must NOT tolerate storage, result-schema, or event-ABI
+        // drift, because that is exactly the deployment the handshake exists
+        // to prevent (#601: co-bump invariant enforced in the handshake, not
+        // just in tests).
+        if peer.storage_version != our_info.storage_version {
+            mismatches.push_back(VersionMismatchDetail {
+                contract_name: peer.contract_name.clone(),
+                reported_protocol: peer.storage_version,
+                required_min: our_info.storage_version,
+                dimension: Symbol::new(env, "storage"),
+            });
+            outcome = NegotiationOutcome::Incompatible;
+        }
+
+        if peer.result_schema_version != our_info.result_schema_version {
+            mismatches.push_back(VersionMismatchDetail {
+                contract_name: peer.contract_name.clone(),
+                reported_protocol: peer.result_schema_version,
+                required_min: our_info.result_schema_version,
+                dimension: Symbol::new(env, "result_schema"),
+            });
+            outcome = NegotiationOutcome::Incompatible;
+        }
+
+        if peer.event_version != our_info.event_version {
+            mismatches.push_back(VersionMismatchDetail {
+                contract_name: peer.contract_name.clone(),
+                reported_protocol: 0,
+                required_min: 0,
+                dimension: Symbol::new(env, "event"),
             });
             outcome = NegotiationOutcome::Incompatible;
         }
@@ -219,6 +270,22 @@ mod tests {
         paused: bool,
         needs_mig: bool,
     ) -> VersionNegotiationInfo {
+        // Default schema/event dims match build_negotiation_info's
+        // (RESULT_SCHEMA_VERSION = 1, EVENT_VERSION = "v1").
+        let event_v1 = symbol_short!("v1");
+        make_info_full(name, protocol, storage, min_compat, paused, needs_mig, 1, &event_v1)
+    }
+
+    fn make_info_full(
+        name: &str,
+        protocol: u32,
+        storage: u32,
+        min_compat: u32,
+        paused: bool,
+        needs_mig: bool,
+        result_schema: u32,
+        event: &Symbol,
+    ) -> VersionNegotiationInfo {
         VersionNegotiationInfo {
             contract_name: Symbol::new(&Env::default(), name),
             protocol_version: protocol,
@@ -226,6 +293,8 @@ mod tests {
             min_compatible_protocol: min_compat,
             is_paused: paused,
             needs_migration: needs_mig,
+            result_schema_version: result_schema,
+            event_version: event.clone(),
         }
     }
 
@@ -318,6 +387,60 @@ mod tests {
         let result = negotiate_contract_versions(&env, &our, &peers);
         assert_eq!(result.outcome, NegotiationOutcome::Incompatible);
         assert_eq!(result.mismatches.len(), 2);
+    }
+
+    #[test]
+    fn test_storage_schema_mismatch_is_incompatible() {
+        // (#601) Protocol handshake alone is not enough: a peer on the same
+        // protocol but a newer storage layout must be rejected.
+        let env = Env::default();
+        let our = build_negotiation_info(1, 1, false); // storage 1
+        let mut peers = Vec::new(&env);
+        let peer = make_info_full("pay_escro", 1, 2, 1, false, true, 1, &symbol_short!("v1"));
+        peers.push_back(peer);
+
+        let result = negotiate_contract_versions(&env, &our, &peers);
+        assert_eq!(result.outcome, NegotiationOutcome::Incompatible);
+        let d = result.mismatches.get(0).unwrap();
+        assert_eq!(d.contract_name, symbol_short!("pay_escro"));
+        assert_eq!(d.dimension, Symbol::new(&env, "storage"));
+        assert_eq!(d.reported_protocol, 2);
+        assert_eq!(d.required_min, 1);
+    }
+
+    #[test]
+    fn test_result_schema_mismatch_is_incompatible() {
+        // (#601) A peer that serializes results under a different schema
+        // version is a broken-ABI peer and must fail the handshake.
+        let env = Env::default();
+        let our = build_negotiation_info(1, 1, false); // result schema 1
+        let mut peers = Vec::new(&env);
+        peers.push_back(make_info_full("settle", 1, 1, 1, false, false, 2, &symbol_short!("v1")));
+
+        let result = negotiate_contract_versions(&env, &our, &peers);
+        assert_eq!(result.outcome, NegotiationOutcome::Incompatible);
+        let d = result.mismatches.get(0).unwrap();
+        assert_eq!(d.contract_name, symbol_short!("settle"));
+        assert_eq!(d.dimension, Symbol::new(&env, "result_schema"));
+        assert_eq!(d.reported_protocol, 2);
+        assert_eq!(d.required_min, 1);
+    }
+
+    #[test]
+    fn test_event_version_mismatch_is_incompatible() {
+        // (#601) A peer emitting an older (or newer) event ABI while agreeing
+        // on protocol/storage/result-schema is still a broken-ABI peer.
+        let env = Env::default();
+        let our = build_negotiation_info(1, 1, false); // event v1
+        let mut peers = Vec::new(&env);
+        let peer = make_info_full("pay_escro", 1, 1, 1, false, false, 1, &symbol_short!("v2"));
+        peers.push_back(peer);
+
+        let result = negotiate_contract_versions(&env, &our, &peers);
+        assert_eq!(result.outcome, NegotiationOutcome::Incompatible);
+        let d = result.mismatches.get(0).unwrap();
+        assert_eq!(d.contract_name, symbol_short!("pay_escro"));
+        assert_eq!(d.dimension, Symbol::new(&env, "event"));
     }
 
     #[test]
