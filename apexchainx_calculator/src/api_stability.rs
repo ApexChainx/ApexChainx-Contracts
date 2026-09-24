@@ -222,7 +222,7 @@ mod tests {
         );
         assert_eq!(
             contract_info.unwrap().1,
-            11,
+            12,
             "ContractInfo field count changed — bump CONTRACT_INFO_SCHEMA_VERSION"
         );
 

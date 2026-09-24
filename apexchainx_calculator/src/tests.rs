@@ -3275,6 +3275,87 @@ fn test_get_history_page_offset_plus_limit_saturates() {
     assert_eq!(page.get(0).unwrap().outage_id, Symbol::new(&_env, "PG_SAT_3"));
 }
 
+/// #597 – The pagination cap is the single spec-backed constant
+/// (`history::MAX_PAGE_SIZE`), and clamping happens at that exported value: a
+/// page can never exceed it, and a probe just above it is clamped back down.
+#[test]
+fn test_max_page_size_is_single_exported_constant_and_clamps() {
+    use crate::history::MAX_PAGE_SIZE as exported_max_page_size;
+
+    let (_env, client, actors) = setup();
+
+    // Exceeds MAX_PAGE_SIZE so the clamp is provable in both methods.
+    for i in 0..(exported_max_page_size + 20) {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_CLAMP_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // A limit above the exported value is clamped, not honoured.
+    let page = client.get_history_page(&0, &(exported_max_page_size + 50));
+    assert_eq!(page.len(), exported_max_page_size);
+
+    let meta = client.get_history_page_with_meta(&0, &(exported_max_page_size + 50));
+    assert_eq!(meta.items.len(), exported_max_page_size);
+    assert_eq!(meta.total, exported_max_page_size + 20);
+    assert!(meta.has_more);
+
+    // The exported name is exactly the spec-backed constant (#409), so the
+    // crate root can never hold a second value that drifts from it.
+    assert_eq!(exported_max_page_size, crate::history::MAX_PAGE_SIZE);
+    assert_eq!(crate::MAX_PAGE_SIZE, crate::history::MAX_PAGE_SIZE);
+}
+
+/// #598 – The free-form `history` module accessors (`history::get_history_page`,
+/// `history::get_history_page_with_meta`) must route through the same slicing
+/// implementation as the contract methods, including the `offset + limit` wrap
+/// case, so neither surface can drift from the other.
+#[test]
+fn test_history_free_form_accessors_delegate_to_shared_slicing() {
+    let (_env, client, actors) = setup();
+
+    for i in 0..5u32 {
+        let oid = Symbol::new(&_env, &alloc::format!("PG_DELEG_{}", i));
+        client.calculate_sla(&actors.operator, &oid, &symbol_short!("low"), &10);
+    }
+
+    // Contract surface (invoked through the contract client).
+    let contract_page = client.get_history_page(&3, &(u32::MAX - 1));
+    let contract_meta = client.get_history_page_with_meta(&3, &(u32::MAX - 1));
+
+    // Free-form surface (invoked directly, inside the contract storage context).
+    let (free_page, free_meta) = _env.as_contract(&client.address, || {
+        let page = crate::history::get_history_page(&_env, 3, u32::MAX - 1).unwrap();
+        let meta = crate::history::get_history_page_with_meta(&_env, 3, u32::MAX - 1).unwrap();
+        (page, meta)
+    });
+
+    // offset (3) + limit (u32::MAX - 1) saturates to the real history length:
+    // the shared implementation must return the tail, not a wrapped slice.
+    assert_eq!(free_page.len(), contract_page.len());
+    assert_eq!(free_page.len(), 2);
+    for i in 0..contract_page.len() {
+        assert_eq!(
+            free_page.get(i).unwrap().outage_id,
+            contract_page.get(i).unwrap().outage_id
+        );
+    }
+    assert_eq!(
+        free_page.get(0).unwrap().outage_id,
+        Symbol::new(&_env, "PG_DELEG_3")
+    );
+    assert_eq!(
+        free_page.get(1).unwrap().outage_id,
+        Symbol::new(&_env, "PG_DELEG_4")
+    );
+
+    // Metadata accessor agrees with the contract surface on total and has_more.
+    assert_eq!(free_meta.total, contract_meta.total);
+    assert_eq!(free_meta.total, 5);
+    assert_eq!(free_meta.items.len(), contract_meta.items.len());
+    assert_eq!(free_meta.has_more, contract_meta.has_more);
+    assert!(!free_meta.has_more);
+}
+
 #[test]
 fn test_get_history_page_zero_limit_returns_empty() {
     let (_env, client, actors) = setup();

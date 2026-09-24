@@ -8,6 +8,7 @@
     "test:all": "tsx --test tests/*.test.ts scripts/release-replay.test.ts ts/parity/readSemanticsParity.test.ts",
     "test:property": "tsx --test tests/*.test.ts",
     "test:offchain": "tsx offchain/eventSizeRegression.ts && tsx offchain/readCostRegression.ts && tsx offchain/governanceConsistency.ts && tsx offchain/contractMetadata.ts",
+    "check:pers-store": "tsx pers-store/generate-fixtures.ts",
     "release-replay": "tsx scripts/release-replay.ts",
     "test:parity": "tsx --test ts/parity/readSemanticsParity.test.ts",
     "typecheck": "tsc --noEmit"
