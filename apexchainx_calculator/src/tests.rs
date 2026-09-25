@@ -525,6 +525,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
     //   SEVERITY_VIOL_COUNTS_KEY   = "VIOLCNT"
     //   LAST_CALCULATION_TS_KEY     = "CALCTS"
     //   LAST_VIOLATION_TS_KEY       = "VIOLTS"
+    //   CUSTOM_TELEMETRY_KEY        = "CUSTEL"   (dedicated custom lane for #559)
     //   HISTORY_KEY                = "HIST"
     //   HISTORY_LEN_KEY            = "HISTLEN"  (cached history length for issue #463)
     //   HIST_ENTRY_KEY             = "HISTE"    (v3 per-entry sub-key prefix, #582)
@@ -554,6 +555,7 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         SEVERITY_VIOL_COUNTS_KEY,
         LAST_CALCULATION_TS_KEY,
         LAST_VIOLATION_TS_KEY,
+        CUSTOM_TELEMETRY_KEY,
         HISTORY_KEY,
         HISTORY_LEN_KEY,
         HIST_ENTRY_KEY,
@@ -6722,6 +6724,41 @@ fn test_invariance_boundary_mttr_zero() {
 // ============================================================
 
 #[test]
+fn test_extreme_mttr_at_max_boundary_violates_and_does_not_overflow() {
+    // mttr = MAX_MTTR (525,600) with default critical config (threshold=15, penalty=100/min).
+    // overtime = MAX_MTTR - 15; penalty = overtime * 100 as i128 — no overflow.
+    // mttr at MAX_MTTR + 1 must be rejected with InvalidInput. (#560)
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    let mttr = MAX_MTTR;
+    let result = client.calculate_sla_view(&symbol_short!("XMTTR"), &symbol_short!("critical"), &mttr);
+
+    assert_eq!(result.status, symbol_short!("viol"));
+    assert_eq!(result.payment_type, symbol_short!("pen"));
+    // overtime = (MAX_MTTR - 15) as i128; penalty = overtime * 100
+    let expected_penalty = -((MAX_MTTR - 15) as i128 * 100);
+    assert_eq!(result.amount, expected_penalty);
+    assert!(result.amount < 0);
+
+    // One above the documented maximum is rejected — exactly per the documented
+    // error contract (the untruncated u32::MAX math is exercised by the
+    // compute_result-level fuzz suites instead).
+    let rejected = client.try_calculate_sla_view(
+        &symbol_short!("XMTTR1"),
+        &symbol_short!("critical"),
+        &(MAX_MTTR + 1),
+    );
+    assert!(error_responses::is_invalid_input(&rejected.unwrap_err().unwrap()));
+}
+
+#[test]
 #[should_panic(expected = "#17")]
 fn test_extreme_mttr_at_max_u32_violates_and_does_not_overflow() {
     // mttr = u32::MAX exceeds the documented 365-day input bound
@@ -6844,6 +6881,69 @@ fn test_extreme_penalty_large_overtime_no_i128_overflow() {
     // Largest accepted mttr: overtime = MAX_MTTR_MINUTES - 1; penalty = that * 100.
     let expected = -((crate::spec::MAX_MTTR_MINUTES - 1) as i128 * 100);
     assert_eq!(result.amount, expected);
+
+    // The same upper bound applies to the mutating and replay paths. (#560)
+    let mutating_rejected = client2.try_calculate_sla(
+        &op2,
+        &symbol_short!("OVF1"),
+        &symbol_short!("low"),
+        &(MAX_MTTR + 1),
+    );
+    assert!(error_responses::is_invalid_input(
+        &mutating_rejected.unwrap_err().unwrap()
+    ));
+    let replay_rejected =
+        client2.try_replay_calculate_sla(&symbol_short!("OVF2"), &symbol_short!("low"), &(MAX_MTTR + 1), &0);
+    assert!(error_responses::is_invalid_input(
+        &replay_rejected.unwrap_err().unwrap()
+    ));
+}
+
+#[test]
+fn test_max_mttr_boundary_accepted_and_bound_exceeded_rejected() {
+    // #560 – the documented maximum (525,600 / 365 days) is accepted on all
+    // three paths; exactly one minute above is rejected with InvalidInput.
+    let env = Env::default();
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
+
+    // At the boundary: accepted, evaluated as a violation (default critical
+    // threshold = 15) on every path.
+    let mutating = client.calculate_sla(&op, &symbol_short!("B1"), &symbol_short!("critical"), &MAX_MTTR);
+    assert_eq!(mutating.status, symbol_short!("viol"));
+    let view = client.calculate_sla_view(&symbol_short!("B2"), &symbol_short!("critical"), &MAX_MTTR);
+    assert_eq!(view.status, symbol_short!("viol"));
+    let (replay, _) = client.replay_calculate_sla(
+        &symbol_short!("B3"),
+        &symbol_short!("critical"),
+        &MAX_MTTR,
+        &u64::from(env.ledger().sequence()),
+    );
+    assert_eq!(replay.status, symbol_short!("viol"));
+
+    // One above the boundary: rejected with InvalidInput on every path.
+    let above = MAX_MTTR + 1;
+    let mutating_err =
+        client.try_calculate_sla(&op, &symbol_short!("X1"), &symbol_short!("critical"), &above);
+    assert!(error_responses::is_invalid_input(
+        &mutating_err.unwrap_err().unwrap()
+    ));
+    let view_err = client.try_calculate_sla_view(&symbol_short!("X2"), &symbol_short!("critical"), &above);
+    assert!(error_responses::is_invalid_input(&view_err.unwrap_err().unwrap()));
+    let replay_err = client.try_replay_calculate_sla(
+        &symbol_short!("X3"),
+        &symbol_short!("critical"),
+        &above,
+        &u64::from(env.ledger().sequence()),
+    );
+    assert!(error_responses::is_invalid_input(
+        &replay_err.unwrap_err().unwrap()
+    ));
 }
 
 #[test]
@@ -9546,40 +9646,61 @@ fn test_economic_exposure_with_custom_severity_pins_canonical_only_behavior() {
     assert_eq!(exposure.total_penalty_per_minute, 185);
 }
 
-/// #504 - Pins current behavior of get_severity_telemetry when calculate_sla runs against a custom severity.
-/// Currently custom-severity calculate_sla calls map to index 0 (critical lane), misattributing counts to critical.
+/// #559 - Custom-severity telemetry must not pollute the canonical (critical) lane.
+/// Custom-severity calculate_sla activity is recorded in a dedicated `CUSTEL`
+/// lane and surfaced as a single aggregate `custom` bucket, so the critical
+/// lane reports critical-only traffic.
 #[test]
-fn test_severity_telemetry_with_custom_severity_pins_canonical_lane_attribution() {
+fn test_severity_telemetry_custom_severity_isolated_from_canonical_lanes() {
     let (env, client, actors) = setup();
     env.ledger().set_timestamp(1000);
 
-    // Register a custom severity ("warning")
+    // Register a custom severity ("warning") and run calculations on it,
+    // including one canonical (critical) calculation for contrast.
     client.set_custom_severity(&actors.admin, &symbol_short!("warning"), &90, &5, &200);
-
-    // Execute calculate_sla for custom severity causing a violation (mttr 100 > threshold 90)
     client.calculate_sla(
         &actors.operator,
         &symbol_short!("CUST001"),
         &symbol_short!("warning"),
-        &100,
+        &100, // violation (mttr 100 > threshold 90)
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("CUST002"),
+        &symbol_short!("warning"),
+        &50, // met
+    );
+    client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("CRIT001"),
+        &symbol_short!("critical"),
+        &5, // met
     );
 
     let telemetry = client.get_severity_telemetry();
 
-    // The telemetry output has 5 entries (4 canonical + 1 custom)
+    // 4 canonical rows + 1 aggregate custom bucket.
     assert_eq!(telemetry.len(), 5);
 
-    // Current behavior: custom activity is misattributed to critical lane (index 0)
+    // Canonical lanes are untouched by custom-severity activity.
     let critical = telemetry.get(0).unwrap();
     assert_eq!(critical.severity, symbol_short!("critical"));
-    assert_eq!(critical.calculations, 1);
-    assert_eq!(critical.violations, 1);
+    assert_eq!(
+        critical.calculations, 1,
+        "critical must only count canonical calcs"
+    );
+    assert_eq!(
+        critical.violations, 0,
+        "custom violations must never hit critical"
+    );
 
-    // The custom severity entry ("warning") shows 0 calculations and 0 violations
-    let warning = telemetry.get(4).unwrap();
-    assert_eq!(warning.severity, symbol_short!("warning"));
-    assert_eq!(warning.calculations, 0);
-    assert_eq!(warning.violations, 0);
+    // The aggregate custom bucket carries all custom-severity counts.
+    let custom = telemetry.get(4).unwrap();
+    assert_eq!(custom.severity, CUSTOM_TELEMETRY_SEVERITY);
+    assert_eq!(custom.severity, symbol_short!("custom"));
+    assert_eq!(custom.calculations, 2);
+    assert_eq!(custom.violations, 1);
+    assert_eq!(custom.violation_rate, 50);
 }
 
 // ============================================================

@@ -26,7 +26,8 @@ mod event_ordering_tests {
     #![allow(clippy::module_inception, clippy::len_zero)]
     use crate::{
         SLACalculatorContract, SLACalculatorContractClient, SLAStats, EVENT_CONFIG_UPD, EVENT_PAUSED,
-        EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_STATS_SAT, EVENT_UNPAUSED, STATS_KEY,
+        EVENT_PRUNED, EVENT_RET_LIM, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_STATS_SAT, EVENT_UNPAUSED,
+        STATS_KEY,
     };
     use alloc::vec::Vec;
     use soroban_sdk::{
@@ -338,5 +339,44 @@ mod event_ordering_tests {
         // decision events that follow reflect the counter already capped.
         let stats = client.get_stats();
         assert_eq!(stats.total_calculations, u64::MAX, "counter must cap, not wrap");
+    }
+
+    // ── 7. ret_lim precedes pruned on the eager-trim path (#561) ────────
+
+    #[test]
+    fn test_ret_lim_event_precedes_pruned_on_eager_trim() {
+        // SC-W5-042 / #561 – `set_retention_limit` lower than the current
+        // history length trims immediately: the `ret_lim` event is published
+        // first (the limit is already stored and emitted), then the `pruned`
+        // event reports (removed, kept). A consumer watching only `ret_lim`
+        // must not race a stale `pruned`.
+        let env = Env::default();
+        let (admin, operator, client) = setup(&env);
+
+        // Fill history past the lowered limit so lowering prunes immediately.
+        for i in 0..4u32 {
+            let oid = Symbol::new(&env, &alloc::format!("RL{}", i));
+            client.calculate_sla(&operator, &oid, &symbol_short!("critical"), &5);
+        }
+        assert_eq!(client.get_history().len(), 4);
+
+        client.set_retention_limit(&admin, &2);
+
+        let names = event_names(&env);
+        let ret_lim_pos = names
+            .iter()
+            .position(|n| *n == EVENT_RET_LIM)
+            .unwrap_or_else(|| panic!("expected a ret_lim event"));
+        let pruned_pos = names
+            .iter()
+            .position(|n| *n == EVENT_PRUNED)
+            .unwrap_or_else(|| panic!("expected a pruned event"));
+        assert!(
+            ret_lim_pos < pruned_pos,
+            "ret_lim must be emitted before pruned on the eager-trim path"
+        );
+
+        // Immediate trim really happened in the same call.
+        assert_eq!(client.get_history().len(), 2);
     }
 }

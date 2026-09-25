@@ -28,10 +28,11 @@
 use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::{
-    SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT,
-    EVENT_SLA_CALC, EVENT_VERSION, HISTORY_KEY, HISTORY_LEN_KEY, LAST_CALCULATION_TS_KEY,
-    LAST_VIOLATION_TS_KEY, MAX_HISTORY_SIZE, MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY,
-    SEVERITY_CALC_COUNTS_KEY, SEVERITY_VIOL_COUNTS_KEY, STATS_KEY, TOTAL_ENTRIES_KEY,
+    SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, CUSTOM_CONFIG_KEY, CUSTOM_TELEMETRY_KEY,
+    CUSTOM_TELEMETRY_SEVERITY, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_VERSION,
+    HISTORY_KEY, HISTORY_LEN_KEY, LAST_CALCULATION_TS_KEY, LAST_VIOLATION_TS_KEY, MAX_HISTORY_SIZE, MAX_MTTR,
+    MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY,
+    SEVERITY_VIOL_COUNTS_KEY, STATS_KEY, TOTAL_ENTRIES_KEY,
 };
 
 /// Calculate the SLA outcome for an outage event (delegated implementation).
@@ -59,6 +60,9 @@ pub fn calculate_sla(
 ) -> Result<SLAResult, SLAError> {
     // ── Phase 1: Pre-flight (read-only auth & config) ──────────────────
     crate::SLACalculatorContract::check_version(env)?;
+    if mttr_minutes > MAX_MTTR {
+        return Err(SLAError::InvalidInput);
+    }
     require_not_paused(env)?;
     crate::SLACalculatorContract::require_operator(env, caller)?;
 
@@ -161,6 +165,11 @@ pub fn calculate_sla(
 
 /// Recalculates SLA deterministically without mutating state or emitting events.
 /// Can be called by anyone for audit and verification purposes.
+///
+/// # Input constraints
+///
+/// - `mttr_minutes` must be ≤ `MAX_MTTR` (525,600 minutes / 365 days). Values
+///   exceeding this bound are rejected with `InvalidInput`. (#560)
 pub fn calculate_sla_view(
     env: &Env,
     outage_id: Symbol,
@@ -168,6 +177,9 @@ pub fn calculate_sla_view(
     mttr_minutes: u32,
 ) -> Result<SLAResult, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
+    if mttr_minutes > MAX_MTTR {
+        return Err(SLAError::InvalidInput);
+    }
     let cfg = crate::SLACalculatorContract::load_config(env, &severity)?;
     let config_version_hash = crate::SLACalculatorContract::compute_severity_config_hash(env, &severity)?;
 
@@ -212,6 +224,11 @@ pub fn get_stats(env: &Env) -> Result<SLAStats, SLAError> {
 }
 
 /// Returns per-severity weekly violation-rate telemetry.
+///
+/// Returns one entry per canonical severity in canonical order, plus a single
+/// trailing `custom` bucket (severity symbol `"custom"`) that aggregates all
+/// custom-severity activity. The custom bucket is present only when custom
+/// severities are registered or have recorded counters. (#559)
 pub fn get_severity_telemetry(env: &Env) -> Result<Vec<SeverityTelemetry>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     let mut telemetry = Vec::new(env);
@@ -230,6 +247,28 @@ pub fn get_severity_telemetry(env: &Env) -> Result<Vec<SeverityTelemetry>, SLAEr
         };
         telemetry.push_back(SeverityTelemetry {
             severity: severity.clone(),
+            calculations: calc_count,
+            violations: violation_count,
+            violation_rate,
+        });
+    }
+
+    let custom: soroban_sdk::Map<Symbol, SLAConfig> = env
+        .storage()
+        .instance()
+        .get(&CUSTOM_CONFIG_KEY)
+        .unwrap_or_else(|| soroban_sdk::Map::new(env));
+    let custom_counters = load_counts(env, &CUSTOM_TELEMETRY_KEY);
+    if custom.len() > 0 || custom_counters != 0 {
+        let calc_count = count_lane(custom_counters, 0);
+        let violation_count = count_lane(custom_counters, 1);
+        let violation_rate = if calc_count == 0 {
+            0u32
+        } else {
+            (violation_count.saturating_mul(100) / calc_count).min(100)
+        };
+        telemetry.push_back(SeverityTelemetry {
+            severity: CUSTOM_TELEMETRY_SEVERITY,
             calculations: calc_count,
             violations: violation_count,
             violation_rate,
@@ -350,7 +389,13 @@ fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
 /// saturates at `u32::MAX` rather than wrapping (release) or panicking (debug).
 /// `u32::MAX` is treated as "many" and is never reset to zero by overflow.
 pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
-    let index = crate::SLACalculatorContract::canonical_severity_index(severity).unwrap_or(0);
+    // Custom severities have no canonical lane; route them to the dedicated
+    // `CUSTEL` bucket so a custom calculation can never pollute the critical
+    // (index 0) lane. (#559)
+    let Some(index) = crate::SLACalculatorContract::canonical_severity_index(severity) else {
+        record_custom_severity_telemetry(env, met);
+        return;
+    };
     let mut calculations = load_counts(env, &SEVERITY_CALC_COUNTS_KEY);
     let mut violations = load_counts(env, &SEVERITY_VIOL_COUNTS_KEY);
     let mut last_calculations = load_counts(env, &LAST_CALCULATION_TS_KEY);
@@ -400,6 +445,50 @@ pub fn record_severity_telemetry(env: &Env, severity: &Symbol, met: bool) {
     env.storage()
         .instance()
         .set(&LAST_VIOLATION_TS_KEY, &last_violations);
+}
+
+/// Records telemetry for a custom-severity calculation in the dedicated
+/// `CUSTEL` lane. (#559) Mirrors the canonical weekly-reset semantics on a
+/// single packed `u128`:
+///
+/// - lane 0 = calculation count
+/// - lane 1 = violation count
+/// - lane 2 = last calculation timestamp
+/// - lane 3 = last violation timestamp
+///
+/// Counters are `u32` lanes incremented with `saturating_add(1)` and reset
+/// lazily once 7 days (604,800 s) elapse since the lane's own timestamp.
+pub fn record_custom_severity_telemetry(env: &Env, met: bool) {
+    let mut counters = load_counts(env, &CUSTOM_TELEMETRY_KEY);
+    let now = env.ledger().timestamp();
+    let week_seconds = 7u64 * 24u64 * 60u64 * 60u64;
+    let last_calc = count_lane(counters, 2) as u64;
+    let last_violation = count_lane(counters, 3) as u64;
+    let calc_stale = last_calc != 0 && now.saturating_sub(last_calc) >= week_seconds;
+    let violation_stale = last_violation != 0 && now.saturating_sub(last_violation) >= week_seconds;
+    if calc_stale {
+        counters = set_count_lane(counters, 0, 0);
+    }
+    if violation_stale {
+        counters = set_count_lane(counters, 1, 0);
+    }
+
+    counters = set_count_lane(counters, 0, count_lane(counters, 0).saturating_add(1));
+    if !met {
+        counters = set_count_lane(counters, 1, count_lane(counters, 1).saturating_add(1));
+    }
+
+    let current_ts = if now > u64::from(u32::MAX) {
+        u32::MAX
+    } else {
+        now as u32
+    };
+    counters = set_count_lane(counters, 2, current_ts);
+    if !met {
+        counters = set_count_lane(counters, 3, current_ts);
+    }
+
+    env.storage().instance().set(&CUSTOM_TELEMETRY_KEY, &counters);
 }
 
 /// Increments the cumulative SLA statistics, emitting `stats_sat` on overflow.
