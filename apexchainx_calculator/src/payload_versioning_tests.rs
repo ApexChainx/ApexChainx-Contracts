@@ -83,11 +83,12 @@ mod payload_versioning_tests {
     // ── set_int payload versioning ──────────────────────────────────────
 
     #[test]
-    fn test_settle_intent_payload_has_nine_fields() {
-        // set_int payload carries the full decision, sharing the canonical
-        // 9-field (#429) layout with sla_calc:
+    fn test_settle_intent_payload_carries_correlation_id() {
+        // set_int carries the full decision, sharing the canonical field order
+        // (#429) with sla_calc, PLUS a trailing correlation_id field (#566):
         //   (outage_id, status, mttr_minutes, threshold_minutes, amount,
-        //    payment_type, rating, config_version_hash, recorded_at)
+        //    payment_type, rating, config_version_hash, recorded_at,
+        //    correlation_id)
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
@@ -106,10 +107,34 @@ mod payload_versioning_tests {
             }
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_SETTLE_INTENT {
-                // 9-field payload must decode without error
-                let payload: Result<(Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64), _> =
+                // 10-field payload (9 canonical + correlation_id) must decode
+                let payload: Result<(Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64), _> =
                     data.try_into_val(&env);
-                assert!(payload.is_ok(), "set_int payload must decode as 9-field tuple");
+                assert!(
+                    payload.is_ok(),
+                    "set_int payload must decode as the 10-field tuple"
+                );
+                let (
+                    _outage_id,
+                    _status,
+                    _mttr,
+                    _threshold,
+                    _amount,
+                    _ptype,
+                    _rating,
+                    _cfg,
+                    _recorded,
+                    correlated,
+                ) = payload.unwrap();
+                let expected = crate::event_correlation::generate_correlation_id(
+                    &env,
+                    &symbol_short!("VERSION2"),
+                    env.ledger().sequence(),
+                );
+                assert_eq!(
+                    correlated, expected,
+                    "#566: set_int must carry generate_correlation_id's output"
+                );
                 return;
             }
         }

@@ -22,6 +22,11 @@
 //!   (outage_id, status, mttr_minutes, threshold_minutes, amount,
 //!    payment_type, rating, config_version_hash, recorded_at)
 //!
+//! `sla_calc` and `dup_input` carry exactly those nine fields. `set_int`
+//! carries the same nine fields in the same order **plus** a trailing
+//! `correlation_id` field (see below) — an additive extension that does not
+//! disturb the shared prefix (#566).
+//!
 //! ## sla_calc (`sla_calc`)
 //! Emitted on every successful `calculate_sla` call.
 //! - topic[2]: severity Symbol
@@ -37,7 +42,16 @@
 //! - topic[2]: severity Symbol
 //! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
 //!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
-//!   rating: Symbol, config_version_hash: u64, recorded_at: u64)
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64,
+//!   correlation_id: u64)
+//!
+//! The trailing `correlation_id` field (an additive change, #566) is the
+//! **single documented home** of the correlation ID (SC-W5-079): it is
+//! `event_correlation::generate_correlation_id`'s output for the (outage_id,
+//! ledger sequence) pair of the emitting calculation, so a backend can join
+//! the `set_int` to its originating calculation deterministically. It is the
+//! only decision event that carries the id — `sla_calc` and `dup_input` stay
+//! at nine fields. (`#565`)
 //!
 //! ## dup_input (`dup_input`)
 //! Emitted when `calculate_sla` rejects a conflicting duplicate `outage_id`
@@ -196,6 +210,11 @@
 //! the version symbol from "v1" to "v2". Additive changes (new fields at the
 //! end) are NOT considered breaking and do not require a version bump as long
 //! as old consumers ignore unrecognised trailing fields.
+//!
+//! The `set_int` payload gained the trailing `correlation_id` field under
+//! `"v1"` as an additive change (#566); the `EVENT_ABI_GENERATION` co-bump
+//! invariant (#497) applies only to breaking event changes and remains
+//! unchanged.
 //!
 //! # Symbol Deprecation Protocol
 //!

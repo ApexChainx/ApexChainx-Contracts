@@ -149,8 +149,12 @@ pub fn calculate_sla(
     // Published after all state mutations are committed so that indexers
     // observe a consistent view. These calls never affect the returned
     // SLAResult and can be toggled independently for dry-run modes.
+    // #566 – the correlation id is generated once and carried in the
+    // settlement-intent payload so backends can join events to the origin.
+    let correlation_id =
+        crate::event_correlation::generate_correlation_id(env, &outage_id, env.ledger().sequence());
     publish_sla_event(env, severity.clone(), &result);
-    publish_settlement_intent_event(env, severity, &result);
+    publish_settlement_intent_event(env, severity, &result, correlation_id);
 
     Ok(result)
 }
@@ -467,7 +471,7 @@ fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
     );
 }
 
-fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult) {
+fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult, correlation_id: u64) {
     env.events().publish(
         (EVENT_SETTLE_INTENT, EVENT_VERSION, severity),
         (
@@ -480,6 +484,7 @@ fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResu
             result.rating.clone(),
             result.config_version_hash,
             result.recorded_at,
+            correlation_id,
         ),
     );
 }

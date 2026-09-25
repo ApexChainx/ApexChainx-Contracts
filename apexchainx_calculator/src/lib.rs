@@ -2926,8 +2926,13 @@ impl SLACalculatorContract {
             Self::increment_stats(&env, true, result.amount, 0);
         }
 
+        // #566 – generate the workflow's correlation id once (SC-W5-079) so the
+        // settlement-intent event can be joined back to this calculation.
+        let correlation_id =
+            crate::event_correlation::generate_correlation_id(&env, &outage_id, env.ledger().sequence());
+
         Self::publish_sla_event(&env, severity.clone(), &result);
-        Self::publish_settlement_intent_event(&env, severity, &result);
+        Self::publish_settlement_intent_event(&env, severity, &result, correlation_id);
 
         Ok(result)
     }
@@ -3083,7 +3088,7 @@ impl SLACalculatorContract {
         Ok(())
     }
 
-    fn require_not_frozen(env: &Env) -> Result<(), SLAError> {
+    pub(crate) fn require_not_frozen(env: &Env) -> Result<(), SLAError> {
         if config_freeze::is_config_frozen(env) {
             return Err(SLAError::ConfigFrozen);
         }
@@ -3596,10 +3601,15 @@ impl SLACalculatorContract {
         );
     }
 
-    fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult) {
+    fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult, correlation_id: u64) {
         // Canonical decision field order (#429) carrying the full decision
         // (mttr_minutes, threshold_minutes, rating) so a settlement-only
         // consumer can reconstruct the SLA decision (#428).
+        //
+        // #566 – `correlation_id` is a trailing additive field (SC-W5-079):
+        // the first nine fields stay in the canonical order shared with
+        // sla_calc and dup_input, and no version bump is required for an
+        // additive trailing field (event_schema.rs § Schema Versioning).
         env.events().publish(
             (EVENT_SETTLE_INTENT, EVENT_VERSION, severity),
             (
@@ -3612,6 +3622,7 @@ impl SLACalculatorContract {
                 result.rating.clone(),
                 result.config_version_hash,
                 result.recorded_at,
+                correlation_id,
             ),
         );
     }
@@ -3657,6 +3668,7 @@ impl SLACalculatorContract {
 
     /// Returns the raw log of recent SLA calculations stored on-chain.
     pub fn get_history(env: Env) -> Result<Vec<SLAResult>, SLAError> {
+        history::get_history(&env)
         Self::check_version(&env)?;
         Ok(history::read_all_entries(&env))
     }
@@ -3669,6 +3681,7 @@ impl SLACalculatorContract {
     /// so only the dropped entries and their owning outage index lists are
     /// rewritten (O(dropped) writes), never the whole retained set (#582).
     pub fn prune_history(env: Env, caller: Address, keep_latest: u32) -> Result<(), SLAError> {
+        history::prune_history(&env, &caller, keep_latest)
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
 
@@ -3687,6 +3700,7 @@ impl SLACalculatorContract {
     /// time. View-mode results (from `calculate_sla_view`) are never stored to history,
     /// so the empty-edge case of `recorded_at == 0` does not occur in practice.
     pub fn prune_history_by_age(env: Env, caller: Address, min_age_seconds: u64) -> Result<(), SLAError> {
+        history::prune_history_by_age(&env, &caller, min_age_seconds)
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
 
@@ -3737,7 +3751,7 @@ impl SLACalculatorContract {
     /// - `offset` is the 0-based index of the first entry to return. History is
     ///   stored oldest-first, so `offset = 0` is the earliest recorded result.
     /// - `limit` is the maximum number of entries returned per page. It is clamped
-    ///   to an upper bound (`MAX_PAGE_SIZE`): the effective page is
+    ///   to an upper bound (`history::MAX_PAGE_SIZE`): the effective page is
     ///   `min(min(limit, MAX_PAGE_SIZE), len - offset)`, so a page shorter than the
     ///   requested `limit` signals end-of-history. A `limit` larger than the
     ///   remaining history simply returns everything that remains.
@@ -3752,6 +3766,7 @@ impl SLACalculatorContract {
     ///
     /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
     pub fn get_history_page(env: Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
+        history::get_history_page(&env, offset, limit)
         Self::check_version(&env)?;
         let (head, tail) = (history::head(&env), history::tail(&env));
         let total = tail.saturating_sub(head);
@@ -3780,6 +3795,7 @@ impl SLACalculatorContract {
     /// identical to `get_history_page` — see
     /// `docs/HISTORY_PAGINATION_POLICY.md`.
     pub fn get_history_page_with_meta(env: Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
+        history::get_history_page_with_meta(&env, offset, limit)
         Self::check_version(&env)?;
         let (head, tail) = (history::head(&env), history::tail(&env));
         let total = tail.saturating_sub(head);
@@ -3819,6 +3835,7 @@ impl SLACalculatorContract {
     /// so consumers can match records to specific config generations. The final
     /// entry in the returned array represents the latest decision.
     pub fn get_history_by_outage(env: Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
+        history::get_history_by_outage(&env, outage_id)
         Self::check_version(&env)?;
         // Read only the outage's index subset instead of scanning the whole
         // retained history (#581): cost is proportional to the matching entries.
@@ -3832,6 +3849,7 @@ impl SLACalculatorContract {
     /// Returns the most recent history entry for the given `outage_id`, or `None`
     /// if no entry exists for that outage.
     pub fn get_latest_by_outage(env: Env, outage_id: Symbol) -> Result<Option<SLAResult>, SLAError> {
+        history::get_latest_by_outage(&env, outage_id)
         Self::check_version(&env)?;
         // The per-outage index stores the newest index last, so this reads a
         // single entry instead of scanning the whole retained history (#581).
@@ -3846,12 +3864,7 @@ impl SLACalculatorContract {
     /// Off-chain consumers can inspect retention state without fetching the full map.
     /// This is an O(1) read: the count is cached alongside CONFIG_KEY (#606).
     pub fn get_config_count(env: Env) -> Result<u32, SLAError> {
-        Self::check_version(&env)?;
-        Ok(env
-            .storage()
-            .instance()
-            .get(&CONFIG_COUNT_KEY)
-            .ok_or(SLAError::NotInitialized)?)
+        history::get_config_count(&env)
     }
 
     /// Returns the current storage schema version so off-chain consumers can
@@ -3879,6 +3892,7 @@ impl SLACalculatorContract {
     /// Must be between 1 and MAX_HISTORY_SIZE (1000). Admin only.
     /// The new limit takes effect on the next `calculate_sla` call.
     pub fn set_retention_limit(env: Env, caller: Address, limit: u32) -> Result<(), SLAError> {
+        history::set_retention_limit(&env, &caller, limit)
         Self::check_version(&env)?;
         Self::require_admin(&env, &caller)?;
         Self::require_not_frozen(&env)?;
@@ -3902,12 +3916,15 @@ impl SLACalculatorContract {
     /// Returns the current configurable retention limit.
     /// Defaults to MAX_HISTORY_SIZE (1000) if never explicitly set.
     pub fn get_retention_limit(env: Env) -> Result<u32, SLAError> {
-        Self::check_version(&env)?;
-        Ok(env
-            .storage()
-            .instance()
-            .get(&RETENTION_LIMIT_KEY)
-            .unwrap_or(MAX_HISTORY_SIZE))
+        history::get_retention_limit(&env)
+    }
+
+    /// Internal helper to update history and maintain cached length atomically.
+    /// Addresses issue #463: allows get_full_audit_state to report history_len
+    /// without deserializing the full vector, keeping "one-shot bootstrap" cheap.
+    fn update_history_and_cache(env: &Env, history: &Vec<SLAResult>) {
+        env.storage().instance().set(&HISTORY_KEY, history);
+        env.storage().instance().set(&HISTORY_LEN_KEY, &history.len());
     }
 
     /// SC-021 – Migration state read helper

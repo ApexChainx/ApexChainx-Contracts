@@ -13,16 +13,26 @@
 //! - Passed as an argument to downstream contract calls
 //! - Emitted in every event payload that is part of the same logical workflow
 //!
+//! # The home of the correlation ID
+//!
+//! The correlation ID is carried in the `set_int` (settlement intent) event
+//! payload as a trailing `correlation_id` field — see `event_schema.rs` §
+//! `set_int` (#566). Topics never carry it: the 3-topic layout
+//! `(name, version, context)` is fixed by `event_schema.rs`, and the old
+//! `correlation_event_topics` helper that accepted a `correlation_id` it
+//! ignored has been removed (#565).
+//!
 //! # Integration
 //!
-//! The SLA calculator's `calculate_sla` function generates a correlation ID
-//! from the outage_id and ledger sequence, then includes it in the
-//! `set_int` event payload and any downstream calls.
+//! The SLA calculator's `calculate_sla` generates a correlation ID from the
+//! outage_id and ledger sequence, then includes it in the `set_int` event
+//! payload and any downstream calls.
 //!
 //! Downstream contracts (payment escrow, settlement) accept the correlation
 //! ID as a parameter and include it in their own events.
 
-use soroban_sdk::{symbol_short, Env, Symbol};
+use alloc::string::ToString;
+use soroban_sdk::{Env, Symbol};
 
 /// Opaque correlation identifier for tracing workflows across contracts.
 ///
@@ -31,40 +41,30 @@ use soroban_sdk::{symbol_short, Env, Symbol};
 /// (outage_id, ledger_sequence) pair so that backends can re-derive it.
 pub type CorrelationId = u64;
 
-/// Event topic symbol for the correlation ID in cross-contract events.
-pub const CORRELATION_TOPIC: Symbol = symbol_short!("corr_id");
-
-/// Generates a deterministic correlation ID from the current ledger sequence.
+/// Generates a deterministic correlation ID for an (outage, ledger) pair.
 ///
-/// Uses a simple FNV-1a hash of the ledger sequence to produce a unique
-/// trace identifier per ledger. The `_outage_id` parameter is reserved for
-/// future use (Symbol bytes are not directly accessible in SDK 21.x).
-pub fn generate_correlation_id(_env: &Env, _outage_id: &Symbol, ledger_sequence: u32) -> CorrelationId {
-    // Deterministic hash: use ledger sequence with FNV-1a mixing for temporal uniqueness
-    // (Outage_id bytes are not directly accessible in Soroban SDK 21.x without Symbol::to_string)
+/// The outage symbol's string bytes are hashed with FNV-1a and mixed with the
+/// ledger sequence so that:
+///
+/// - distinct outages submitted in the same ledger always receive distinct
+///   ids (SC-W5-079, #564), and
+/// - repeating the same outage in the same ledger still reproduces the
+///   identical id, preserving the replay semantics backends rely on.
+///
+/// The symbol is hashed via its `ToString` representation (Symbol bytes are
+/// not directly accessible in Soroban SDK 21.x), so the result is
+/// deterministic and reproducible off-chain by consumers that apply the same
+/// FNV-1a mixing over the outage string and ledger sequence.
+pub fn generate_correlation_id(_env: &Env, outage_id: &Symbol, ledger_sequence: u32) -> CorrelationId {
+    // FNV-1a over the outage symbol bytes, then the ledger sequence.
     let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
-    hash ^= (ledger_sequence as u64) << 32 | ledger_sequence as u64;
+    for byte in outage_id.to_string().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
+    }
+    hash ^= (u64::from(ledger_sequence) << 32) | u64::from(ledger_sequence);
     hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
     hash
-}
-/// Generates a cross-contract event topic tuple matching the standard
-/// 3-topic arity used by all contract events.
-///
-/// Topic layout:
-///   topic[0] = event name (e.g., "sla_calc")
-///   topic[1] = event version ("v1")
-///   topic[2] = event-specific context (e.g., severity)
-///
-/// The correlation_id is NOT included as a topic. It is carried in the
-/// event payload instead, consistent with how `set_int` carries
-/// `config_version_hash` and `recorded_at` in its payload.
-pub fn correlation_event_topics(
-    event_name: Symbol,
-    event_version: Symbol,
-    context: Symbol,
-    _correlation_id: CorrelationId,
-) -> (Symbol, Symbol, Symbol) {
-    (event_name, event_version, context)
 }
 
 #[cfg(test)]
@@ -112,16 +112,32 @@ mod tests {
     }
 
     #[test]
-    fn test_correlation_event_topics_structure() {
-        let topics = correlation_event_topics(
-            symbol_short!("sla_calc"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            42,
+    fn test_distinct_outages_in_same_ledger_never_collide() {
+        let env = Env::default();
+        // #564 – two different outages submitted in the same ledger must never
+        // share a correlation id, or backends would join unrelated incidents.
+        let outage_a = Symbol::new(&env, "SF001");
+        let outage_b = Symbol::new(&env, "SF002");
+        let id_a = generate_correlation_id(&env, &outage_a, 42);
+        let id_b = generate_correlation_id(&env, &outage_b, 42);
+        assert_ne!(
+            id_a, id_b,
+            "distinct outages in the same ledger must not share an id"
         );
-        assert_eq!(topics.0, symbol_short!("sla_calc"));
-        assert_eq!(topics.1, symbol_short!("v1"));
-        assert_eq!(topics.2, symbol_short!("critical"));
+    }
+
+    #[test]
+    fn test_same_outage_in_same_ledger_still_collides() {
+        let env = Env::default();
+        // #564 – replaying the same outage in the same ledger reproduces the
+        // same id, preserving the determinism backends re-derive from.
+        let outage = Symbol::new(&env, "SF001");
+        let id1 = generate_correlation_id(&env, &outage, 42);
+        let id2 = generate_correlation_id(&env, &outage, 42);
+        assert_eq!(
+            id1, id2,
+            "same outage in the same ledger must reproduce the same id"
+        );
     }
 
     #[test]
@@ -139,18 +155,5 @@ mod tests {
         let short = Symbol::new(&env, "X");
         let id = generate_correlation_id(&env, &short, 1);
         assert_ne!(id, 0);
-    }
-
-    #[test]
-    fn test_correlation_topic_has_correct_type() {
-        let topics = correlation_event_topics(
-            symbol_short!("set_int"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            12345,
-        );
-        assert_eq!(topics.0, symbol_short!("set_int"));
-        assert_eq!(topics.1, symbol_short!("v1"));
-        assert_eq!(topics.2, symbol_short!("critical"));
     }
 }

@@ -175,8 +175,8 @@ fn test_calculate_sla_emits_versioned_integration_event() {
     let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
     let topic_2: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
     // Canonical decision field order (#429): the sla_calc payload mirrors the
-    // SLAResult struct order shared with set_int and dup_input, so it decodes
-    // as the full 9-field tuple.
+    // SLAResult struct order shared with dup_input (set_int extends it with a
+    // trailing correlation_id, #566), so it decodes as the full 9-field tuple.
     let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at): (
         Symbol,
         Symbol,
@@ -3801,6 +3801,13 @@ fn test_get_history_page_with_meta_items_match_get_history_page() {
 
 /// Issue #464 — documented equivalence of the two paginated accessors.
 ///
+/// `get_history_page` and `get_history_page_with_meta` now derive their slice
+/// from the single shared `history::page_slice` implementation (#563). This
+/// pins the documented equivalence end-to-end: for every `(offset, limit)` the
+/// `items` are byte-for-byte identical across both accessors, and the metadata
+/// accessor's `has_more` and page length match the independent executable
+/// pagination spec in `spec.rs`. A refactor that let the two accessors drift
+/// apart — or either one diverge from the policy — fails here.
 /// `get_history_page` and `get_history_page_with_meta` derive their slice from
 /// the same history accessor (`history::read_range`) and identical saturating
 /// slice arithmetic. This pins the documented equivalence end-to-end: for
@@ -4398,11 +4405,13 @@ fn test_sla_calc_event_payload_field_count_is_nine() {
     assert_eq!(recorded_at, stored.recorded_at);
 }
 
-/// #429 – Guardrail: all three decision-carrying events (sla_calc, set_int,
+/// #429 – Guardrail: the decision-carrying events (sla_calc, set_int,
 /// dup_input) MUST share the same canonical payload field order, or an
-/// indexer's single decoder would misread one of them. If a payload tuple is
-/// reordered or a decision event diverges, this test fails so the drift cannot
-/// reach release without a review + version bump.
+/// indexer's single decoder would misread one of them. `set_int` additionally
+/// carries a trailing `correlation_id` field (#566) — an additive extension
+/// that leaves the nine shared fields at exactly the same positions. If a
+/// payload tuple is reordered or a decision event diverges, this test fails
+/// so the drift cannot reach release without a review + version bump.
 #[test]
 fn test_decision_events_share_canonical_payload_order() {
     let (env, client, actors) = setup();
@@ -4422,11 +4431,13 @@ fn test_decision_events_share_canonical_payload_order() {
         &30,
     );
 
-    // Canonical 9-field order shared by all three decision events (#429).
+    // Canonical 9-field order shared by all three decision events (#429);
+    // set_int appends the trailing correlation_id (#566).
     type DecisionPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64);
+    type SettlementPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64);
 
     let mut sla_calc_payload: Option<DecisionPayload> = None;
-    let mut set_int_payload: Option<DecisionPayload> = None;
+    let mut set_int_payload: Option<SettlementPayload> = None;
     let mut dup_input_payload: Option<DecisionPayload> = None;
 
     let events = env.events().all();
@@ -4436,15 +4447,21 @@ fn test_decision_events_share_canonical_payload_order() {
             continue;
         }
         let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-        let payload: DecisionPayload = data
-            .try_into_val(&env)
-            .expect("every decision event must decode as the canonical 9-field tuple");
         if name == EVENT_SLA_CALC {
-            sla_calc_payload = Some(payload);
+            sla_calc_payload = Some(
+                data.try_into_val(&env)
+                    .expect("sla_calc must decode as the canonical 9-field tuple"),
+            );
         } else if name == EVENT_SETTLE_INTENT {
-            set_int_payload = Some(payload);
+            set_int_payload = Some(
+                data.try_into_val(&env)
+                    .expect("set_int must decode as 10 fields (9 canonical + correlation_id)"),
+            );
         } else if name == EVENT_DUP_INPUT {
-            dup_input_payload = Some(payload);
+            dup_input_payload = Some(
+                data.try_into_val(&env)
+                    .expect("dup_input must decode as the canonical 9-field tuple"),
+            );
         }
     }
 
@@ -4452,24 +4469,21 @@ fn test_decision_events_share_canonical_payload_order() {
     let set_int = set_int_payload.expect("set_int event not found");
     let dup_input = dup_input_payload.expect("dup_input event not found");
 
-    // All three decode to the canonical order; the shared decision fields
-    // (outage_id, status, mttr, threshold, amount, payment_type, rating) must
-    // agree with each other so a single decoder is unambiguous.
-    assert_eq!(sla_calc.0, set_int.0, "outage_id order/index drift");
-    assert_eq!(sla_calc.1, set_int.1, "status order/index drift");
-    assert_eq!(sla_calc.2, set_int.2, "mttr order/index drift");
-    assert_eq!(sla_calc.3, set_int.3, "threshold order/index drift");
-    assert_eq!(sla_calc.4, set_int.4, "amount order/index drift");
-    assert_eq!(sla_calc.5, set_int.5, "payment_type order/index drift");
-    assert_eq!(sla_calc.6, set_int.6, "rating order/index drift");
+    // set_int's shared fields (its first nine) must decode to the exact same
+    // canonical order as sla_calc; only the trailing correlation_id differs.
+    let set_int_shared: DecisionPayload = (
+        set_int.0, set_int.1, set_int.2, set_int.3, set_int.4, set_int.5, set_int.6, set_int.7, set_int.8,
+    );
+    assert_eq!(
+        sla_calc, set_int_shared,
+        "set_int shared fields must match sla_calc"
+    );
+    assert_ne!(set_int.9, 0, "#566: set_int must carry a non-zero correlation_id");
 
-    assert_eq!(dup_input.0, sla_calc.0, "dup_input outage_id drift");
-    assert_eq!(dup_input.1, sla_calc.1, "dup_input status drift");
-    assert_eq!(dup_input.2, sla_calc.2, "dup_input mttr drift");
-    assert_eq!(dup_input.3, sla_calc.3, "dup_input threshold drift");
-    assert_eq!(dup_input.4, sla_calc.4, "dup_input amount drift");
-    assert_eq!(dup_input.5, sla_calc.5, "dup_input payment_type drift");
-    assert_eq!(dup_input.6, sla_calc.6, "dup_input rating drift");
+    assert_eq!(
+        dup_input, sla_calc,
+        "dup_input must share the canonical order with sla_calc"
+    );
 }
 
 /// #428 – A consumer processing only `set_int` can reconstruct the full SLA
@@ -4499,18 +4513,20 @@ fn test_set_int_payload_is_self_contained_for_reconciliation() {
             continue;
         }
         found = true;
-        // set_int now carries the full decision in canonical order (#428).
-        let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at): (
-            Symbol,
-            Symbol,
-            u32,
-            u32,
-            i128,
-            Symbol,
-            Symbol,
-            u64,
-            u64,
-        ) = data.try_into_val(&env).unwrap();
+        // set_int now carries the full decision in canonical order (#428),
+        // plus the trailing correlation_id (#566).
+        let (
+            outage_id,
+            status,
+            mttr,
+            threshold,
+            amount,
+            payment_type,
+            rating,
+            hash,
+            recorded_at,
+            correlation_id,
+        ): (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64) = data.try_into_val(&env).unwrap();
         assert_eq!(outage_id, stored.outage_id);
         assert_eq!(status, stored.status);
         assert_eq!(mttr, stored.mttr_minutes);
@@ -4520,6 +4536,15 @@ fn test_set_int_payload_is_self_contained_for_reconciliation() {
         assert_eq!(rating, stored.rating);
         assert_eq!(hash, stored.config_version_hash);
         assert_eq!(recorded_at, stored.recorded_at);
+        let expected = crate::event_correlation::generate_correlation_id(
+            &env,
+            &symbol_short!("SETL1"),
+            env.ledger().sequence(),
+        );
+        assert_eq!(
+            correlation_id, expected,
+            "#566: set_int must carry generate_correlation_id's output"
+        );
     }
     assert!(found, "set_int event not found");
 }
