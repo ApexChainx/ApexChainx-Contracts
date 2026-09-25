@@ -23,6 +23,8 @@
 //! ## Single-step (legacy break-glass)
 //!
 //! Admin calls `set_operator` → emits `op_set` event, operator is set immediately.
+//! If an operator proposal is pending, it is cancelled first (with an `op_can`
+//! event) so the stale handoff can never override the single-step decision. (#569)
 //!
 //! This path does **not** require the new operator's consent or signature. It was
 //! introduced in the #28-era before the two-step handoff (#64) existed and is
@@ -53,6 +55,8 @@
 //! ## Single-step (legacy break-glass)
 //!
 //! Admin calls `set_operator` → emits `op_set` event, operator is set immediately.
+//! If an operator proposal is pending, it is cancelled first (with an `op_can`
+//! event) so the stale handoff can never override the single-step decision. (#569)
 //!
 //! This path does **not** require the new operator's consent or signature. It was
 //! introduced in the #28-era before the two-step handoff (#64) existed and is
@@ -69,25 +73,50 @@ use soroban_sdk::{Address, Env, Symbol};
 
 use crate::{
     SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN,
-    EVENT_ADMIN_SUP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_OP_SUP, EVENT_VERSION,
-    OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, PENDING_OP_KEY, PENDING_OP_TS_KEY,
+    EVENT_ADMIN_SUP, EVENT_ADMIN_XP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET,
+    EVENT_OP_SUP, EVENT_OP_XP, EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY,
+    PENDING_OP_KEY, PENDING_OP_TS_KEY,
 };
 
 /// Window (in ledger seconds) after which a pending proposal expires.
 const PROPOSAL_EXPIRY_WINDOW: u64 = 90 * 24 * 60 * 60;
 
 /// Requires that the stored proposal is still within its expiry window.
-fn require_proposal_valid(env: &Env, ts_key: Symbol) -> Result<(), SLAError> {
+///
+/// On the FIRST observation of a lapsed proposal this both emits the typed
+/// expiry event (`adm_xp`/`op_xp`) carrying the stale candidate and clears the
+/// pending keys, then returns `ProposalExpired`. Later attempts observe no
+/// pending proposal at all (`NoPendingTransfer`) and emit nothing, so the
+/// expiry transition is published **at most once** and stays idempotent for
+/// indexers. (#589)
+fn require_proposal_valid(
+    env: &Env,
+    caller: &Address,
+    pending_key: Symbol,
+    ts_key: Symbol,
+    expiry_event: Symbol,
+) -> Result<(), SLAError> {
     let proposed: u64 = env
         .storage()
         .instance()
         .get(&ts_key)
         .ok_or(SLAError::NoPendingTransfer)?;
     let now = env.ledger().timestamp();
-    if now.saturating_sub(proposed) > PROPOSAL_EXPIRY_WINDOW {
-        return Err(SLAError::ProposalExpired);
+    if now.saturating_sub(proposed) <= PROPOSAL_EXPIRY_WINDOW {
+        return Ok(());
     }
-    Ok(())
+    let stale: Option<Address> = env.storage().instance().get(&pending_key);
+    if let Some(stale) = stale {
+        // The `expiry_event` passed in is EVENT_ADMIN_XP for the admin handoff
+        // and EVENT_OP_XP for the operator handoff — the emit-site audit in
+        // event_schema.rs (`test_every_declared_event_has_an_emit_site`) picks
+        // both names up from this publish site.
+        env.events()
+            .publish((expiry_event, EVENT_VERSION, caller.clone()), (stale,));
+    }
+    env.storage().instance().remove(&pending_key);
+    env.storage().instance().remove(&ts_key);
+    Err(SLAError::ProposalExpired)
 }
 
 /// Proposes a new admin. The current admin initiates; the new admin must
@@ -127,7 +156,7 @@ pub fn accept_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
         .instance()
         .get(&PENDING_ADMIN_KEY)
         .ok_or(SLAError::NoPendingTransfer)?;
-    require_proposal_valid(env, PENDING_ADMIN_TS_KEY)?;
+    require_proposal_valid(env, caller, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, EVENT_ADMIN_XP)?;
     if *caller != pending {
         return Err(SLAError::Unauthorized);
     }
@@ -169,7 +198,11 @@ pub fn get_pending_admin(env: &Env) -> Result<Option<Address>, SLAError> {
 /// operator agrees to assume the role.
 ///
 /// Emits an `op_prop` event carrying `(new_operator,)` in the payload.
-/// If a previous proposal exists, it is silently overwritten.
+/// If a previous proposal exists, it is **superseded** rather than silently
+/// overwritten: an `op_sup` event carrying `(superseded_operator,
+/// new_operator)` is published first, then the `op_prop` event follows. This
+/// lets indexers key on `op_sup` so the pending-slot history stays fully
+/// reconstructable. (#570)
 pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
@@ -210,7 +243,7 @@ pub fn accept_operator(env: &Env, caller: &Address) -> Result<(), SLAError> {
         .instance()
         .get(&PENDING_OP_KEY)
         .ok_or(SLAError::NoPendingTransfer)?;
-    require_proposal_valid(env, PENDING_OP_TS_KEY)?;
+    require_proposal_valid(env, caller, PENDING_OP_KEY, PENDING_OP_TS_KEY, EVENT_OP_XP)?;
     if *caller != pending {
         return Err(SLAError::Unauthorized);
     }
@@ -298,11 +331,14 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
 ///
 /// ## Pending-slot interaction
 ///
-/// This function does **not** clear or interact with any pending operator
-/// proposal (`PENDING_OP_KEY`). If a two-step proposal is pending when
-/// `set_operator` is called, the pending proposal remains in storage and
-/// can still be accepted. Admins should explicitly cancel any pending
-/// proposal before using this path to avoid ambiguity.
+/// A direct assignment **cancels** any pending operator proposal: if
+/// `PENDING_OP_KEY` holds a proposal, `set_operator` clears it (and its
+/// timestamp) before installing the new operator and emits an `op_can`
+/// event so indexers can observe the cancellation. This guarantees a stale
+/// handoff can never override the admin's single-step decision and that the
+/// pending slot is left empty for the next two-step attempt. (#569)
+///
+/// Pending *admin* proposals are unaffected.
 ///
 /// ## Gating
 ///

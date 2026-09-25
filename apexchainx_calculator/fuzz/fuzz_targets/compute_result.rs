@@ -87,4 +87,24 @@ fuzz_target!(|data: (u32, u32, u32, i128, i128)| {
         fuzz_spec::assert_validated_config_computes(symbol_short!("outage"), mttr, &cfg);
         fuzz_spec::assert_validated_config_computes(symbol_short!("outage"), u32::MAX, &cfg);
     }
+
+    // Arm 3 — max-boundary inputs (#593). The entry points reject mttr values
+    // above `spec::MAX_MTTR_MINUTES` with `InvalidInput` before any arithmetic
+    // runs; the pure `compute_result` path must stay panic-free and
+    // deterministic at and just past that documented 365-day boundary for any
+    // validated config.
+    if fuzz_spec::assert_validate_config_matches_spec(
+        &severity,
+        threshold_minutes,
+        penalty_per_minute,
+        reward_base,
+    ) {
+        for b in [
+            spec::MAX_MTTR_MINUTES.saturating_sub(1),
+            spec::MAX_MTTR_MINUTES,
+            spec::MAX_MTTR_MINUTES.saturating_add(1),
+        ] {
+            fuzz_spec::assert_validated_config_computes(symbol_short!("outage"), b, &cfg);
+        }
+    }
 });
