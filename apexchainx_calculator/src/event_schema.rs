@@ -353,6 +353,8 @@ mod tests {
 
     use super::*;
     use alloc::format;
+    use std::string::String;
+    use std::vec::Vec;
 
     #[test]
     fn test_event_version_is_stable() {
@@ -416,6 +418,124 @@ mod tests {
         }
     }
 
+    /// The emit-site catalog: every event name the contract publishes, paired
+    /// with the `EVENT_*` constant that names it in code. This is the single
+    /// source of truth the bidirectional audits below enforce: every catalogued
+    /// event must have a real publish site (forward), and every publish site
+    /// must be catalogued (reverse) so an uncatalogued event cannot escape
+    /// schema review (#496, #575).
+    ///
+    /// `sev_add`/`sev_upd` are emitted by `set_custom_severity` (the same
+    /// function, branch selected by the create-vs-reconfigure lifecycle) via a
+    /// bound `event_name` variable, so they are listed with the constant that
+    /// carries each branch. `cfg_rem`, the removal counterpart, is listed too —
+    /// the three must stay symmetric so the custom-severity lifecycle is fully
+    /// audited.
+    const EMIT_SITE_CATALOG: &[(&str, &str)] = &[
+        ("sla_calc", "EVENT_SLA_CALC"),
+        ("set_int", "EVENT_SETTLE_INTENT"),
+        ("cfg_upd", "EVENT_CONFIG_UPD"),
+        ("sev_add", "EVENT_SEV_ADD"),
+        ("sev_upd", "EVENT_SEV_UPD"),
+        ("cfg_rem", "EVENT_CONFIG_REM"),
+        ("paused", "EVENT_PAUSED"),
+        ("unpause", "EVENT_UNPAUSED"),
+        ("op_set", "EVENT_OP_SET"),
+        ("pruned", "EVENT_PRUNED"),
+        ("pruned_a", "EVENT_PRUNED_AGE"),
+        ("adm_prop", "EVENT_ADMIN_PROP"),
+        ("adm_acc", "EVENT_ADMIN_ACC"),
+        ("adm_can", "EVENT_ADMIN_CAN"),
+        ("adm_ren", "EVENT_ADMIN_REN"),
+        ("adm_sup", "EVENT_ADMIN_SUP"),
+        ("adm_xp", "EVENT_ADMIN_XP"),
+        ("op_prop", "EVENT_OP_PROP"),
+        ("op_acc", "EVENT_OP_ACC"),
+        ("op_can", "EVENT_OP_CAN"),
+        ("op_sup", "EVENT_OP_SUP"),
+        ("op_xp", "EVENT_OP_XP"),
+        ("cfg_frz", "EVENT_CONFIG_FREEZE"),
+        ("cfg_unfrz", "EVENT_CONFIG_UNFREEZE"),
+        ("stats_sat", "EVENT_STATS_SAT"),
+        ("dup_input", "EVENT_DUP_INPUT"),
+        ("mig_done", "EVENT_MIGRATE_DONE"),
+        ("ret_lim", "EVENT_RET_LIM"),
+    ];
+
+    /// All crate sources, excluding this schema catalog and the `api_stability`
+    /// guardrail: both are *declaration* sites, not emit sites.
+    fn crate_sources() -> Vec<String> {
+        let src_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&src_dir).expect("src/ readable for emit-site audit") {
+            let entry = entry.expect("read_dir entry");
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            if fname == "event_schema.rs" || fname == "api_stability.rs" || !fname.ends_with(".rs") {
+                continue;
+            }
+            sources.push(std::fs::read_to_string(src_dir.join(&fname)).expect("cannot read source file"));
+        }
+        sources
+    }
+
+    /// A publish call can span several lines, and the emitting constant often
+    /// sits on the line *before* `.publish(...)` — e.g. `set_custom_severity`
+    /// binds `let event_name = if is_update { EVENT_SEV_UPD } else { EVENT_SEV_ADD }`
+    /// immediately above its single publish call. Each publish site is
+    /// therefore audited over a window spanning ±300 bytes. (#575)
+    fn publish_windows<'a>(text: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        text.match_indices("publish").map(move |(idx, _)| {
+            let mut start = idx.saturating_sub(300);
+            while !text.is_char_boundary(start) {
+                start -= 1;
+            }
+            let mut end = (idx + 300).min(text.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            &text[start..end]
+        })
+    }
+
+    /// Yields every `EVENT_*` identifier declared with `const` in `text`.
+    /// Used by the reverse audit so prose placeholders (e.g. the `EVENT_NAME`
+    /// in `event.rs`'s doc comment) are not mistaken for emit-site references.
+    fn declared_event_idents(text: &str) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for (idx, _) in text.match_indices("const") {
+            let prev_is_word = text
+                .as_bytes()
+                .get(idx.wrapping_sub(1))
+                .map_or(false, |b| b.is_ascii_alphanumeric() || *b == b'_');
+            if prev_is_word {
+                continue; // "constant", "const_" etc., not a `const` declaration
+            }
+            let trimmed = text[idx + "const".len()..].trim_start();
+            if let Some(rest) = trimmed.strip_prefix("EVENT_") {
+                let name_len = rest
+                    .char_indices()
+                    .take_while(|(_, c)| c.is_ascii_alphanumeric() || *c == '_')
+                    .last()
+                    .map_or(0, |(i, c)| i + c.len_utf8());
+                names.push(format!("EVENT_{}", &rest[..name_len]));
+            }
+        }
+        names
+    }
+
+    /// Yields every `EVENT_*` constant identifier token in `text`.
+    fn event_tokens(text: &str) -> impl Iterator<Item = &str> + '_ {
+        text.match_indices("EVENT_").map(move |(idx, _)| {
+            let rest = &text[idx..];
+            let name_len = rest
+                .char_indices()
+                .take_while(|(_, c)| c.is_ascii_alphanumeric() || *c == '_')
+                .last()
+                .map_or(0, |(i, c)| i + c.len_utf8());
+            &text[idx..idx + name_len]
+        })
+    }
+
     /// #496 – The compiler can only see an event constant is unused; the
     /// divergence that matters is *declared but never emitted*. Every event
     /// name constant in the catalog below must be referenced inside a `publish`
@@ -427,6 +547,19 @@ mod tests {
         use std::string::String;
         use std::vec::Vec;
 
+        let sources = crate_sources();
+        let mut failures: Vec<String> = Vec::new();
+        for (event_name, ident) in EMIT_SITE_CATALOG {
+            let emitted = sources
+                .iter()
+                .any(|text: &String| publish_windows(text).any(|window| window.contains(ident)));
+            if !emitted {
+                failures.push(alloc::format!(
+                    "event `{}` (constant `{}`) is declared in the schema catalog but never \
+                     emitted from a publish site in src/ — wire it up or remove it (#496)",
+                    event_name,
+                    ident
+                ));
         // (event name string, source identifier of the emitting constant).
         let catalog: [(&str, &str); 26] = [
             ("sla_calc", "EVENT_SLA_CALC"),
@@ -467,25 +600,52 @@ mod tests {
             if fname == "event_schema.rs" || fname == "api_stability.rs" || !fname.ends_with(".rs") {
                 continue;
             }
-            sources.push(std::fs::read_to_string(src_dir.join(&fname)).expect("cannot read source file"));
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// #575 – The reverse direction of the emit-site audit: every publish site
+    /// must reference a constant that is in the catalog. `sev_add`/`sev_upd`
+    /// were previously emitted but absent from the catalog, so their payload
+    /// shapes, topic arities, and version bumps escaped schema review — and the
+    /// lifecycle looked asymmetric next to the audited `cfg_rem`. A publish
+    /// site that reaches an `EVENT_*` constant missing from
+    /// [`EMIT_SITE_CATALOG`] fails this test.
+    ///
+    /// `EVENT_VERSION` is the shared topic[1] constant, not an event name, and
+    /// is deliberately excluded; prose tokens that are not declared `const`s
+    /// are ignored.
+    #[test]
+    fn test_every_publish_site_is_in_the_catalog() {
+        use std::collections::HashSet;
+        use std::string::String;
+        use std::vec::Vec;
+
+        let catalog_idents: HashSet<&str> = EMIT_SITE_CATALOG.iter().map(|(_, ident)| *ident).collect();
+        let mut declared: HashSet<String> = HashSet::new();
+        for source in crate_sources() {
+            declared.extend(declared_event_idents(&source));
         }
 
-        for (event_name, ident) in catalog {
-            // A publish call can span several lines, so inspect a window after
-            // every occurrence of "publish" rather than matching per line.
-            let emitted = sources.iter().any(|text: &String| {
-                text.match_indices("publish").any(|(idx, _)| {
-                    let end = text.len().min(idx + 300);
-                    text[idx..end].contains(ident)
-                })
-            });
-            assert!(
-                emitted,
-                "event `{}` (constant `{}`) is declared in the schema catalog but never \
-                 emitted from a publish site in src/ — wire it up or remove it (#496)",
-                event_name, ident
-            );
+        let mut failures: Vec<String> = Vec::new();
+        for source in crate_sources() {
+            for window in publish_windows(&source) {
+                for ident in event_tokens(window) {
+                    if ident == "EVENT_VERSION" || !declared.contains(ident) {
+                        continue;
+                    }
+                    if !catalog_idents.contains(ident) {
+                        failures.push(alloc::format!(
+                            "publish site references `{}`, which is not in the emit-site \
+                             catalog — add it (with its payload schema) so it cannot escape \
+                             schema review (#575)",
+                            ident
+                        ));
+                    }
+                }
+            }
         }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

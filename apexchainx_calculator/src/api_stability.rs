@@ -90,7 +90,7 @@ pub fn canonical_field_counts() -> [(&'static str, u32); 32] {
         ("FailureSchema", 2),
         ("HealthcheckResult", 3),
         ("ConfigBundle", 3),
-        ("AuditState", 10),
+        ("AuditState", 11),
         ("ContractInfo", 11),
         ("HistoryPage", 3),
         ("RentEstimate", 4),
@@ -242,7 +242,7 @@ mod tests {
         );
         assert_eq!(
             audit_state.unwrap().1,
-            10,
+            11,
             "AuditState field count changed — review with backend consumers"
         );
     }

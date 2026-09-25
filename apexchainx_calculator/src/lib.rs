@@ -2268,6 +2268,7 @@ impl SLACalculatorContract {
         let pending_operator: Option<Address> = env.storage().instance().get(&PENDING_OP_KEY);
         let paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
         let pause_info: Option<PauseInfo> = env.storage().instance().get(&PAUSE_INFO_KEY);
+        let config_frozen: bool = config_freeze::is_config_frozen(&env);
         let config_snapshot = Self::build_config_snapshot(&env)?;
         let stats: SLAStats = env
             .storage()
@@ -2301,6 +2302,7 @@ impl SLACalculatorContract {
             pending_admin,
             pending_operator,
             paused,
+            config_frozen,
             // Empty when unpaused, single-element when paused: `Option<PauseInfo>`
             // cannot be a `#[contracttype]` field (the SDK's ScVal conversion
             // needs `From<&PauseInfo>`, which `#[contracttype]` does not derive).

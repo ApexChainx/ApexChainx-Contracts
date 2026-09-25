@@ -22,6 +22,12 @@ pub struct AuditState {
     pub pending_operator: Option<Address>,
     /// Whether the contract is currently paused.
     pub paused: bool,
+    /// Whether the configuration is currently frozen. Freeze is a first-class
+    /// governance posture: while frozen, `set_config` (and admin role changes)
+    /// are rejected. It must be visible to `get_full_audit_state` so a backend
+    /// polling the audit endpoint can distinguish frozen from thawed without
+    /// attempting a write and hitting `ConfigFrozen` (#577).
+    pub config_frozen: bool,
     /// Pause metadata when paused, empty otherwise. Follows the crate-wide
     /// optional-state convention for `#[contracttype]` fields (CODING_STYLE.md
     /// Part 3, #493): `Option<T>` cannot be a `#[contracttype]` field, so a
@@ -74,6 +80,7 @@ mod tests {
         assert_eq!(state.admin, client.get_admin());
         assert_eq!(state.operator, client.get_operator());
         assert_eq!(state.paused, client.is_paused());
+        assert_eq!(state.config_frozen, client.is_config_frozen());
         assert_eq!(state.pause_info.first(), client.get_pause_info());
         assert_eq!(state.config_snapshot, client.get_config_snapshot());
         assert_eq!(state.stats, client.get_stats());
@@ -89,6 +96,30 @@ mod tests {
         let state = client.get_full_audit_state();
         assert_eq!(state.history_len, 2);
         assert_eq!(state.stats.total_calculations, 2);
+    }
+
+    // #577 – the freeze posture must be visible to the audit endpoint and stay
+    // consistent with the `is_config_frozen` getter across a freeze/thaw cycle.
+    #[test]
+    fn test_audit_state_reports_freeze_posture() {
+        let (_env, client, admin, _operator) = setup();
+
+        let state = client.get_full_audit_state();
+        assert!(!state.config_frozen, "thawed by default after initialize");
+        assert_eq!(state.config_frozen, client.is_config_frozen());
+
+        client.freeze_config(&admin);
+        let state = client.get_full_audit_state();
+        assert!(
+            state.config_frozen,
+            "freeze must be visible to the audit endpoint"
+        );
+        assert_eq!(state.config_frozen, client.is_config_frozen());
+
+        client.unfreeze_config(&admin);
+        let state = client.get_full_audit_state();
+        assert!(!state.config_frozen, "unfreeze must clear the freeze posture");
+        assert_eq!(state.config_frozen, client.is_config_frozen());
     }
 
     // #493 – the pause_info Vec-stands-in-for-Option invariant: empty when
