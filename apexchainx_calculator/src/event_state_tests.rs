@@ -101,7 +101,9 @@ mod event_state_tests {
                 let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
                 if name == EVENT_SETTLE_INTENT {
                     let (_, _, data) = events.get(i).unwrap();
-                    let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
+                    // set_int carries the canonical 9-field decision plus a
+                    // trailing correlation_id (#566).
+                    let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64) =
                         data.try_into_val(&env).unwrap();
                     let (
                         outage_id,
@@ -113,6 +115,7 @@ mod event_state_tests {
                         rating,
                         cfg_hash,
                         recorded,
+                        correlation_id,
                     ) = payload;
 
                     assert_eq!(outage_id, stored.outage_id);
@@ -124,6 +127,15 @@ mod event_state_tests {
                     assert_eq!(rating, stored.rating);
                     assert_eq!(cfg_hash, stored.config_version_hash);
                     assert_eq!(recorded, stored.recorded_at);
+                    let expected = crate::event_correlation::generate_correlation_id(
+                        &env,
+                        &symbol_short!("INTENT01"),
+                        env.ledger().sequence(),
+                    );
+                    assert_eq!(
+                        correlation_id, expected,
+                        "#566: set_int must carry generate_correlation_id's output"
+                    );
                     return;
                 }
             }

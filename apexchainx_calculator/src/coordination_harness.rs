@@ -134,29 +134,17 @@ mod coordination_harness_tests {
         let ledger_seq = 12345u32;
         let corr_id = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
 
-        // The correlation ID should be stable and propagate to downstream contracts
+        // The correlation ID must be non-zero and deterministic for a
+        // (outage, ledger) pair so downstream contracts can re-derive it.
         assert_ne!(corr_id, 0, "Correlation ID must be non-zero");
+        let rederived = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, rederived, "Correlation ID must be deterministic");
 
-        // Verify the correlation topics structure (3-topic arity)
-        let topics = event_correlation::correlation_event_topics(
-            symbol_short!("sla_calc"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            corr_id,
-        );
-        assert_eq!(topics.0, symbol_short!("sla_calc"));
-        assert_eq!(topics.1, symbol_short!("v1"));
-        assert_eq!(topics.2, symbol_short!("critical"));
-
-        // The same correlation ID should be passed to downstream contract events
-        let downstream_topics = event_correlation::correlation_event_topics(
-            symbol_short!("set_int"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            corr_id,
-        );
-        assert_eq!(topics.1, downstream_topics.1, "Event version must match");
-        assert_eq!(topics.2, downstream_topics.2, "Context must match");
+        // The id a downstream contract re-derives from the same (outage,
+        // ledger) pair propagates unchanged; its single documented home is the
+        // `set_int` event payload (see event_schema.rs, #565/#566).
+        let downstream_id = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, downstream_id, "Correlation ID must propagate unchanged");
     }
 
     // ===================================================================
@@ -273,21 +261,15 @@ mod coordination_harness_tests {
         let safety = CrossContractSafety::new(&env);
         assert!(!safety.has_pending(), "Step 3: Safety tracker starts empty");
 
-        // Step 4: Verify correlation topics propagate (3-topic arity)
-        let sla_topic = event_correlation::correlation_event_topics(
-            symbol_short!("sla_calc"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            corr_id,
-        );
-        let settle_topic = event_correlation::correlation_event_topics(
-            symbol_short!("set_int"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            corr_id,
-        );
-        assert_eq!(sla_topic.1, settle_topic.1, "Step 4: Event version must match");
-        assert_eq!(sla_topic.2, settle_topic.2, "Step 4: Context must match");
+        // Step 4: The workflow's correlation id is deterministic and never
+        // shared with a different outage in the same ledger, so downstream
+        // settlement events can be traced to exactly one incident (SC-W5-079,
+        // #564). It is carried in the `set_int` payload (event_schema.rs).
+        let rederived = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, rederived, "Step 4: Correlation ID must be deterministic");
+        let other_outage = Symbol::new(&env, "WF_2024_002");
+        let other_id = event_correlation::generate_correlation_id(&env, &other_outage, ledger_seq);
+        assert_ne!(corr_id, other_id, "Step 4: Distinct outages must not share an id");
     }
 
     // ===================================================================

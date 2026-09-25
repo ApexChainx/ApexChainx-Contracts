@@ -175,8 +175,8 @@ fn test_calculate_sla_emits_versioned_integration_event() {
     let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
     let topic_2: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
     // Canonical decision field order (#429): the sla_calc payload mirrors the
-    // SLAResult struct order shared with set_int and dup_input, so it decodes
-    // as the full 9-field tuple.
+    // SLAResult struct order shared with dup_input (set_int extends it with a
+    // trailing correlation_id, #566), so it decodes as the full 9-field tuple.
     let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at): (
         Symbol,
         Symbol,
@@ -527,6 +527,10 @@ fn test_storage_key_namespace_symbols_are_distinct() {
     //   LAST_VIOLATION_TS_KEY       = "VIOLTS"
     //   HISTORY_KEY                = "HIST"
     //   HISTORY_LEN_KEY            = "HISTLEN"  (cached history length for issue #463)
+    //   HIST_ENTRY_KEY             = "HISTE"    (v3 per-entry sub-key prefix, #582)
+    //   HIST_INDEX_KEY             = "HISTI"    (v3 per-outage index prefix, #580/#581)
+    //   HIST_HEAD_KEY              = "HISTH"    (v3 head counter)
+    //   HIST_TAIL_KEY              = "HISTT"    (v3 tail counter)
     //   CONFIG_COUNT_KEY           = "CFGCNT"   (cached config count for issue #606)
     //   STORAGE_VERSION_KEY        = "VER"
     //   RETENTION_LIMIT_KEY        = "RETLIM"
@@ -552,6 +556,10 @@ fn test_storage_key_namespace_symbols_are_distinct() {
         LAST_VIOLATION_TS_KEY,
         HISTORY_KEY,
         HISTORY_LEN_KEY,
+        HIST_ENTRY_KEY,
+        HIST_INDEX_KEY,
+        HIST_HEAD_KEY,
+        HIST_TAIL_KEY,
         CONFIG_COUNT_KEY,
         STORAGE_VERSION_KEY,
         RETENTION_LIMIT_KEY,
@@ -1579,8 +1587,13 @@ fn test_prune_history_budget_is_reasonable() {
     client.prune_history(&admin, &5);
     let after = env.budget().cpu_instruction_cost();
 
+    // Threshold re-baselined for the v3 sharded layout (#582): dropping 15
+    // entries removes their sub-keys and rewrites the owning outage index
+    // lists — O(dropped) key writes. Measured ≈ 1.65M instructions on
+    // soroban-env-host 21.2.1 (v2's single-vector rewrite was ≈ 900k at this
+    // size); ceiling kept at ~1.5× the measured steady-state.
     assert!(
-        after - before < 900_000,
+        after - before < 2_500_000,
         "prune_history too expensive: {} instructions",
         after - before
     );
@@ -1609,8 +1622,13 @@ fn test_prune_history_by_age_budget_is_reasonable() {
     client.prune_history_by_age(&admin, &500);
     let after = env.budget().cpu_instruction_cost();
 
+    // Threshold re-baselined for the v3 sharded layout (#582): by-age keeps an
+    // arbitrary subset, so it rebuilds the retained entries plus their outage
+    // index lists. Measured ≈ 1.9M instructions at this size on
+    // soroban-env-host 21.2.1; ceiling kept at ~1.5× the measured
+    // steady-state.
     assert!(
-        after - before < 900_000,
+        after - before < 3_000_000,
         "prune_history_by_age too expensive: {} instructions",
         after - before
     );
@@ -3784,12 +3802,20 @@ fn test_get_history_page_with_meta_items_match_get_history_page() {
 /// Issue #464 — documented equivalence of the two paginated accessors.
 ///
 /// `get_history_page` and `get_history_page_with_meta` now derive their slice
-/// from the single `compute_page_slice` implementation. This pins the
-/// documented equivalence end-to-end: for every `(offset, limit)` the `items`
-/// are byte-for-byte identical across both accessors, and the metadata
+/// from the single shared `history::page_slice` implementation (#563). This
+/// pins the documented equivalence end-to-end: for every `(offset, limit)` the
+/// `items` are byte-for-byte identical across both accessors, and the metadata
 /// accessor's `has_more` and page length match the independent executable
 /// pagination spec in `spec.rs`. A refactor that let the two accessors drift
 /// apart — or either one diverge from the policy — fails here.
+/// `get_history_page` and `get_history_page_with_meta` derive their slice from
+/// the same history accessor (`history::read_range`) and identical saturating
+/// slice arithmetic. This pins the documented equivalence end-to-end: for
+/// every `(offset, limit)` the `items` are byte-for-byte identical across both
+/// accessors, and the metadata accessor's `has_more` and page length match the
+/// independent executable pagination spec in `spec.rs`. A refactor that let
+/// the two accessors drift apart — or either one diverge from the policy —
+/// fails here.
 #[test]
 fn test_pagination_slice_equivalence_matches_spec() {
     let (env, client, actors) = setup();
@@ -4379,11 +4405,13 @@ fn test_sla_calc_event_payload_field_count_is_nine() {
     assert_eq!(recorded_at, stored.recorded_at);
 }
 
-/// #429 – Guardrail: all three decision-carrying events (sla_calc, set_int,
+/// #429 – Guardrail: the decision-carrying events (sla_calc, set_int,
 /// dup_input) MUST share the same canonical payload field order, or an
-/// indexer's single decoder would misread one of them. If a payload tuple is
-/// reordered or a decision event diverges, this test fails so the drift cannot
-/// reach release without a review + version bump.
+/// indexer's single decoder would misread one of them. `set_int` additionally
+/// carries a trailing `correlation_id` field (#566) — an additive extension
+/// that leaves the nine shared fields at exactly the same positions. If a
+/// payload tuple is reordered or a decision event diverges, this test fails
+/// so the drift cannot reach release without a review + version bump.
 #[test]
 fn test_decision_events_share_canonical_payload_order() {
     let (env, client, actors) = setup();
@@ -4403,11 +4431,13 @@ fn test_decision_events_share_canonical_payload_order() {
         &30,
     );
 
-    // Canonical 9-field order shared by all three decision events (#429).
+    // Canonical 9-field order shared by all three decision events (#429);
+    // set_int appends the trailing correlation_id (#566).
     type DecisionPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64);
+    type SettlementPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64);
 
     let mut sla_calc_payload: Option<DecisionPayload> = None;
-    let mut set_int_payload: Option<DecisionPayload> = None;
+    let mut set_int_payload: Option<SettlementPayload> = None;
     let mut dup_input_payload: Option<DecisionPayload> = None;
 
     let events = env.events().all();
@@ -4417,15 +4447,21 @@ fn test_decision_events_share_canonical_payload_order() {
             continue;
         }
         let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-        let payload: DecisionPayload = data
-            .try_into_val(&env)
-            .expect("every decision event must decode as the canonical 9-field tuple");
         if name == EVENT_SLA_CALC {
-            sla_calc_payload = Some(payload);
+            sla_calc_payload = Some(
+                data.try_into_val(&env)
+                    .expect("sla_calc must decode as the canonical 9-field tuple"),
+            );
         } else if name == EVENT_SETTLE_INTENT {
-            set_int_payload = Some(payload);
+            set_int_payload = Some(
+                data.try_into_val(&env)
+                    .expect("set_int must decode as 10 fields (9 canonical + correlation_id)"),
+            );
         } else if name == EVENT_DUP_INPUT {
-            dup_input_payload = Some(payload);
+            dup_input_payload = Some(
+                data.try_into_val(&env)
+                    .expect("dup_input must decode as the canonical 9-field tuple"),
+            );
         }
     }
 
@@ -4433,24 +4469,21 @@ fn test_decision_events_share_canonical_payload_order() {
     let set_int = set_int_payload.expect("set_int event not found");
     let dup_input = dup_input_payload.expect("dup_input event not found");
 
-    // All three decode to the canonical order; the shared decision fields
-    // (outage_id, status, mttr, threshold, amount, payment_type, rating) must
-    // agree with each other so a single decoder is unambiguous.
-    assert_eq!(sla_calc.0, set_int.0, "outage_id order/index drift");
-    assert_eq!(sla_calc.1, set_int.1, "status order/index drift");
-    assert_eq!(sla_calc.2, set_int.2, "mttr order/index drift");
-    assert_eq!(sla_calc.3, set_int.3, "threshold order/index drift");
-    assert_eq!(sla_calc.4, set_int.4, "amount order/index drift");
-    assert_eq!(sla_calc.5, set_int.5, "payment_type order/index drift");
-    assert_eq!(sla_calc.6, set_int.6, "rating order/index drift");
+    // set_int's shared fields (its first nine) must decode to the exact same
+    // canonical order as sla_calc; only the trailing correlation_id differs.
+    let set_int_shared: DecisionPayload = (
+        set_int.0, set_int.1, set_int.2, set_int.3, set_int.4, set_int.5, set_int.6, set_int.7, set_int.8,
+    );
+    assert_eq!(
+        sla_calc, set_int_shared,
+        "set_int shared fields must match sla_calc"
+    );
+    assert_ne!(set_int.9, 0, "#566: set_int must carry a non-zero correlation_id");
 
-    assert_eq!(dup_input.0, sla_calc.0, "dup_input outage_id drift");
-    assert_eq!(dup_input.1, sla_calc.1, "dup_input status drift");
-    assert_eq!(dup_input.2, sla_calc.2, "dup_input mttr drift");
-    assert_eq!(dup_input.3, sla_calc.3, "dup_input threshold drift");
-    assert_eq!(dup_input.4, sla_calc.4, "dup_input amount drift");
-    assert_eq!(dup_input.5, sla_calc.5, "dup_input payment_type drift");
-    assert_eq!(dup_input.6, sla_calc.6, "dup_input rating drift");
+    assert_eq!(
+        dup_input, sla_calc,
+        "dup_input must share the canonical order with sla_calc"
+    );
 }
 
 /// #428 – A consumer processing only `set_int` can reconstruct the full SLA
@@ -4480,18 +4513,20 @@ fn test_set_int_payload_is_self_contained_for_reconciliation() {
             continue;
         }
         found = true;
-        // set_int now carries the full decision in canonical order (#428).
-        let (outage_id, status, mttr, threshold, amount, payment_type, rating, hash, recorded_at): (
-            Symbol,
-            Symbol,
-            u32,
-            u32,
-            i128,
-            Symbol,
-            Symbol,
-            u64,
-            u64,
-        ) = data.try_into_val(&env).unwrap();
+        // set_int now carries the full decision in canonical order (#428),
+        // plus the trailing correlation_id (#566).
+        let (
+            outage_id,
+            status,
+            mttr,
+            threshold,
+            amount,
+            payment_type,
+            rating,
+            hash,
+            recorded_at,
+            correlation_id,
+        ): (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64) = data.try_into_val(&env).unwrap();
         assert_eq!(outage_id, stored.outage_id);
         assert_eq!(status, stored.status);
         assert_eq!(mttr, stored.mttr_minutes);
@@ -4501,6 +4536,15 @@ fn test_set_int_payload_is_self_contained_for_reconciliation() {
         assert_eq!(rating, stored.rating);
         assert_eq!(hash, stored.config_version_hash);
         assert_eq!(recorded_at, stored.recorded_at);
+        let expected = crate::event_correlation::generate_correlation_id(
+            &env,
+            &symbol_short!("SETL1"),
+            env.ledger().sequence(),
+        );
+        assert_eq!(
+            correlation_id, expected,
+            "#566: set_int must carry generate_correlation_id's output"
+        );
     }
     assert!(found, "set_int event not found");
 }
@@ -5063,30 +5107,74 @@ fn test_migrate_initialises_missing_fields() {
 
 #[test]
 fn test_migrate_v1_backfills_cached_history_length() {
-    let (env, client, actors) = setup();
-    client.calculate_sla(
-        &actors.operator,
-        &symbol(&env, "MIG_HIST_1"),
-        &symbol_short!("low"),
-        &10,
-    );
-    client.calculate_sla(
-        &actors.operator,
-        &symbol(&env, "MIG_HIST_2"),
-        &symbol_short!("low"),
-        &10,
-    );
+    let env = Env::default();
+    env.mock_all_auths();
+    let cid = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &cid);
+    let admin = soroban_sdk::Address::generate(&env);
+    let op = soroban_sdk::Address::generate(&env);
+    client.initialize(&admin, &op);
 
-    // A v1 deployment has history but lacks the v2 cached length key.
-    env.as_contract(&client.address, || {
+    // Synthesize a genuine legacy pre-v3 deployment (#582): a storage-version
+    // 1 contract holding one `HISTORY_KEY` vector and no sharded
+    // (`HISTE`/`HISTI`/`HISTH`/`HISTT`) or cached-length (`HISTLEN`) keys.
+    let mut legacy_history = Vec::new(&env);
+    legacy_history.push_back(SLAResult {
+        outage_id: symbol(&env, "MIG_HIST_1"),
+        status: symbol_short!("met"),
+        mttr_minutes: 10,
+        threshold_minutes: 30,
+        amount: 100,
+        payment_type: symbol_short!("rew"),
+        rating: symbol_short!("top"),
+        config_version_hash: 123,
+        recorded_at: 1700000000,
+    });
+    legacy_history.push_back(SLAResult {
+        outage_id: symbol(&env, "MIG_HIST_2"),
+        status: symbol_short!("viol"),
+        mttr_minutes: 45,
+        threshold_minutes: 30,
+        amount: 200,
+        payment_type: symbol_short!("pen"),
+        rating: symbol_short!("low"),
+        config_version_hash: 123,
+        recorded_at: 1700000100,
+    });
+    env.as_contract(&cid, || {
+        env.storage().instance().set(&HISTORY_KEY, &legacy_history);
+        // Absent in a legacy v1 deployment:
         env.storage().instance().remove(&HISTORY_LEN_KEY);
+        env.storage().instance().remove(&HIST_HEAD_KEY);
+        env.storage().instance().remove(&HIST_TAIL_KEY);
         env.storage().instance().set(&STORAGE_VERSION_KEY, &1u32);
     });
 
-    client.migrate(&actors.admin);
+    // Migrate v1 -> v2 (backfill) -> v3 (legacy vector -> sharded layout).
+    client.migrate(&admin);
 
     assert_eq!(client.get_storage_version(), STORAGE_VERSION);
     assert_eq!(client.get_full_audit_state().history_len, 2);
+
+    // The legacy vector is gone; the sharded counters own the history now.
+    env.as_contract(&cid, || {
+        assert!(!env.storage().instance().has(&HISTORY_KEY));
+        assert_eq!(
+            env.storage().instance().get::<Symbol, u32>(&HIST_HEAD_KEY),
+            Some(0)
+        );
+        assert_eq!(
+            env.storage().instance().get::<Symbol, u32>(&HIST_TAIL_KEY),
+            Some(2)
+        );
+        assert_eq!(crate::history::len(&env), 2);
+        // Outage reads resolve through the rebuilt per-outage index (#580/#581).
+        let one = crate::history::entries_for_outage(&env, &symbol(&env, "MIG_HIST_1"));
+        assert_eq!(one.len(), 1);
+        assert_eq!(one.get(0).unwrap().outage_id, symbol(&env, "MIG_HIST_1"));
+        let two = crate::history::entries_for_outage(&env, &symbol(&env, "MIG_HIST_2"));
+        assert_eq!(two.len(), 1);
+    });
 }
 
 #[test]
