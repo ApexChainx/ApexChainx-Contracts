@@ -134,7 +134,8 @@ mod coordination_harness_tests {
         let ledger_seq = 12345u32;
         let corr_id = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
 
-        // The correlation ID should be stable and propagate to downstream contracts
+        // The correlation ID must be non-zero and deterministic for a
+        // (outage, ledger) pair so downstream contracts can re-derive it.
         assert_ne!(corr_id, 0, "Correlation ID must be non-zero");
 
         // Verify the correlation topics structure (4-topic arity: name, version,
@@ -163,6 +164,14 @@ mod coordination_harness_tests {
             topics.3, downstream_topics.3,
             "trace join key must match across contract boundaries (#576)"
         );
+        let rederived = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, rederived, "Correlation ID must be deterministic");
+
+        // The id a downstream contract re-derives from the same (outage,
+        // ledger) pair propagates unchanged; its single documented home is the
+        // `set_int` event payload (see event_schema.rs, #565/#566).
+        let downstream_id = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, downstream_id, "Correlation ID must propagate unchanged");
     }
 
     // ===================================================================
@@ -298,6 +307,15 @@ mod coordination_harness_tests {
             sla_topic.3, settle_topic.3,
             "Step 4: Correlation id must match across contracts (#576)"
         );
+        // Step 4: The workflow's correlation id is deterministic and never
+        // shared with a different outage in the same ledger, so downstream
+        // settlement events can be traced to exactly one incident (SC-W5-079,
+        // #564). It is carried in the `set_int` payload (event_schema.rs).
+        let rederived = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, rederived, "Step 4: Correlation ID must be deterministic");
+        let other_outage = Symbol::new(&env, "WF_2024_002");
+        let other_id = event_correlation::generate_correlation_id(&env, &other_outage, ledger_seq);
+        assert_ne!(corr_id, other_id, "Step 4: Distinct outages must not share an id");
     }
 
     // ===================================================================

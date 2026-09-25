@@ -22,6 +22,11 @@
 //!   (outage_id, status, mttr_minutes, threshold_minutes, amount,
 //!    payment_type, rating, config_version_hash, recorded_at)
 //!
+//! `sla_calc` and `dup_input` carry exactly those nine fields. `set_int`
+//! carries the same nine fields in the same order **plus** a trailing
+//! `correlation_id` field (see below) — an additive extension that does not
+//! disturb the shared prefix (#566).
+//!
 //! ## sla_calc (`sla_calc`)
 //! Emitted on every successful `calculate_sla` call.
 //! - topic[2]: severity Symbol
@@ -37,7 +42,16 @@
 //! - topic[2]: severity Symbol
 //! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
 //!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
-//!   rating: Symbol, config_version_hash: u64, recorded_at: u64)
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64,
+//!   correlation_id: u64)
+//!
+//! The trailing `correlation_id` field (an additive change, #566) is the
+//! **single documented home** of the correlation ID (SC-W5-079): it is
+//! `event_correlation::generate_correlation_id`'s output for the (outage_id,
+//! ledger sequence) pair of the emitting calculation, so a backend can join
+//! the `set_int` to its originating calculation deterministically. It is the
+//! only decision event that carries the id — `sla_calc` and `dup_input` stay
+//! at nine fields. (`#565`)
 //!
 //! ## dup_input (`dup_input`)
 //! Emitted when `calculate_sla` rejects a conflicting duplicate `outage_id`
@@ -185,7 +199,7 @@
 //!   `totviol`, `totrew`, `totpen`)
 //! - payload:  (field: Symbol, previous_value: i128, attempted_increment: i128)
 //!
-//! ## migrate_done (`migrate_done`)
+//! ## mig_done (`mig_done`)
 //! Emitted when a storage migration completes successfully.
 //! - topic[2]: caller Address
 //! - payload:  (old_version: u32, new_version: u32)
@@ -196,6 +210,11 @@
 //! the version symbol from "v1" to "v2". Additive changes (new fields at the
 //! end) are NOT considered breaking and do not require a version bump as long
 //! as old consumers ignore unrecognised trailing fields.
+//!
+//! The `set_int` payload gained the trailing `correlation_id` field under
+//! `"v1"` as an additive change (#566); the `EVENT_ABI_GENERATION` co-bump
+//! invariant (#497) applies only to breaking event changes and remains
+//! unchanged.
 //!
 //! # Symbol Deprecation Protocol
 //!
@@ -315,7 +334,11 @@ pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 pub const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
 /// Emitted on the `DuplicateOutageInput` error path with the stored result. (#385)
 pub const EVENT_DUP_INPUT: Symbol = symbol_short!("dup_input");
-pub const EVENT_MIGRATE_DONE: &str = "migrate_done";
+/// Emitted when a storage migration completes successfully. (#61)
+///
+/// Named `mig_done` (not `migrate_done`) so it fits `symbol_short!`'s 9-byte
+/// limit like every sibling event-name constant (#573).
+pub const EVENT_MIGRATE_DONE: Symbol = symbol_short!("mig_done");
 
 /// Returns the canonical event version string for consumer documentation.
 pub fn current_event_version() -> Symbol {
@@ -380,6 +403,8 @@ mod tests {
             EVENT_CONFIG_UNFREEZE,
             EVENT_STATS_SAT,
             EVENT_DUP_INPUT,
+            EVENT_MIGRATE_DONE,
+            crate::EVENT_RET_LIM,
         ];
 
         for i in 0..names.len() {
@@ -535,6 +560,45 @@ mod tests {
                     event_name,
                     ident
                 ));
+        // (event name string, source identifier of the emitting constant).
+        let catalog: [(&str, &str); 26] = [
+            ("sla_calc", "EVENT_SLA_CALC"),
+            ("set_int", "EVENT_SETTLE_INTENT"),
+            ("cfg_upd", "EVENT_CONFIG_UPD"),
+            ("cfg_rem", "EVENT_CONFIG_REM"),
+            ("paused", "EVENT_PAUSED"),
+            ("unpause", "EVENT_UNPAUSED"),
+            ("op_set", "EVENT_OP_SET"),
+            ("pruned", "EVENT_PRUNED"),
+            ("pruned_a", "EVENT_PRUNED_AGE"),
+            ("adm_prop", "EVENT_ADMIN_PROP"),
+            ("adm_acc", "EVENT_ADMIN_ACC"),
+            ("adm_can", "EVENT_ADMIN_CAN"),
+            ("adm_ren", "EVENT_ADMIN_REN"),
+            ("adm_sup", "EVENT_ADMIN_SUP"),
+            ("adm_xp", "EVENT_ADMIN_XP"),
+            ("op_prop", "EVENT_OP_PROP"),
+            ("op_acc", "EVENT_OP_ACC"),
+            ("op_can", "EVENT_OP_CAN"),
+            ("op_sup", "EVENT_OP_SUP"),
+            ("op_xp", "EVENT_OP_XP"),
+            ("cfg_frz", "EVENT_CONFIG_FREEZE"),
+            ("cfg_unfrz", "EVENT_CONFIG_UNFREEZE"),
+            ("stats_sat", "EVENT_STATS_SAT"),
+            ("dup_input", "EVENT_DUP_INPUT"),
+            ("mig_done", "EVENT_MIGRATE_DONE"),
+            ("ret_lim", "EVENT_RET_LIM"),
+        ];
+
+        let src_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&src_dir).expect("src/ readable for emit-site audit") {
+            let entry = entry.expect("read_dir entry");
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            // Skip this schema catalog and the api_stability guardrail: both are
+            // *declaration* sites, not emit sites.
+            if fname == "event_schema.rs" || fname == "api_stability.rs" || !fname.ends_with(".rs") {
+                continue;
             }
         }
         assert!(failures.is_empty(), "{}", failures.join("\n"));

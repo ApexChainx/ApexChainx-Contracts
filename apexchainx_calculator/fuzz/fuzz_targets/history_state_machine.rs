@@ -29,8 +29,9 @@ use soroban_sdk::{Address, Env, Symbol};
 
 /// Maximum number of operations decoded from a single fuzz input.
 const MAX_OPS: usize = 32;
-/// Must match the contract's pagination cap (`history::MAX_PAGE_SIZE`).
-const MAX_PAGE_SIZE: u32 = 200;
+/// The contract's pagination cap, imported from the single implementation so
+/// the fuzz target can never drift from the capping the contract enforces.
+const MAX_PAGE_SIZE: u32 = apexchainx_calculator::history::MAX_PAGE_SIZE;
 
 const OP_CALCULATE: u8 = 0;
 const OP_PRUNE_KEEP: u8 = 1;

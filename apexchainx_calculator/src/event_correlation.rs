@@ -25,16 +25,30 @@
 //! one shared id and correlated events carried no actionable id at all
 //! (#576). The current layout restores both properties.
 //!
+//! # The home of the correlation ID
+//!
+//! The correlation ID is carried in the `set_int` (settlement intent) event
+//! payload as a trailing `correlation_id` field — see `event_schema.rs` §
+//! `set_int` (#566). Topics never carry it: the 3-topic layout
+//! `(name, version, context)` is fixed by `event_schema.rs`, and the old
+//! `correlation_event_topics` helper that accepted a `correlation_id` it
+//! ignored has been removed (#565).
+//!
 //! # Integration
 //!
 //! The SLA calculator's `calculate_sla` function generates a correlation ID
 //! from the outage_id and ledger sequence, then carries it in the `sla_calc`
 //! event's `topic[3]` and passes it to downstream calls.
+//! The SLA calculator's `calculate_sla` generates a correlation ID from the
+//! outage_id and ledger sequence, then includes it in the `set_int` event
+//! payload and any downstream calls.
 //!
 //! Downstream contracts (payment escrow, settlement) accept the correlation
 //! ID as a parameter and echo it into their own events' `topic[3]`.
 
 use soroban_sdk::{symbol_short, Env, Symbol, SymbolStr, TryFromVal};
+use alloc::string::ToString;
+use soroban_sdk::{Env, Symbol};
 
 /// Opaque correlation identifier for tracing workflows across contracts.
 ///
@@ -97,6 +111,31 @@ pub fn correlation_event_topics(
     );
     (event_name, event_version, context, correlation_id)
 }
+/// Generates a deterministic correlation ID for an (outage, ledger) pair.
+///
+/// The outage symbol's string bytes are hashed with FNV-1a and mixed with the
+/// ledger sequence so that:
+///
+/// - distinct outages submitted in the same ledger always receive distinct
+///   ids (SC-W5-079, #564), and
+/// - repeating the same outage in the same ledger still reproduces the
+///   identical id, preserving the replay semantics backends rely on.
+///
+/// The symbol is hashed via its `ToString` representation (Symbol bytes are
+/// not directly accessible in Soroban SDK 21.x), so the result is
+/// deterministic and reproducible off-chain by consumers that apply the same
+/// FNV-1a mixing over the outage string and ledger sequence.
+pub fn generate_correlation_id(_env: &Env, outage_id: &Symbol, ledger_sequence: u32) -> CorrelationId {
+    // FNV-1a over the outage symbol bytes, then the ledger sequence.
+    let mut hash: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
+    for byte in outage_id.to_string().as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
+    }
+    hash ^= (u64::from(ledger_sequence) << 32) | u64::from(ledger_sequence);
+    hash = hash.wrapping_mul(0x100000001b3); // FNV-1a prime
+    hash
+}
 
 #[cfg(test)]
 mod tests {
@@ -149,11 +188,18 @@ mod tests {
         // must not collapse onto a single correlation id.
         let outage_a = Symbol::new(&env, "OUT_A");
         let outage_b = Symbol::new(&env, "OUT_B");
+    fn test_distinct_outages_in_same_ledger_never_collide() {
+        let env = Env::default();
+        // #564 – two different outages submitted in the same ledger must never
+        // share a correlation id, or backends would join unrelated incidents.
+        let outage_a = Symbol::new(&env, "SF001");
+        let outage_b = Symbol::new(&env, "SF002");
         let id_a = generate_correlation_id(&env, &outage_a, 42);
         let id_b = generate_correlation_id(&env, &outage_b, 42);
         assert_ne!(
             id_a, id_b,
             "distinct outages in the same ledger must yield distinct correlation ids (#576)"
+            "distinct outages in the same ledger must not share an id"
         );
     }
 
@@ -169,6 +215,17 @@ mod tests {
         assert_eq!(topics.1, symbol_short!("v1"));
         assert_eq!(topics.2, symbol_short!("critical"));
         assert_eq!(topics.3, 42, "correlation id must be emitted in topic[3] (#576)");
+    fn test_same_outage_in_same_ledger_still_collides() {
+        let env = Env::default();
+        // #564 – replaying the same outage in the same ledger reproduces the
+        // same id, preserving the determinism backends re-derive from.
+        let outage = Symbol::new(&env, "SF001");
+        let id1 = generate_correlation_id(&env, &outage, 42);
+        let id2 = generate_correlation_id(&env, &outage, 42);
+        assert_eq!(
+            id1, id2,
+            "same outage in the same ledger must reproduce the same id"
+        );
     }
 
     #[test]

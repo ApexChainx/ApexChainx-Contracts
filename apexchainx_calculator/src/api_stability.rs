@@ -118,9 +118,10 @@ pub fn sl_a_error_count() -> u32 {
 /// Returns the list of event name symbols that form the public event ABI.
 /// Backend listeners depend on these names never changing.
 ///
-/// **Maintainer note:** This must cover every event constant declared in
-/// `event_schema.rs`. When a new event name is added there, add it here too.
-pub fn event_name_symbols() -> [&'static str; 25] {
+/// **Maintainer note:** This must cover every event name constant declared in
+/// the crate (both `event_schema.rs` and `lib.rs`, e.g. `EVENT_RET_LIM`). When
+/// a new event name is declared, add it here too.
+pub fn event_name_symbols() -> [&'static str; 26] {
     [
         "sla_calc",
         "set_int",
@@ -146,7 +147,8 @@ pub fn event_name_symbols() -> [&'static str; 25] {
         "cfg_unfrz",
         "stats_sat",
         "dup_input",
-        "migrate_done",
+        "mig_done",
+        "ret_lim",
     ]
 }
 
@@ -175,7 +177,7 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check event symbols are at expected count.
-    if event_name_symbols().len() != 25 {
+    if event_name_symbols().len() != 26 {
         return StabilityScore::C;
     }
 
@@ -259,7 +261,7 @@ mod tests {
     fn test_225_event_symbols_are_well_known() {
         // All public event names must be documented and stable.
         let events = event_name_symbols();
-        let expected = 25;
+        let expected = 26;
         assert_eq!(
             events.len(),
             expected,
@@ -276,9 +278,11 @@ mod tests {
 
     #[test]
     fn test_event_name_symbols_matches_event_schema_catalog() {
-        // Guards against event_schema.rs gaining (or losing) an event name
-        // constant without a matching update to event_name_symbols(). If
-        // this fails, sync the two lists.
+        // Guards against the declared event-name constants gaining (or losing)
+        // an entry without a matching update to event_name_symbols(). If this
+        // fails, sync the two lists. EVENT_MIGRATE_DONE and EVENT_RET_LIM are
+        // declared outside the event_schema constant block but are part of the
+        // same distinct event-name ABI, so they are enumerated uniformly here.
         use soroban_sdk::{Env, Symbol};
 
         let env = Env::default();
@@ -307,28 +311,25 @@ mod tests {
             crate::event_schema::EVENT_CONFIG_UNFREEZE,
             crate::event_schema::EVENT_STATS_SAT,
             crate::event_schema::EVENT_DUP_INPUT,
+            crate::event_schema::EVENT_MIGRATE_DONE,
+            crate::EVENT_RET_LIM,
         ];
 
         let guardrail = event_name_symbols();
         assert_eq!(
             guardrail.len(),
-            schema_symbols.len() + 1, // + EVENT_MIGRATE_DONE, which is a &str constant
-            "event_name_symbols() length diverged from event_schema.rs's constant count"
+            schema_symbols.len(),
+            "event_name_symbols() length diverged from the declared event-name constants"
         );
 
         for sym in schema_symbols {
             let found = guardrail.iter().any(|name| Symbol::new(&env, name) == sym);
             assert!(
                 found,
-                "event_schema symbol {:?} is missing from event_name_symbols()",
+                "event name symbol {:?} is missing from event_name_symbols()",
                 sym
             );
         }
-
-        assert!(
-            guardrail.contains(&crate::event_schema::EVENT_MIGRATE_DONE),
-            "event_schema::EVENT_MIGRATE_DONE is missing from event_name_symbols()"
-        );
     }
 
     #[test]

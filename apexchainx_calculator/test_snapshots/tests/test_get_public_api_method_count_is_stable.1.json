@@ -286,6 +286,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "HIST"
+                        },
+                        "val": {
+                          "map": []
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "HISTH"
                         },
                         "val": {
@@ -303,6 +311,14 @@
                       {
                         "key": {
                           "symbol": "HISTT"
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTLEN"
                         },
                         "val": {
                           "u32": 0
@@ -376,6 +392,7 @@
                           "symbol": "VER"
                         },
                         "val": {
+                          "u32": 2
                           "u32": 3
                         }
                       },
@@ -2353,7 +2370,7 @@
                               "symbol": "event"
                             },
                             "val": {
-                              "symbol": "migrate_done"
+                              "symbol": "mig_done"
                             }
                           },
                           {
