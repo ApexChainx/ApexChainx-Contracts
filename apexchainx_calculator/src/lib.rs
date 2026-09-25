@@ -1622,7 +1622,7 @@ impl SLACalculatorContract {
 
         env.events().publish(
             (
-                soroban_sdk::Symbol::new(&env, event_schema::EVENT_MIGRATE_DONE),
+                event_schema::EVENT_MIGRATE_DONE,
                 event_schema::EVENT_VERSION,
                 caller,
             ),
@@ -2480,7 +2480,7 @@ impl SLACalculatorContract {
         // Config queries:
         methods.push_back(method("list_configs", false, "none", ""));
         // Migration:
-        methods.push_back(method("migrate", true, "admin", "migrate_done"));
+        methods.push_back(method("migrate", true, "admin", "mig_done"));
         // Pause:
         methods.push_back(method("pause", true, "admin", "paused"));
         methods.push_back(method("propose_admin", true, "admin", "adm_prop"));
