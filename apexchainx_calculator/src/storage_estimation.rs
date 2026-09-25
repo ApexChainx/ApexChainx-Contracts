@@ -22,8 +22,8 @@
 //! The estimate is consumed by `get_rent_estimate`; changes to these constants
 //! affect on-chain rent projections.
 
-use crate::{SLAConfig, SLAError, CUSTOM_CONFIG_KEY, HISTORY_KEY};
-use soroban_sdk::{Env, Map, Symbol, Vec};
+use crate::{RentEstimate, SLAConfig, SLAError, CUSTOM_CONFIG_KEY};
+use soroban_sdk::{symbol_short, Env, Map, Symbol};
 
 // ── Calibrated byte constants ──────────────────────────────────────────────
 //
@@ -69,11 +69,20 @@ pub(crate) const BYTES_LAST_CALC_TS_KEY: u64 = 32;
 pub(crate) const BYTES_LAST_VIOL_TS_KEY: u64 = 32;
 /// Overhead for the STORAGE_VERSION key (u32).
 pub(crate) const BYTES_STORAGE_VERSION_KEY: u64 = 16;
+/// Overhead for the v3 sharded-history meta keys: HIST_HEAD_KEY, HIST_TAIL_KEY
+/// and the HISTORY_LEN_KEY counter (base overhead only; per-entry sizes are
+/// counted separately), replacing the legacy single HISTORY_KEY vector (#582).
+pub(crate) const BYTES_HISTORY_META_BASE: u64 = 32;
+/// Overhead per history entry for its composite sub-key `(HIST_E, u32)` (#582).
+pub(crate) const BYTES_PER_HISTORY_ENTRY_KEY: u64 = 16;
+/// Overhead per history entry for its slot in the per-outage index
+/// `(HIST_I, outage)` — one `u32` plus vector overhead (#580/#581).
+pub(crate) const BYTES_PER_HISTORY_INDEX_ENTRY: u64 = 20;
+/// Overhead for the per-outage index vector key `(HIST_I, outage)` itself.
+/// Counted once per distinct outages with history entries (#580/#581).
+pub(crate) const BYTES_PER_OUTAGE_INDEX_KEY: u64 = 24;
 /// Overhead for the CONFIG_COUNT key (u32, cached config count added at v3).
 pub(crate) const BYTES_CFGCNT_KEY: u64 = 16;
-/// Overhead for the HISTORY key (Vec<SLAResult> — base Vec overhead only;
-/// element sizes are counted separately via `BYTES_PER_HISTORY_ENTRY`).
-pub(crate) const BYTES_HISTORY_KEY_BASE: u64 = 32;
 /// Overhead for the CUSTOM_CONFIG key (Map — base Map overhead only;
 /// entry sizes are counted separately via `BYTES_PER_CUSTOM_SEVERITY`).
 pub(crate) const BYTES_CUSTOM_CONFIG_KEY_BASE: u64 = 48;
@@ -114,13 +123,23 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     let inst = env.storage().instance();
 
     // ── Variable-size collections ───────────────────────────────────────
-    let history_len = inst
-        .get::<Symbol, Vec<crate::SLAResult>>(&HISTORY_KEY)
-        .map_or(0, |h| h.len() as u64);
+    // v3 sharded history (#580/#581/#582): length is read from the head/tail
+    // counters (O(1)); distinct outages are counted by scanning the retained
+    // entries once — the estimate is a read-only admin diagnostic, so the
+    // O(retained) scan here is acceptable and documented.
+    let history_len = crate::history::len(env) as u64;
 
     let custom_count = inst
         .get::<Symbol, Map<Symbol, SLAConfig>>(&CUSTOM_CONFIG_KEY)
         .map_or(0, |m| m.len() as u64);
+
+    let mut distinct_outages = Map::<Symbol, u32>::new(env);
+    let retained = crate::history::read_all_entries(env);
+    for i in 0..retained.len() {
+        let entry = retained.get(i).unwrap();
+        distinct_outages.set(entry.outage_id, 1u32);
+    }
+    let outage_count = distinct_outages.len() as u64;
 
     let mut footprint: u64 = 0;
 
@@ -136,8 +155,10 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     footprint += BYTES_LAST_VIOL_TS_KEY;
     footprint += BYTES_STORAGE_VERSION_KEY;
     footprint += BYTES_CFGCNT_KEY;
-    footprint += BYTES_HISTORY_KEY_BASE;
-    footprint += history_len * BYTES_PER_HISTORY_ENTRY;
+    footprint += BYTES_HISTORY_META_BASE;
+    footprint +=
+        history_len * (BYTES_PER_HISTORY_ENTRY + BYTES_PER_HISTORY_ENTRY_KEY + BYTES_PER_HISTORY_INDEX_ENTRY);
+    footprint += outage_count * BYTES_PER_OUTAGE_INDEX_KEY;
 
     // ── Lazily-created keys (counted only when present) ─────────────────
     if inst.has(&crate::PENDING_ADMIN_KEY) {
@@ -175,24 +196,59 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     Ok(footprint)
 }
 
+/// Stellar rent reference parameters used for the per-ledger estimate.
+///
+/// Derived from Stellar's rent fee formula (CAP-0046-07, implemented in
+/// `soroban-env-host` `fees.rs`):
+///
+/// ```text
+/// rent(S, L) = ceil( S * fee_per_rent_1kb * L / (1024 * persistent_rent_rate_denominator) )
+/// ```
+///
+/// where `fee_per_rent_1kb` is `compute_rent_write_fee_per_1kb(soroban_state_size, config)`.
+///
+/// Mainnet reference values used below (validator-votable ledger settings):
+/// - `RENT_WRITE_FEE_PER_1KB = 1000` stroops/1KB — the effective floor
+///   (`MINIMUM_RENT_WRITE_FEE_PER_1KB` in `fees.rs`). The configured low rate
+///   is 518 stroops/1KB and rises to a high of 3674 at the 250GB target size
+///   and beyond, so the 1000 floor binds for state sizes below ~98GB — using
+///   the floor keeps the estimate conservative.
+/// - `PERSISTENT_RENT_RATE_DENOMINATOR = 20000` — 1KB of persistent ledger
+///   space is charged `fee_per_rent_1kb` once every 20000 ledgers.
+///
+/// The numerator is computed for a single ledger (amortized) and rounded up.
+pub(crate) const RENT_WRITE_FEE_PER_1KB: i128 = 1000;
+pub(crate) const PERSISTENT_RENT_RATE_DENOMINATOR: i128 = 20000;
+
 /// Calculates an **approximate** per-ledger storage rent cost (in stroops)
 /// based on the current storage footprint.
 ///
-/// **Disclaimer (#459):** This is a relative growth proxy, not an
-/// authoritative rent figure. The formula (`footprint / 10 + 1`) is a
-/// placeholder approximation. Actual Stellar rent depends on network
-/// parameters (rent fee per byte per ledger, minimum rent, etc.) that
-/// are not available to the Soroban host in this SDK version.
+/// The value applies Stellar's rent formula (CAP-0046-07) to the estimated
+/// footprint using the mainnet reference parameters above, amortized to one
+/// ledger. It replaces the former `footprint / 10 + 1` placeholder (#579).
 ///
-/// Operators should use this value to track **relative** storage cost
-/// growth over time, not as an absolute budgeting number.
-pub fn get_rent_estimate(env: &Env) -> Result<i128, SLAError> {
+/// **Approximation (#459/#579):** Actual rent depends on live network
+/// parameters (rent write fee per 1KB, `persistent_rent_rate_denominator`)
+/// that are ledger config settings voted by validators and not exposed to the
+/// Soroban host. This estimate is a proxy built from documented reference
+/// parameters; the returned [`RentEstimate`] carries `is_approximation =
+/// true` across the ABI boundary so backends can detect and discount it.
+/// It must not be used for absolute budgeting.
+pub fn get_rent_estimate(env: &Env) -> Result<RentEstimate, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let footprint = get_storage_footprint_estimate(env)? as i128;
-    // Relative proxy: ~1 stroop per 10 bytes per ledger + 1 base stroop.
-    // See doc comment — this is not derived from network parameters.
-    let rent_per_ledger = (footprint / 10) + 1;
-    Ok(rent_per_ledger)
+    let footprint = get_storage_footprint_estimate(env)?;
+
+    // rent(S, 1) = ceil( S * fee_per_rent_1kb / (1024 * denominator) )
+    let num = (footprint as i128).saturating_mul(RENT_WRITE_FEE_PER_1KB);
+    let denom = 1024i128.saturating_mul(PERSISTENT_RENT_RATE_DENOMINATOR);
+    let rent_per_ledger = num.div_euclid(denom) + i128::from(num.rem_euclid(denom) > 0);
+
+    Ok(RentEstimate {
+        estimated_rent_per_ledger: rent_per_ledger,
+        footprint_bytes: footprint,
+        is_approximation: true,
+        method: symbol_short!("cap0046"),
+    })
 }
 
 #[cfg(test)]
@@ -222,7 +278,11 @@ mod tests {
         assert!(initial_footprint >= 1000);
 
         let initial_rent = client.get_rent_estimate();
-        assert!(initial_rent > 0);
+        assert!(initial_rent.estimated_rent_per_ledger > 0);
+        // #579: the approximation signal crosses the ABI boundary.
+        assert!(initial_rent.is_approximation);
+        assert_eq!(initial_rent.method, symbol_short!("cap0046"));
+        assert_eq!(initial_rent.footprint_bytes, initial_footprint);
 
         // Add 5 history entries with distinct outage IDs
         let outage_ids = [
@@ -243,13 +303,19 @@ mod tests {
 
         let updated_footprint = client.get_storage_footprint_estimate();
         assert!(updated_footprint > initial_footprint);
+        // v3 sharded history (#582): each new outage adds its value plus its
+        // entry sub-key, one index slot, and its own per-outage index key.
+        let per_entry_delta =
+            BYTES_PER_HISTORY_ENTRY + BYTES_PER_HISTORY_ENTRY_KEY + BYTES_PER_HISTORY_INDEX_ENTRY;
         assert_eq!(
             updated_footprint,
-            initial_footprint + (5 * BYTES_PER_HISTORY_ENTRY)
+            initial_footprint + (5 * per_entry_delta) + (5 * BYTES_PER_OUTAGE_INDEX_KEY)
         );
 
         let updated_rent = client.get_rent_estimate();
-        assert!(updated_rent >= initial_rent);
+        assert!(updated_rent.estimated_rent_per_ledger >= initial_rent.estimated_rent_per_ledger);
+        assert_eq!(updated_rent.footprint_bytes, updated_footprint);
+        assert!(updated_rent.is_approximation);
     }
 
     /// Validate that the measured byte constants are within a reasonable range
