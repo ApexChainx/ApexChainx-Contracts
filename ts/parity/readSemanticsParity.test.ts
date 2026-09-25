@@ -45,6 +45,7 @@ import {
   EVENT_VERSION,
   MAX_HISTORY_SIZE,
   MAX_PAGE_SIZE,
+  MAX_RECALCS_PER_OUTAGE,
   RESULT_FIELD_COUNT,
   RESULT_SCHEMA_VERSION,
   SYMBOLS,
@@ -127,6 +128,7 @@ const HISTORY: HistoryEntry[] = FIXTURE.history.map((entry, index) => ({
 test("mirrored constants match the values the contract reported", () => {
   assert.equal(MAX_PAGE_SIZE, FIXTURE.constants.maxPageSize);
   assert.equal(MAX_HISTORY_SIZE, FIXTURE.constants.maxHistorySize);
+  assert.equal(MAX_RECALCS_PER_OUTAGE, FIXTURE.constants.maxRecalcsPerOutage);
   assert.equal(RESULT_SCHEMA_VERSION, FIXTURE.constants.resultSchemaVersion);
   assert.equal(RESULT_FIELD_COUNT, FIXTURE.constants.resultFieldCount);
 });

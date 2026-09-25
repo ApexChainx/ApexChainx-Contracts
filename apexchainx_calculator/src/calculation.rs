@@ -67,7 +67,7 @@ pub fn calculate_sla(
     crate::SLACalculatorContract::require_operator(env, caller)?;
 
     let cfg = crate::SLACalculatorContract::load_config(env, &severity)?;
-    let config_version_hash = crate::SLACalculatorContract::compute_config_version_hash(env)?;
+    let config_version_hash = crate::SLACalculatorContract::compute_severity_config_hash(env, &severity)?;
 
     // ── Phase 2: Pure computation (no state reads/writes) ─────────────
     let result = compute_result(
@@ -177,7 +177,7 @@ pub fn calculate_sla_view(
         return Err(SLAError::InvalidInput);
     }
     let cfg = crate::SLACalculatorContract::load_config(env, &severity)?;
-    let config_version_hash = crate::SLACalculatorContract::compute_config_version_hash(env)?;
+    let config_version_hash = crate::SLACalculatorContract::compute_severity_config_hash(env, &severity)?;
 
     let history: Vec<SLAResult> = env
         .storage()
