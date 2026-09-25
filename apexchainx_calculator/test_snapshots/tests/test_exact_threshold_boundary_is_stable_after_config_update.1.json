@@ -609,169 +609,34 @@
                       },
                       {
                         "key": {
-                          "symbol": "HIST"
+                          "symbol": "CUSTCFG"
                         },
                         "val": {
-                          "vec": [
-                            {
-                              "map": [
-                                {
-                                  "key": {
-                                    "symbol": "amount"
-                                  },
-                                  "val": {
-                                    "i128": {
-                                      "hi": 0,
-                                      "lo": 1000
-                                    }
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "config_version_hash"
-                                  },
-                                  "val": {
-                                    "u64": 3202668148427286373
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "mttr_minutes"
-                                  },
-                                  "val": {
-                                    "u32": 20
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "outage_id"
-                                  },
-                                  "val": {
-                                    "symbol": "EXACT"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "payment_type"
-                                  },
-                                  "val": {
-                                    "symbol": "rew"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "rating"
-                                  },
-                                  "val": {
-                                    "symbol": "good"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "recorded_at"
-                                  },
-                                  "val": {
-                                    "u64": 0
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "status"
-                                  },
-                                  "val": {
-                                    "symbol": "met"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "threshold_minutes"
-                                  },
-                                  "val": {
-                                    "u32": 20
-                                  }
-                                }
-                              ]
-                            },
-                            {
-                              "map": [
-                                {
-                                  "key": {
-                                    "symbol": "amount"
-                                  },
-                                  "val": {
-                                    "i128": {
-                                      "hi": -1,
-                                      "lo": 18446744073709551416
-                                    }
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "config_version_hash"
-                                  },
-                                  "val": {
-                                    "u64": 3202668148427286373
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "mttr_minutes"
-                                  },
-                                  "val": {
-                                    "u32": 21
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "outage_id"
-                                  },
-                                  "val": {
-                                    "symbol": "OVER"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "payment_type"
-                                  },
-                                  "val": {
-                                    "symbol": "pen"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "rating"
-                                  },
-                                  "val": {
-                                    "symbol": "poor"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "recorded_at"
-                                  },
-                                  "val": {
-                                    "u64": 0
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "status"
-                                  },
-                                  "val": {
-                                    "symbol": "viol"
-                                  }
-                                },
-                                {
-                                  "key": {
-                                    "symbol": "threshold_minutes"
-                                  },
-                                  "val": {
-                                    "u32": 20
-                                  }
-                                }
-                              ]
-                            }
-                          ]
+                          "map": []
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTH"
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTLEN"
+                        },
+                        "val": {
+                          "u32": 2
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTT"
+                        },
+                        "val": {
+                          "u32": 2
                         }
                       },
                       {
@@ -850,7 +715,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 3
                         }
                       },
                       {
@@ -873,6 +738,226 @@
                             "hi": 0,
                             "lo": 0
                           }
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "HISTE"
+                            },
+                            {
+                              "u32": 0
+                            }
+                          ]
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": 0,
+                                  "lo": 1000
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "config_version_hash"
+                              },
+                              "val": {
+                                "u64": 3202668148427286373
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "mttr_minutes"
+                              },
+                              "val": {
+                                "u32": 20
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "outage_id"
+                              },
+                              "val": {
+                                "symbol": "EXACT"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "payment_type"
+                              },
+                              "val": {
+                                "symbol": "rew"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "rating"
+                              },
+                              "val": {
+                                "symbol": "good"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recorded_at"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "status"
+                              },
+                              "val": {
+                                "symbol": "met"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold_minutes"
+                              },
+                              "val": {
+                                "u32": 20
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "HISTE"
+                            },
+                            {
+                              "u32": 1
+                            }
+                          ]
+                        },
+                        "val": {
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "amount"
+                              },
+                              "val": {
+                                "i128": {
+                                  "hi": -1,
+                                  "lo": 18446744073709551416
+                                }
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "config_version_hash"
+                              },
+                              "val": {
+                                "u64": 3202668148427286373
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "mttr_minutes"
+                              },
+                              "val": {
+                                "u32": 21
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "outage_id"
+                              },
+                              "val": {
+                                "symbol": "OVER"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "payment_type"
+                              },
+                              "val": {
+                                "symbol": "pen"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "rating"
+                              },
+                              "val": {
+                                "symbol": "poor"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "recorded_at"
+                              },
+                              "val": {
+                                "u64": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "status"
+                              },
+                              "val": {
+                                "symbol": "viol"
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "threshold_minutes"
+                              },
+                              "val": {
+                                "u32": 20
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "HISTI"
+                            },
+                            {
+                              "symbol": "EXACT"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "u32": 0
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
+                          "vec": [
+                            {
+                              "symbol": "HISTI"
+                            },
+                            {
+                              "symbol": "OVER"
+                            }
+                          ]
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "u32": 1
+                            }
+                          ]
                         }
                       }
                     ]
@@ -1305,12 +1390,6 @@
                   "symbol": "met"
                 },
                 {
-                  "symbol": "rew"
-                },
-                {
-                  "symbol": "good"
-                },
-                {
                   "u32": 20
                 },
                 {
@@ -1321,6 +1400,18 @@
                     "hi": 0,
                     "lo": 1000
                   }
+                },
+                {
+                  "symbol": "rew"
+                },
+                {
+                  "symbol": "good"
+                },
+                {
+                  "u64": 3202668148427286373
+                },
+                {
+                  "u64": 0
                 }
               ]
             }
@@ -1356,13 +1447,22 @@
                   "symbol": "met"
                 },
                 {
-                  "symbol": "rew"
+                  "u32": 20
+                },
+                {
+                  "u32": 20
                 },
                 {
                   "i128": {
                     "hi": 0,
                     "lo": 1000
                   }
+                },
+                {
+                  "symbol": "rew"
+                },
+                {
+                  "symbol": "good"
                 },
                 {
                   "u64": 3202668148427286373
@@ -1542,12 +1642,6 @@
                   "symbol": "viol"
                 },
                 {
-                  "symbol": "pen"
-                },
-                {
-                  "symbol": "poor"
-                },
-                {
                   "u32": 21
                 },
                 {
@@ -1558,6 +1652,18 @@
                     "hi": -1,
                     "lo": 18446744073709551416
                   }
+                },
+                {
+                  "symbol": "pen"
+                },
+                {
+                  "symbol": "poor"
+                },
+                {
+                  "u64": 3202668148427286373
+                },
+                {
+                  "u64": 0
                 }
               ]
             }
@@ -1593,13 +1699,22 @@
                   "symbol": "viol"
                 },
                 {
-                  "symbol": "pen"
+                  "u32": 21
+                },
+                {
+                  "u32": 20
                 },
                 {
                   "i128": {
                     "hi": -1,
                     "lo": 18446744073709551416
                   }
+                },
+                {
+                  "symbol": "pen"
+                },
+                {
+                  "symbol": "poor"
                 },
                 {
                   "u64": 3202668148427286373

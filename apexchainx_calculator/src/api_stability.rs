@@ -70,7 +70,7 @@ impl StabilityScore {
 /// **Maintainer note:** When adding or removing a field from any of these
 /// structs, update the corresponding count here AND bump the relevant
 /// schema version constant.
-pub fn canonical_field_counts() -> [(&'static str, u32); 31] {
+pub fn canonical_field_counts() -> [(&'static str, u32); 32] {
     [
         ("SLAConfig", 3),
         ("SLAResult", 9),
@@ -93,6 +93,7 @@ pub fn canonical_field_counts() -> [(&'static str, u32); 31] {
         ("AuditState", 10),
         ("ContractInfo", 11),
         ("HistoryPage", 3),
+        ("RentEstimate", 4),
         ("PublicApiMethod", 4),
         ("PublicApiDescriptor", 3),
         ("SeverityAliasMapping", 4),
@@ -154,11 +155,11 @@ pub fn event_name_symbols() -> [&'static str; 25] {
 /// Additions to this set MUST coincide with a `STORAGE_VERSION` bump —
 /// enforced by `storage_key_invariant_tests::`
 /// `test_storage_key_set_pinned_to_version_snapshot_or_newer` (#602).
-pub fn storage_key_symbols() -> [&'static str; 23] {
+pub fn storage_key_symbols() -> [&'static str; 27] {
     [
         "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED",
         "PAUSEINF", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT",
-        "VER", "RETLIM", "TPRUNED", "TTOTENT", "LCFGUPD",
+        "VER", "RETLIM", "TPRUNED", "TTOTENT", "LCFGUPD", "HISTE", "HISTI", "HISTH", "HISTT",
     ]
 }
 
@@ -179,12 +180,12 @@ pub fn assess_stability() -> StabilityScore {
     }
 
     // Check storage key symbols are at expected count.
-    if storage_key_symbols().len() != 23 {
+    if storage_key_symbols().len() != 27 {
         return StabilityScore::C;
     }
 
     // Check canonical field counts have expected number of entries.
-    if canonical_field_counts().len() != 31 {
+    if canonical_field_counts().len() != 32 {
         return StabilityScore::C;
     }
 
@@ -333,7 +334,7 @@ mod tests {
     #[test]
     fn test_225_storage_keys_are_distinct() {
         let keys = storage_key_symbols();
-        let expected = 22;
+        let expected = 27;
 
         assert_eq!(
             keys.len(),

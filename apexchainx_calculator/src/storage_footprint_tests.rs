@@ -25,10 +25,10 @@
 //! | `saturation_regression` | 1000-calculation run stays under 65 KiB per entry |
 
 use alloc::format;
+extern crate std;
+use crate::{SLACalculatorContract, SLACalculatorContractClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::Env;
-
-use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
 /// Helper: deploy + init, return (env, client, operator).
 fn deploy() -> (Env, SLACalculatorContractClient<'static>, soroban_sdk::Address) {
@@ -62,15 +62,23 @@ fn storage_key_count_is_stable_after_init() {
     // Keys written eagerly by initialize (see SLACalculatorContract::initialize
     // in lib.rs). Asserting presence pins the post-init footprint so accidental
     // additions or removals are caught. CUSTCFG is seeded eagerly since #455;
-    // CFGCNT is seeded eagerly since #606.
-    let eagerly_written: [&str; 14] = [
-        "ADMIN", "OPERATOR", "CONFIG", "PAUSED", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST",
-        "HISTLEN", "VER", "CUSTCFG", "CFGCNT",
+    // CFGCNT is seeded eagerly since #606. Covering-history comes from the
+    // v3 sharded meta counters `HISTH`/`HISTT` plus the cached `HISTLEN`;
+    // `HIST` is the legacy pre-v3 vector key and is not expected post-init
+    // (#582).
+    let eagerly_written: [&str; 15] = [
+        "ADMIN", "OPERATOR", "CONFIG", "PAUSED", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HISTH",
+        "HISTT", "HISTLEN", "VER", "CUSTCFG", "CFGCNT",
     ];
 
     // Keys intentionally created lazily — they must be absent until the
-    // corresponding feature is first exercised.
-    let lazily_created: [&str; 5] = ["PADMIN", "POP", "PAUSEINF", "RETLIM", "LCFGUPD"];
+    // corresponding feature is first exercised. `HISTE`/`HISTI` are the v3
+    // per-entry and per-outage-index sub-key prefixes, created on first
+    // evaluation; the legacy `HIST` key is never written by fresh deploys
+    // (#580/#581/#582).
+    let lazily_created: [&str; 8] = [
+        "PADMIN", "POP", "PAUSEINF", "RETLIM", "LCFGUPD", "HIST", "HISTE", "HISTI",
+    ];
 
     env.as_contract(&client.address, || {
         for key in eagerly_written {
@@ -154,9 +162,9 @@ fn history_growth_is_linear_then_bounded() {
 /// deployment and assert that the entire storage footprint stays
 /// comfortably below the per-entry size ceiling.
 ///
-/// The primary risk being tested: a Vec serialisation bug that linearly
-/// re-encodes all previous entries on each push, turning O(n) into O(n²)
-/// for the 1 000th write and blowing through the CPU budget.
+/// The primary risk being tested: a storage bug that linearly re-encodes all
+/// previous entries on each push, turning O(n) into O(n²) for the 1 000th write
+/// and blowing through the CPU budget.
 #[test]
 fn saturation_regression_1000_calculations() {
     let env = Env::default();
@@ -184,14 +192,16 @@ fn saturation_regression_1000_calculations() {
     let after = env.budget().cpu_instruction_cost();
     let per_call = (after - before) / 1000;
 
-    // Each call writes the full history Vec. If the cost is O(n²) we'd
-    // expect >1 000 000 instructions per call; the current design measures
-    // ~18M per call for a 1 010-element Vec, so the gate is set with
-    // headroom above that baseline to catch regressions beyond the current
-    // steady-state cost (e.g. an accidental O(n²) amplification).
+    // Since v3 (#582) the hot path writes one entry sub-key + one per-outage
+    // index entry + counters, and reads/deserialises only what it touches — it
+    // never rewrites a shared history vector. Per-call cost is therefore linear
+    // in retained history with a small constant (measured to average ~27M over
+    // a 10→1000-entry ramp, scaling ~62k/entry). The gate is set with headroom
+    // above that steady-state baseline to catch regressions beyond it — e.g. an
+    // accidental O(n²) amplification, which would reach billions per call here.
     assert!(
-        per_call < 25_000_000,
-        "Saturation regression: per-call CPU {} exceeds budget 25 000 000 (possible O(n²) storage)",
+        per_call < 40_000_000,
+        "Saturation regression: per-call CPU {} exceeds budget 40 000 000 (possible O(n²) storage)",
         per_call
     );
 
@@ -276,14 +286,23 @@ fn pause_cycles_do_not_leak_storage() {
 // ── Per-call storage write cost budget (Issue #466) ──────────────────
 
 /// Measure CPU cost of `calculate_sla` at a pinned history size to gate
-/// write-amplification regressions. Each call rewrites the entire history Vec,
-/// so the cost is O(retained_history_size). This test ensures the per-call
-/// cost does not unexpectedly jump due to a storage redesign or extra
-/// serialization step.
+/// write-amplification regressions. Since v3 (#582) each call writes one
+/// entry sub-key plus one per-outage index entry and the head/tail counters —
+/// bytes serialized per call are O(1); it never rewrites a shared history
+/// vector. Per-call CPU still scales with retained history because instance
+/// storage is a single ledger entry whose access cost the test env models as
+/// an O(instance-blob) load/parse per op (see `get_full_audit_state` docs,
+/// issue #463); the v3 constant is ~51M at near-max history vs ~18M for the
+/// pre-#582 full-vector rewrite, because v3 touches several small entries per
+/// call instead of one large one.
+///
+/// This test ensures the per-call cost does not unexpectedly jump due to a
+/// storage redesign or extra serialization step, and cannot regress into
+/// O(n²) (which would exceed 1B instructions per call at this history size).
 ///
 /// The budget is calibrated at MAX_HISTORY_SIZE = 1000 entries. If history
-/// storage changes (e.g. pruned more aggressively), the budget must be
-/// re-baselined and documented in a CHANGELOG entry.
+/// storage changes, the budget must be re-baselined and documented in a
+/// CHANGELOG entry.
 #[test]
 fn calculate_sla_per_call_write_cost_at_max_history() {
     let env = Env::default();
@@ -309,7 +328,7 @@ fn calculate_sla_per_call_write_cost_at_max_history() {
 
     // Sample with an unbounded budget so the 10-call benchmark can complete;
     // the cost gate below asserts the steady-state per-call cost stays under the
-    // 50M ceiling. (10 x per-call cost exceeds the default 100M host budget, so
+    // 80M ceiling. (10 x per-call cost exceeds the default 100M host budget, so
     // `reset_default()` would abort the sample loop before it finishes.)
     env.budget().reset_unlimited();
     let before = env.budget().cpu_instruction_cost();
@@ -322,14 +341,16 @@ fn calculate_sla_per_call_write_cost_at_max_history() {
     let after = env.budget().cpu_instruction_cost();
     let per_call_avg = (after - before) / 10;
 
-    // Budget at MAX_HISTORY_SIZE: per-call O(n) cost must stay under 50M instructions.
-    // Measured baseline: ~18M for 1000-entry Vec. Headroom prevents regressions like:
+    // Budget at MAX_HISTORY_SIZE: per-call O(n) cost must stay under 80M instructions.
+    // Measured baseline: ~51M at 1000 entries (v3 sharded constant; see module docs).
+    // Headroom prevents regressions like:
     // - Extra deserialization round-trips
     // - Silent Vec duplication on append
     // - Inefficient slice-copy patterns
+    // An accidental O(n²) amplification would exceed 1B instructions and fail here.
     assert!(
-        per_call_avg < 50_000_000,
-        "Per-call write cost at MAX_HISTORY_SIZE: {} instructions exceeds budget 50M (issue #466)",
+        per_call_avg < 80_000_000,
+        "Per-call write cost at MAX_HISTORY_SIZE: {} instructions exceeds budget 80M (issue #466)",
         per_call_avg
     );
 }

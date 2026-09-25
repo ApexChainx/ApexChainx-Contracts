@@ -297,6 +297,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "CUSTCFG"
+                        },
+                        "val": {
+                          "map": []
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "FREEZE"
                         },
                         "val": {
@@ -305,10 +313,26 @@
                       },
                       {
                         "key": {
-                          "symbol": "HIST"
+                          "symbol": "HISTH"
                         },
                         "val": {
-                          "vec": []
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTLEN"
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTT"
+                        },
+                        "val": {
+                          "u32": 0
                         }
                       },
                       {
@@ -379,7 +403,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 3
                         }
                       },
                       {

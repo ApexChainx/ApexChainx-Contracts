@@ -13,6 +13,8 @@ Storage keys are strictly partitioned by prefix to prevent data collision betwee
 | `Telemetry` / `TEL_*` | Telemetry | System metrics, counters, and monitoring states. |
 | `Version` / `VER_*` | Version Control | Contract schema versions and protocol negotiation markers. |
 
+The SLA history (v3 layout, #580–#582) maps to the `HIST_*` prefix via four constants: `HISTE` (per-entry sub-key `(HISTE, index)`), `HISTI` (per-outage index `(HISTI, outage_id)`), `HISTH` (head counter), and `HISTT` (tail counter). `HIST` is the **legacy pre-v3 single-vector key**: fresh deploys never write it, and migration removes it. `HISTLEN` caches the retained count for `get_full_audit_state`.
+
 * **Rule**: Direct string literals for storage keys are strictly prohibited outside of central symbol mapping modules. Use the defined enum/constant registries.
 
 ## 1a. Key additions are machine-checked (#602)
