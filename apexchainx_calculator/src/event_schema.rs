@@ -130,6 +130,12 @@
 //! - topic[2]: caller Address
 //! - payload:  (superseded_admin: Address, new_admin: Address)
 //!
+//! ## adm_xp (`adm_xp`)
+//! Emitted at most once when a lapsed admin proposal is first observed by an
+//! accept attempt, immediately before the pending admin keys are cleared. (#589)
+//! - topic[2]: caller Address (the caller whose accept attempt observed expiry)
+//! - payload:  (expired_admin: Address,)
+//!
 //! ## op_prop (`op_prop`)
 //! Emitted when a new operator is proposed.
 //! - topic[2]: caller Address
@@ -150,6 +156,13 @@
 //! before the prior candidate accepted or cancelled. (#468)
 //! - topic[2]: caller Address
 //! - payload:  (superseded_operator: Address, new_operator: Address)
+//!
+//! ## op_xp (`op_xp`)
+//! Emitted at most once when a lapsed operator proposal is first observed by
+//! an accept attempt, immediately before the pending operator keys are
+//! cleared. (#589)
+//! - topic[2]: caller Address (the caller whose accept attempt observed expiry)
+//! - payload:  (expired_operator: Address,)
 //!
 //! ## cfg_frz (`cfg_frz`)
 //! Emitted when the configuration is frozen by admin.
@@ -290,8 +303,12 @@ pub const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 pub const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
 /// Emitted when a pending admin proposal is superseded by a re-proposal. (#468)
 pub const EVENT_ADMIN_SUP: Symbol = symbol_short!("adm_sup");
+/// Emitted at most once when a lapsed admin proposal is first observed. (#589)
+pub const EVENT_ADMIN_XP: Symbol = symbol_short!("adm_xp");
 /// Emitted when a pending operator proposal is superseded by a re-proposal. (#468)
 pub const EVENT_OP_SUP: Symbol = symbol_short!("op_sup");
+/// Emitted at most once when a lapsed operator proposal is first observed. (#589)
+pub const EVENT_OP_XP: Symbol = symbol_short!("op_xp");
 pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
 /// Emitted when a running-stats counter saturates. (SC-W5-047)
@@ -355,10 +372,12 @@ mod tests {
             EVENT_ADMIN_CAN,
             EVENT_ADMIN_REN,
             EVENT_ADMIN_SUP,
+            EVENT_ADMIN_XP,
             EVENT_OP_PROP,
             EVENT_OP_ACC,
             EVENT_OP_CAN,
             EVENT_OP_SUP,
+            EVENT_OP_XP,
             EVENT_CONFIG_FREEZE,
             EVENT_CONFIG_UNFREEZE,
             EVENT_STATS_SAT,
@@ -390,7 +409,7 @@ mod tests {
         use std::vec::Vec;
 
         // (event name string, source identifier of the emitting constant).
-        let catalog: [(&str, &str); 24] = [
+        let catalog: [(&str, &str); 26] = [
             ("sla_calc", "EVENT_SLA_CALC"),
             ("set_int", "EVENT_SETTLE_INTENT"),
             ("cfg_upd", "EVENT_CONFIG_UPD"),
@@ -405,10 +424,12 @@ mod tests {
             ("adm_can", "EVENT_ADMIN_CAN"),
             ("adm_ren", "EVENT_ADMIN_REN"),
             ("adm_sup", "EVENT_ADMIN_SUP"),
+            ("adm_xp", "EVENT_ADMIN_XP"),
             ("op_prop", "EVENT_OP_PROP"),
             ("op_acc", "EVENT_OP_ACC"),
             ("op_can", "EVENT_OP_CAN"),
             ("op_sup", "EVENT_OP_SUP"),
+            ("op_xp", "EVENT_OP_XP"),
             ("cfg_frz", "EVENT_CONFIG_FREEZE"),
             ("cfg_unfrz", "EVENT_CONFIG_UNFREEZE"),
             ("stats_sat", "EVENT_STATS_SAT"),

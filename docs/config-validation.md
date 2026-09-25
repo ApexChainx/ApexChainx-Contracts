@@ -72,7 +72,24 @@ validation parameters:
 
 | Rule | Condition | Error on Violation | Rationale |
 |------|-----------|-------------------|-----------|
-| Penalty severity ordering | `critical.penalty >= high.penalty >= medium.penalty >= low.penalty` | `InvalidPenalty` (code 9) | Maintains logical severity progression — a higher-severity outage must never carry a lower penalty than a lower-severity one |
+| Penalty severity ordering | `critical.penalty >= high.penalty >= medium.penalty` (low is exempt — see below) | `InvalidPenalty` (code 9) | Maintains logical severity progression — a higher-severity outage must never carry a lower penalty than a lower-severity one |
+
+### Penalty ladder & the low-severity exemption (#594)
+
+The ladder above is enforced for the three higher tiers and, on **medium**
+updates, against `low` (`medium.penalty >= low.penalty`). Updating **low**
+itself performs no cross-severity check: because `low`'s per-severity cap (100)
+intentionally exceeds `medium`'s minimum (10), a configuration where
+`low.penalty > medium.penalty` is **reachable and accepted by design**. This is
+a documented tolerance, not a config error:
+
+- Backend implementers consuming `get_config_bundle` must **not** reject or
+  flag a low-above-medium segment; the contract intentionally admits it.
+- Reverting such a segment requires updating `low` to ≤ `medium` first; a
+  later `medium` update enforces `medium.penalty >= low.penalty` and would
+  reject a value below the current `low.penalty`.
+- `low.penalty == medium.penalty` is always allowed (equality does not invert
+  the ladder).
 
 ### Rule Enforcement Order
 

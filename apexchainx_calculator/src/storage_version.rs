@@ -7,11 +7,19 @@
 //!
 //! # Version Lifecycle
 //!
-//! 1. Contract is deployed — `initialize()` stamps `STORAGE_VERSION` (currently 1)
+//! 1. Contract is deployed — `initialize()` stamps `STORAGE_VERSION` (currently 3)
 //! 2. Contract is upgraded — new binary may expect a higher version
 //! 3. `get_migration_state()` reports `needs_migration: true`
 //! 4. Admin calls `migrate()` — storage is transformed and version is bumped
 //! 5. `get_migration_state()` reports `needs_migration: false`
+//!
+//! # Pre-initialisation Reading (#599)
+//!
+//! Before `initialize()` writes `STORAGE_VERSION_KEY` there is no stored
+//! version. `read_storage_version` returns `None` and
+//! `SLACalculatorContract::get_storage_version` returns the baseline `0` (a
+//! "no schema yet" signal for startup probes), while the never-initialised
+//! *migration* state still reports the contract-wide `NotInitialized` posture.
 //!
 //! # Shape-Change Checklist
 //!

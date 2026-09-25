@@ -141,25 +141,16 @@ pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -
 /// See `docs/HISTORY_PAGINATION_POLICY.md` for the full policy.
 pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let limit = limit.min(MAX_PAGE_SIZE);
     let history: Vec<SLAResult> = env
         .storage()
         .instance()
         .get(&HISTORY_KEY)
         .unwrap_or_else(|| Vec::new(env));
-    let len = history.len();
-    let mut page = Vec::new(env);
-    if offset >= len || limit == 0 {
-        return Ok(page);
-    }
-    // Saturating arithmetic: `offset + limit` could otherwise wrap for extreme
-    // `u32` inputs (e.g. offset near `u32::MAX`), silently slicing the wrong
-    // range. Saturation clamps the end index to the real history length, which
-    // is the correct behaviour for any page that asks for more than remains.
-    let end = offset.saturating_add(limit).min(len);
-    for i in offset..end {
-        page.push_back(history.get(i).unwrap());
-    }
+    // #598 – route through the same slicing implementation the contract
+    // method uses (`SLACalculatorContract::compute_page_slice`), so the
+    // free-form accessor can never drift from it: clamping, saturating
+    // `offset + limit` and the empty-page cases are all defined in one place.
+    let (_end, page) = crate::SLACalculatorContract::compute_page_slice(env, &history, offset, limit);
     Ok(page)
 }
 
@@ -178,24 +169,18 @@ pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLARes
 /// `docs/HISTORY_PAGINATION_POLICY.md`.
 pub fn get_history_page_with_meta(env: &Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let limit = limit.min(MAX_PAGE_SIZE);
     let history: Vec<SLAResult> = env
         .storage()
         .instance()
         .get(&HISTORY_KEY)
         .unwrap_or_else(|| Vec::new(env));
     let total = history.len();
-    let mut items = Vec::new(env);
-    // Saturating arithmetic mirrors `get_history_page`: clamp the end index to
-    // the real history length so extreme `u32` inputs can never wrap into a
-    // wrong slice. `end` also drives `has_more`: entries remain whenever the
-    // requested range stops short of the end of history and limit > 0.
-    let end = offset.saturating_add(limit).min(total);
-    if offset < total && limit != 0 {
-        for i in offset..end {
-            items.push_back(history.get(i).unwrap());
-        }
-    }
+    // #598 – shared slicing implementation with `get_history_page` (and the
+    // contract methods): the clamped end index and item slice come from
+    // `compute_page_slice`, so the metadata accessor can never disagree with
+    // the plain page accessor. `end` also drives `has_more`: entries remain
+    // whenever the requested range stops short of the end of history.
+    let (end, items) = crate::SLACalculatorContract::compute_page_slice(env, &history, offset, limit);
     // When limit == 0, the page is empty by request, which signals end-of-history
     // per the pagination policy. This ensures consistency with get_history_page.
     let has_more = if limit == 0 { false } else { end < total };
@@ -248,14 +233,14 @@ pub fn get_latest_by_outage(env: &Env, outage_id: Symbol) -> Result<Option<SLARe
 }
 
 /// Returns the number of configured severity levels.
+/// O(1): reads the cached count maintained alongside CONFIG_KEY (#606).
 pub fn get_config_count(env: &Env) -> Result<u32, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let configs: soroban_sdk::Map<Symbol, crate::SLAConfig> = env
+    Ok(env
         .storage()
         .instance()
-        .get(&crate::CONFIG_KEY)
-        .ok_or(SLAError::NotInitialized)?;
-    Ok(configs.len())
+        .get(&crate::CONFIG_COUNT_KEY)
+        .ok_or(SLAError::NotInitialized)?)
 }
 
 /// Sets the retention limit for history entries. Admin only.

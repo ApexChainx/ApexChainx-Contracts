@@ -7,7 +7,25 @@
  * Payload shapes match the on-chain ABI: the SLAConfigSnapshot entries,
  * SLAResult tuples, and VersionInfo struct as returned by the contract.
  * Sizes are estimated using Soroban SCVal encoding widths, not JSON.
+ *
+ * # Issue #614: regression gating
+ * Two layers are enforced:
+ *  1. Absolute budgets (READ_BUDGET_LIMITS) — a payload shape may never
+ *     grow past the documented per-helper ceiling.
+ *  2. Regression baseline (readCostBaseline.json) — a payload shape may not
+ *     grow more than READ_REGRESSION_TOLERANCE_FRACTION above its committed
+ *     baseline size. The baseline is the "before" measurement; every run
+ *     writes the "after" measurements to readCostMeasurements.json so CI can
+ *     publish before/after artifacts alongside the build.
+ *
+ * Refresh the baseline deliberately (a documented, reviewed enlargement —
+ * e.g. an additive SLAResult field) with `--update-baseline`, which rewrites
+ * readCostBaseline.json from the current measurements. A PR that grows a
+ * payload without updating the baseline fails this script.
  */
+
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
 // ─── Soroban SCVal byte-size estimation ───────────────────────────────────
 // On-chain, view responses are SCVal-encoded. We estimate sizes using
@@ -53,9 +71,27 @@ const READ_BUDGET_LIMITS = {
   metadataRead: 128,
 };
 
+/**
+ * Largest permitted relative growth over the committed baseline before a
+ * change is treated as a read-cost regression. 0.10 = +10%.
+ */
+const READ_REGRESSION_TOLERANCE_FRACTION = 0.1;
+
+// Offchain scripts are executed from the repository root in CI.
+const BASELINE_PATH = join(process.cwd(), "offchain", "readCostBaseline.json");
+const MEASUREMENTS_PATH = join(process.cwd(), "offchain", "readCostMeasurements.json");
+
 interface ReadSample {
   helper: keyof typeof READ_BUDGET_LIMITS;
   payload: unknown;
+}
+
+function measure(samples: ReadSample[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const sample of samples) {
+    out[sample.helper] = estimateScValSize(sample.payload);
+  }
+  return out;
 }
 
 function assertReadBudget(sample: ReadSample): void {
@@ -67,6 +103,31 @@ function assertReadBudget(sample: ReadSample): void {
     );
   }
   console.log(`  ✓ ${sample.helper}: ${size}B / ${limit}B`);
+}
+
+function assertNoRegression(
+  baseline: Record<string, number>,
+  current: Record<string, number>
+): void {
+  for (const [helper, after] of Object.entries(current)) {
+    const before = baseline[helper];
+    if (before === undefined) {
+      throw new Error(
+        `[SC-016/#614] ${helper} has no committed baseline; run 'tsx offchain/readCostRegression.ts --update-baseline' after a reviewed payload enlargement.`
+      );
+    }
+    const ceiling = Math.ceil(before * (1 + READ_REGRESSION_TOLERANCE_FRACTION));
+    if (after > ceiling) {
+      throw new Error(
+        `[SC-016/#614] ${helper} read cost BEFORE ${before}B -> AFTER ${after}B exceeds +${Math.round(READ_REGRESSION_TOLERANCE_FRACTION * 100)}% regression tolerance (ceiling ${ceiling}B). If the enlargement is intentional and reviewed, update the baseline with --update-baseline.`
+      );
+    }
+    if (after >= before) {
+      console.log(`  ~ ${helper}: ${before}B -> ${after}B (within tolerance)`);
+    } else {
+      console.log(`  ~ ${helper}: ${before}B -> ${after}B (improvement)`);
+    }
+  }
 }
 
 // ─── Mock payloads matching real on-chain shapes ──────────────────────────
@@ -113,6 +174,47 @@ const samples: ReadSample[] = [
   { helper: "metadataRead", payload: mockMetadataRead },
 ];
 
-console.log("[SC-016/SC-W5-029] Read-cost regression checks (Soroban SCVal estimation):");
-samples.forEach(assertReadBudget);
-console.log("All read-cost checks passed.");
+function run(): void {
+  console.log("[SC-016/SC-W5-029] Read-cost regression checks (Soroban SCVal estimation):");
+  samples.forEach(assertReadBudget);
+
+  const current = measure(samples);
+  const wantsBaselineUpdate = process.argv.includes("--update-baseline");
+  const baseline: Record<string, number> =
+    readJSONOrEmpty(BASELINE_PATH);
+
+  if (wantsBaselineUpdate) {
+    writeFileSync(BASELINE_PATH, JSON.stringify(current, null, 2) + "\n");
+    console.log(`Updated read-cost baseline (${Object.keys(current).length} helpers).`);
+  } else {
+    assertNoRegression(baseline, current);
+  }
+
+  // Failure artifacts: always record the before/after measurements (and the
+  // budgets) so CI uploads a diffable report on every run.
+  writeFileSync(
+    MEASUREMENTS_PATH,
+    JSON.stringify(
+      {
+        generatedAt: new Date().toISOString(),
+        toleranceFraction: READ_REGRESSION_TOLERANCE_FRACTION,
+        budgets: READ_BUDGET_LIMITS,
+        baseline: baseline,
+        current: current,
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  console.log("All read-cost checks passed.");
+}
+
+function readJSONOrEmpty(path: string): Record<string, number> {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as Record<string, number>;
+  } catch {
+    return {};
+  }
+}
+
+run();

@@ -336,6 +336,7 @@ The contract exposes a multi-surface version posture through
 | Storage schema | `storage_version` | `STORAGE_VERSION` in `lib.rs` |
 | Result encoding | `result_schema_version` | `RESULT_SCHEMA_VERSION` in `lib.rs` |
 | Event ABI | `event_version` | `event_schema::EVENT_VERSION` |
+| Per-outage recalc cap | `max_recalcs_per_outage` | `MAX_RECALCS_PER_OUTAGE` in `lib.rs` |
 
 These surfaces evolve independently, but **breaking event changes are
 coordinated releases**. Bumping the event ABI generation (`EVENT_VERSION`
@@ -358,6 +359,9 @@ MUST be accompanied by:
 - `contract_status`-type consumers should check `get_contract_info()` once at
   startup and treat `event_version` + `result_schema_version` + `storage_version`
   as a single compatibility tuple that must all match the backend's parser.
+- The recalculation cap is exported on the same object as
+  `max_recalcs_per_outage` (source: `MAX_RECALCS_PER_OUTAGE`), so the cap a
+  backend assumes always comes from the deployed binary, never a doc copy (#596).
 
 ---
 
