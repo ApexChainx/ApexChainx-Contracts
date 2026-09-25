@@ -2,8 +2,16 @@
 //!
 //! This module checks that the ledger environment supports the required
 //! minimum protocol version before the contract is considered deployable.
+//!
+//! `REQUIRED_PROTOCOL_VERSION` is **derived** from
+//! `defaults::query_defaults::DEFAULT_PROTOCOL_VERSION`, the single canonical
+//! protocol number backing the protocol-version query defaults. Keeping one
+//! source of truth means a version bump can never silently drift between the
+//! advertised value and the deployment gate (#600).
 
 use soroban_sdk::{symbol_short, Env, Symbol};
+
+use crate::defaults::query_defaults::DEFAULT_PROTOCOL_VERSION;
 
 /// Deployment policy asserting protocol-version compatibility.
 ///
@@ -13,7 +21,10 @@ pub struct DeploymentPolicy;
 
 impl DeploymentPolicy {
     /// Minimum protocol version required for deployment.
-    pub const REQUIRED_PROTOCOL_VERSION: u32 = 1;
+    ///
+    /// Derived from the canonical `DEFAULT_PROTOCOL_VERSION` so the policy
+    /// gate and the query-defaults advertisement can never disagree.
+    pub const REQUIRED_PROTOCOL_VERSION: u32 = DEFAULT_PROTOCOL_VERSION;
     /// Deployment tag for release identification.
     pub const DEPLOYMENT_TAG: Symbol = symbol_short!("v1_rel");
 
@@ -39,5 +50,17 @@ mod tests {
         // In the test ledger the protocol version is non-negative and defaults
         // above 0, so deployment compatibility must hold.
         assert!(DeploymentPolicy::verify_deployment_compatibility(&env));
+    }
+
+    #[test]
+    fn test_policy_version_equals_canonical_default_never_drifts() {
+        // (#600) Equal-adversity guard: the deployment gate and the public
+        // query-defaults value read the same number. If this ever fires, a
+        // release bumped one source of the protocol version and forgot the
+        // other.
+        assert_eq!(
+            DeploymentPolicy::REQUIRED_PROTOCOL_VERSION,
+            crate::defaults::query_defaults::DEFAULT_PROTOCOL_VERSION
+        );
     }
 }

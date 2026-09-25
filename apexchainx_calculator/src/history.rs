@@ -216,10 +216,6 @@ pub fn prune_oldest(env: &Env, keep_count: u32) -> u32 {
 /// Rebuilds the whole sharded history from `entries` (oldest-first), keeping
 /// index keys consistent with the new set.
 ///
-/// Used by the rare admin prune / trim / retention paths and by the v3
-/// migration, where a full O(retained) pass is acceptable. Clears any existing
-/// sharded state first, so it is idempotent. New entries are written at the
-/// current head index onward, preserving the monotonic counters.
 pub fn rebuild_history(env: &Env, entries: &Vec<SLAResult>) {
     let h = head(env);
     let t = tail(env);

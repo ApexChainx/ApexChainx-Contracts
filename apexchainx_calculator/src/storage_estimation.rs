@@ -81,6 +81,8 @@ pub(crate) const BYTES_PER_HISTORY_INDEX_ENTRY: u64 = 20;
 /// Overhead for the per-outage index vector key `(HIST_I, outage)` itself.
 /// Counted once per distinct outages with history entries (#580/#581).
 pub(crate) const BYTES_PER_OUTAGE_INDEX_KEY: u64 = 24;
+/// Overhead for the CONFIG_COUNT key (u32, cached config count added at v3).
+pub(crate) const BYTES_CFGCNT_KEY: u64 = 16;
 /// Overhead for the CUSTOM_CONFIG key (Map — base Map overhead only;
 /// entry sizes are counted separately via `BYTES_PER_CUSTOM_SEVERITY`).
 pub(crate) const BYTES_CUSTOM_CONFIG_KEY_BASE: u64 = 48;
@@ -152,6 +154,7 @@ pub fn get_storage_footprint_estimate(env: &Env) -> Result<u64, SLAError> {
     footprint += BYTES_LAST_CALC_TS_KEY;
     footprint += BYTES_LAST_VIOL_TS_KEY;
     footprint += BYTES_STORAGE_VERSION_KEY;
+    footprint += BYTES_CFGCNT_KEY;
     footprint += BYTES_HISTORY_META_BASE;
     footprint +=
         history_len * (BYTES_PER_HISTORY_ENTRY + BYTES_PER_HISTORY_ENTRY_KEY + BYTES_PER_HISTORY_INDEX_ENTRY);

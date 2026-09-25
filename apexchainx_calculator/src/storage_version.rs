@@ -13,6 +13,14 @@
 //! 4. Admin calls `migrate()` — storage is transformed and version is bumped
 //! 5. `get_migration_state()` reports `needs_migration: false`
 //!
+//! # Pre-initialisation Reading (#599)
+//!
+//! Before `initialize()` writes `STORAGE_VERSION_KEY` there is no stored
+//! version. `read_storage_version` returns `None` and
+//! `SLACalculatorContract::get_storage_version` returns the baseline `0` (a
+//! "no schema yet" signal for startup probes), while the never-initialised
+//! *migration* state still reports the contract-wide `NotInitialized` posture.
+//!
 //! # Shape-Change Checklist
 //!
 //! Any PR that increments `STORAGE_VERSION`, adds or renames storage keys, or

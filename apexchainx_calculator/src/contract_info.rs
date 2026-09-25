@@ -25,7 +25,7 @@ use crate::{SLACalculatorContract, SLAError, RESULT_SCHEMA_VERSION, STORAGE_VERS
 
 /// Schema version of the `ContractInfo` struct itself.
 /// Increment when fields are added, removed, or reordered.
-pub const CONTRACT_INFO_SCHEMA_VERSION: u32 = 1;
+pub const CONTRACT_INFO_SCHEMA_VERSION: u32 = 2;
 
 /// #424 – Single source of truth for the advertised feature set.
 ///
@@ -95,6 +95,7 @@ pub fn cargo_pkg_version_symbol(env: &Env) -> Symbol {
 /// | `is_config_frozen` | True when configuration is frozen |
 /// | `supported_severities` | Canonical severity Symbols in canonical order |
 /// | `features` | Feature flags enabled on this contract |
+/// | `max_recalcs_per_outage` | Per-`outage_id` recalculation cap (`MAX_RECALCS_PER_OUTAGE`) |
 #[allow(missing_docs)]
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -121,6 +122,8 @@ pub struct ContractInfo {
     pub supported_severities: Vec<Symbol>,
     /// Feature flags.
     pub features: Vec<Symbol>,
+    /// Per-outage recalculation cap (exposed `MAX_RECALCS_PER_OUTAGE`).
+    pub max_recalcs_per_outage: u32,
 }
 
 /// #191 – Returns the full typed, versioned contract-info object.
@@ -165,6 +168,7 @@ pub fn get_contract_info(env: &Env) -> Result<ContractInfo, SLAError> {
         is_config_frozen,
         supported_severities: severities,
         features,
+        max_recalcs_per_outage: crate::MAX_RECALCS_PER_OUTAGE,
     })
 }
 
@@ -201,6 +205,8 @@ mod tests {
             assert!(!info.needs_migration);
             assert!(!info.is_paused);
             assert!(!info.is_config_frozen);
+            // #596 – the recalc budget is surfaced on the introspection object.
+            assert_eq!(info.max_recalcs_per_outage, crate::MAX_RECALCS_PER_OUTAGE);
         });
     }
 
@@ -393,6 +399,23 @@ mod tests {
             let info1 = get_contract_info(&env).unwrap();
             let info2 = get_contract_info(&env).unwrap();
             assert_eq!(info1, info2);
+        });
+    }
+
+    /// #596 – `MAX_RECALCS_PER_OUTAGE` must be surfaced on `get_contract_info`
+    /// so backend consumers read the recalculation cap from the same object
+    /// that carries the version posture, never from a hand-maintained copy.
+    #[test]
+    fn test_contract_info_exposes_recalc_budget() {
+        let (env, contract_id, _admin, _operator) = setup();
+        env.as_contract(&contract_id, || {
+            let info = get_contract_info(&env).unwrap();
+            // The advertised value is the exported constant, not a literal:
+            // a change to MAX_RECALCS_PER_OUTAGE is picked up here by
+            // construction.
+            assert_eq!(info.max_recalcs_per_outage, crate::MAX_RECALCS_PER_OUTAGE);
+            assert_eq!(info.max_recalcs_per_outage, 16u32);
+            assert_eq!(info.schema_version, CONTRACT_INFO_SCHEMA_VERSION);
         });
     }
 }

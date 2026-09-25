@@ -54,7 +54,6 @@ LIB_RS="$CRATE_DIR/src/lib.rs"
 # ---------------------------------------------------------------------------
 ALLOWLIST=(
     auth_matrix_tests.rs
-    deployment_policy.rs
     event_ordering_tests.rs
     event_state_tests.rs
     outage_id_tests.rs

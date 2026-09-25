@@ -8,4 +8,3 @@
 
 pub mod default_policy;
 pub mod query_defaults;
-pub mod storage_fallback;

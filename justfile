@@ -159,6 +159,13 @@ offchain-checks:
     npx tsx offchain/governanceConsistency.ts
     npx tsx offchain/contractMetadata.ts
 
+# Regenerate and verify the committed persistence scenario fixtures (pers-store).
+# Deterministic by construction (no randomness); the generator rewrites
+# pers-store/fixtures/persistence-fixtures.json and exits non-zero when the
+# committed file is stale, so staleness fails CI's offchain-checks job (#631).
+pers-store-check:
+    npx tsx pers-store/generate-fixtures.ts
+
 # ------------------------------------------------------------ ts parity ------
 
 # Regenerate the contract-derived artefacts the ts/ helpers are checked against.

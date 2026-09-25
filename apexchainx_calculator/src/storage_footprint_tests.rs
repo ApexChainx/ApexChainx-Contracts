@@ -54,19 +54,21 @@ fn deploy() -> (Env, SLACalculatorContractClient<'static>, soroban_sdk::Address)
 /// (retention override), and `LCFGUPD` (config-update stamp) are created
 /// lazily on first use and must NOT exist after a fresh initialize. `CUSTCFG`
 /// (custom severities) is seeded eagerly since #455, so it IS expected here.
+/// `CFGCNT` (cached config count) is seeded eagerly since #606.
 #[test]
 fn storage_key_count_is_stable_after_init() {
     let (env, client, _op) = deploy();
 
     // Keys written eagerly by initialize (see SLACalculatorContract::initialize
     // in lib.rs). Asserting presence pins the post-init footprint so accidental
-    // additions or removals are caught. CUSTCFG is seeded eagerly since #455.
-    // Covering-history comes from the v3 sharded meta counters `HISTH`/`HISTT`
-    // plus the cached `HISTLEN`; `HIST` is the legacy pre-v3 vector key and is
-    // not expected post-init (#582).
-    let eagerly_written: [&str; 14] = [
+    // additions or removals are caught. CUSTCFG is seeded eagerly since #455;
+    // CFGCNT is seeded eagerly since #606. Covering-history comes from the
+    // v3 sharded meta counters `HISTH`/`HISTT` plus the cached `HISTLEN`;
+    // `HIST` is the legacy pre-v3 vector key and is not expected post-init
+    // (#582).
+    let eagerly_written: [&str; 15] = [
         "ADMIN", "OPERATOR", "CONFIG", "PAUSED", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HISTH",
-        "HISTT", "HISTLEN", "VER", "CUSTCFG",
+        "HISTT", "HISTLEN", "VER", "CUSTCFG", "CFGCNT",
     ];
 
     // Keys intentionally created lazily — they must be absent until the

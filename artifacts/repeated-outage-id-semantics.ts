@@ -13,6 +13,9 @@ export interface SlaResult {
   calculatedAt: number;
 }
 
+
+
+
 type HistoryStore = Map<string, SlaResult[]>;
 
 /** Simulates contract history append — latest entry wins for "get_latest". */
