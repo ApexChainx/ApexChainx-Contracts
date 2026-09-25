@@ -164,6 +164,11 @@ pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLARes
 ///   `has_more` from it without re-deriving the policy.
 /// - The end index uses saturating arithmetic so extreme `u32` inputs cannot
 ///   wrap into a wrong slice.
+///
+/// Issue #563: this is the single implementation of the slicing policy —
+/// `SLACalculatorContract`'s contract methods delegate here (via
+/// `history::get_history_page`/`get_history_page_with_meta`) instead of
+/// duplicating it, so the two can no longer drift apart.
 fn page_slice(env: &Env, history: &Vec<SLAResult>, offset: u32, limit: u32) -> (u32, Vec<SLAResult>) {
     let limit = limit.min(MAX_PAGE_SIZE);
     let len = history.len();
@@ -260,14 +265,14 @@ pub fn get_latest_by_outage(env: &Env, outage_id: Symbol) -> Result<Option<SLARe
 }
 
 /// Returns the number of configured severity levels.
+/// O(1): reads the cached count maintained alongside CONFIG_KEY (#606).
 pub fn get_config_count(env: &Env) -> Result<u32, SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
-    let configs: soroban_sdk::Map<Symbol, crate::SLAConfig> = env
+    Ok(env
         .storage()
         .instance()
-        .get(&crate::CONFIG_KEY)
-        .ok_or(SLAError::NotInitialized)?;
-    Ok(configs.len())
+        .get(&crate::CONFIG_COUNT_KEY)
+        .ok_or(SLAError::NotInitialized)?)
 }
 
 /// Sets the retention limit for history entries. Admin only.

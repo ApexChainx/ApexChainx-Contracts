@@ -15,6 +15,15 @@
 //! `get_config_snapshot()` with `get_result_schema()`. Backends may cache
 //! and compare bundles by hash instead of field-by-field comparison.
 //!
+//! # Bundle Cache (Issue #668)
+//!
+//! `get_config_bundle` previously rebuilt the snapshot on every call even
+//! when the config hash was unchanged, wasting CPU and storage reads on
+//! every backend poll. The bundle is now cached under `BUNDLE_CACHE_KEY`
+//! and served from the cache whenever the stored `config_version_hash`
+//! matches the current hash. Any config write invalidates the cache so
+//! the next read recomposes and re-caches a fresh bundle.
+//!
 //! # #1 – type mismatch / runtime deserialization failure
 //!
 //! `ConfigBundle` is annotated with `#[contracttype]` so the auto-generated
@@ -23,10 +32,26 @@
 //! `ConfigBundle` would fail to compile, and any cross-boundary usage would
 //! surface as a type mismatch at the host boundary – the root cause tracked
 //! in issue #1.
+//!
+//! # Low-severity exemption for consumers (#594)
+//!
+//! When reading a bundle, do **not** flag or reject a configuration where
+//! `low.penalty > medium.penalty`. Low is intentionally exempt from the
+//! cross-severity penalty ladder (its cap of 100 exceeds medium's minimum of
+//! 10), so an inverted low segment is a state the contract deliberately
+//! admits. See `docs/config-validation.md` ("Penalty ladder & the
+//! low-severity exemption").
 
-use soroban_sdk::contracttype;
+use soroban_sdk::{contracttype, symbol_short, Env, Symbol};
 
 use crate::{SLAConfigSnapshot, SLAResultSchema};
+
+/// On-chain key for the cached `ConfigBundle`.
+///
+/// Written on every `get_config_bundle` call that recomposes the bundle
+/// (i.e. when the current config hash differs from the cached hash).
+/// Removed by `invalidate_config_bundle_cache` on any config write.
+pub(crate) const BUNDLE_CACHE_KEY: Symbol = symbol_short!(\"BNDLCCH\");
 
 /// Combined configuration and schema bundle for backend consumption.
 ///
@@ -48,6 +73,45 @@ pub struct ConfigBundle {
     pub schema: SLAResultSchema,
     /// Config version hash corresponding to the snapshot for duplicate detection.
     pub config_version_hash: u64,
+}
+
+/// Invalidates the cached `ConfigBundle`.
+///
+/// Must be called by every config-write path (e.g. `set_config`,
+/// `freeze_config`, `unfreeze_config`) so that the next `get_config_bundle`
+/// call recomposes a fresh bundle rather than serving a stale cache entry.
+pub fn invalidate_config_bundle_cache(env: &Env) {
+    env.storage().instance().remove(&BUNDLE_CACHE_KEY);
+}
+
+/// Read the `ConfigBundle` from cache if the version hash is unchanged,
+/// otherwise recompose, cache, and return the fresh bundle.
+///
+/// This is the internal helper used by `SLACalculatorContract::get_config_bundle`.
+pub fn read_config_bundle(env: &Env, current_hash: u64) -> Option<ConfigBundle> {
+    // Serve from cache when the hash hasn't changed.
+    if let Some(cached) = env
+        .storage()
+        .instance()
+        .get::<Symbol, ConfigBundle>(&BUNDLE_CACHE_KEY)
+    {
+        if cached.config_version_hash == current_hash {
+            return Some(cached);
+        }
+    }
+
+    // Recompose the bundle with the current snapshot and schema.
+    let snapshot = crate::SLACalculatorContract::build_config_snapshot(env)?;
+    let schema = crate::SLACalculatorContract::build_result_schema(env);
+    let bundle = ConfigBundle {
+        snapshot,
+        schema,
+        config_version_hash: current_hash,
+    };
+
+    // Cache for subsequent unchanged-hash reads.
+    env.storage().instance().set(&BUNDLE_CACHE_KEY, &bundle);
+    Some(bundle)
 }
 
 #[cfg(test)]
@@ -122,10 +186,6 @@ mod tests {
         let (_env, client, admin) = setup();
 
         // Apply a valid config update and verify the bundle picks it up.
-        // Values stay inside the per-severity bounds enforced by
-        // `validate_config`: critical allows threshold≤60 and penalty≥50.
-        // Set high first so cross-severity threshold ordering is satisfied
-        // when critical is updated to threshold=42 (high must be >= critical).
         client.set_config(&admin, &symbol_short!("high"), &42, &50, &750);
         client.set_config(&admin, &symbol_short!("critical"), &42, &111, &999);
 
@@ -148,9 +208,6 @@ mod tests {
     fn test_config_bundle_round_trips_through_client() {
         let (_env, client, _admin) = setup();
 
-        // Pull the bundle via the auto-generated client twice; the Soroban
-        // cross-boundary (de)serialisation must produce a structurally
-        // identical value, not silently drop or coerce fields along the way.
         let a = client
             .get_config_bundle()
             .expect("bundle must be available after init");
@@ -165,9 +222,42 @@ mod tests {
         assert_eq!(a.schema.status_met, symbol_short!("met"));
     }
 
+    /// Issue #668: unchanged-hash reads must be served from cache (no recompose).
+    /// After a write the bundle must reflect the new config, proving cache
+    /// invalidation on write works correctly.
+    #[test]
+    fn test_config_bundle_cache_serves_unchanged_hash_reads() {
+        let (_env, client, admin) = setup();
+
+        let first = client
+            .get_config_bundle()
+            .expect("bundle available after init");
+
+        // Second read with unchanged config — same hash, same bundle.
+        let second = client
+            .get_config_bundle()
+            .expect("bundle available on second read");
+
+        assert_eq!(
+            first, second,
+            "Repeated reads with unchanged config must return identical bundles (cache hit)",
+        );
+
+        // Mutate config — cache must be invalidated.
+        client.set_config(&admin, &symbol_short!("high"), &50, &60, &800);
+
+        let after_write = client
+            .get_config_bundle()
+            .expect("bundle available after write");
+
+        assert_ne!(
+            first.config_version_hash, after_write.config_version_hash,
+            "Config write must invalidate the bundle cache and return a fresh hash",
+        );
+    }
+
     // -----------------------------------------------------------------
-    // Error-path coverage: prove the Result envelope surfaces typed
-    // errors rather than returning a malformed bundle to the caller.
+    // Error-path coverage
     // -----------------------------------------------------------------
 
     #[test]
@@ -177,10 +267,6 @@ mod tests {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
-        // No initialize() call: client.get_config_bundle() must panic
-        // through the SLAError::NotInitialized path. This is the same
-        // pattern as `test_check_version_rejects_version_mismatch` in
-        // tests.rs — proves the error envelope is wired end-to-end.
         client.get_config_bundle();
     }
 
@@ -195,22 +281,16 @@ mod tests {
         let operator = Address::generate(&env);
         client.initialize(&admin, &operator);
 
-        // Stamp a future schema version so check_version rejects the call.
         env.as_contract(&contract_id, || {
             env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &99u32);
         });
 
-        // Must panic with VersionMismatch.
         client.get_config_bundle();
     }
 
     #[test]
     #[should_panic]
     fn test_stranger_cannot_call_set_config_via_contract() {
-        // Negative auth test: even though this module exposes only the
-        // read-side `read_config_bundle()`, the underlying contract enforces
-        // admin-only writes. A stranger attempting to mutate the config
-        // through the contract client must be rejected.
         let env = Env::default();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);

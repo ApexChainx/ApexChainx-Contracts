@@ -4,6 +4,9 @@
  * Run: npx ts-node artifacts/constant-mapping.ts > artifacts/constants.json
  */
 
+
+
+
 export const CONTRACT_CONSTANTS = {
   severities: ["critical", "high", "medium", "low"],
   rewardTiers: {

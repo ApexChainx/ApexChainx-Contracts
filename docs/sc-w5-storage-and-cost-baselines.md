@@ -10,6 +10,7 @@
 - [Pruning-by-Age Chronology](#pruning-by-age-chronology)
 - [Storage Footprint Telemetry](#storage-footprint-telemetry)
 - [Critical Path Cost Baseline](#critical-path-cost-baseline)
+- [Calculation Input Bound (#593)](#calculation-input-bound-593)
 - [Mutating Function CPU Budgets](#mutating-function-cpu-budgets)
 - [Per-Call Write-Cost Budget at Pinned History (#466)](#per-call-write-cost-budget-at-pinned-history-466)
 - [Bootstrap Read Cost: get_full_audit_state (#463)](#bootstrap-read-cost-get_full_audit_state-463)
@@ -122,6 +123,16 @@ fn test_no_storage_key_collisions() {
 > Writing the cached `HISTLEN` length (#463) does **not** add a storage write:
 > it is another key in the same instance entry, which is serialised once per
 > call regardless.
+
+### Calculation input bound (#593)
+
+`mttr_minutes` is capped at `spec::MAX_MTTR_MINUTES` (525,600 minutes = 365
+days) at every calculation entry point (`calculate_sla_view`,
+`replay_calculate_sla`, `calculate_sla`). Any larger value is rejected with
+`InvalidInput` before overtime arithmetic or history scanning runs, so the
+execution cost of a single calculation — and the magnitude of any
+penalty/reward it can produce — has a declared ceiling that does not depend on
+the currently configured penalty/reward caps.
 
 ### Testing Requirements
 

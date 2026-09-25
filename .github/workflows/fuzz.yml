@@ -133,11 +133,108 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
 
+      # #630 – Triage: dedup crash artifacts by content hash and drop
+      # duplicates, then prune the corpus. Markers under
+      # apexchainx_calculator/fuzz/.fuzz-reports/<target>/ (committed with the
+      # corpus) make the dedup durable across runs: a crash already reported
+      # from a previous night is not re-filed.
+      - name: Triage crash artifacts (dedup by hash)
+        if: always()
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          set -uo pipefail
+          ARTIFACT_DIR="artifacts/${{ matrix.target }}"
+          REPORT_DIR=".fuzz-reports/${{ matrix.target }}"
+          if [ ! -d "$ARTIFACT_DIR" ] || [ -z "$(ls -A "$ARTIFACT_DIR" 2>/dev/null)" ]; then
+            echo "No crash artifacts for ${{ matrix.target }} — nothing to triage."
+            exit 0
+          fi
+          mkdir -p "$REPORT_DIR"
+          for file in "$ARTIFACT_DIR"/*; do
+            [ -f "$file" ] || continue
+            HASH=$(sha256sum "$file" | cut -d' ' -f1)
+            SHORT=${HASH:0:12}
+            if [ -e "$REPORT_DIR/$SHORT" ]; then
+              echo "Duplicate crash (already reported), pruning: $file (sha256:$SHORT)"
+              rm -f "$file"
+            else
+              : > "$REPORT_DIR/$SHORT"
+              echo "New crash awaiting issue: $file (sha256:$SHORT)"
+            fi
+          done
+
+      # #630 – File one issue per new unique crash with a repro command.
+      - name: File issues for new unique crashes
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          set -uo pipefail
+          ARTIFACT_DIR="artifacts/${{ matrix.target }}"
+          if [ ! -d "$ARTIFACT_DIR" ] || [ -z "$(ls -A "$ARTIFACT_DIR" 2>/dev/null)" ]; then
+            echo "No new crashes — no issues to file."
+            exit 0
+          fi
+          for file in "$ARTIFACT_DIR"/*; do
+            [ -f "$file" ] || continue
+            HASH=$(sha256sum "$file" | cut -d' ' -f1)
+            REPRO="cargo +nightly fuzz run ${{ matrix.target }} -- -runs=1 \"$file\""
+            BODY=$(mktemp)
+            cat > "$BODY" <<EOF
+            Nightly fuzz run found a crash in the \`${{ matrix.target }}\` target (seed \`${{ steps.seed.outputs.seed }}\`, sha256:${HASH:0:12}).
+
+            ## Repro
+            \`\`\`
+            $REPRO
+            \`\`\`
+
+            The crashing input is preserved in the workflow artifact \`fuzz-artifacts-${{ matrix.target }}-${{ steps.seed.outputs.seed }}\`.
+
+            ## Triage checklist (see docs/FUZZING_TRIAGE.md)
+            - [ ] Reproduce locally from the artifact
+            - [ ] Root-cause (implementation vs spec — see docs/FUZZING_GUARANTEES.md)
+            - [ ] Land the fix with a corpus seed added
+            - [ ] Delete the report marker for this hash so the crash stops being re-filed
+            EOF
+            sed -i 's/^[[:space:]]*//' "$BODY"
+            gh issue create \
+              --title "Fuzz crash: ${{ matrix.target }} sha256:${HASH:0:12}" \
+              --body-file "$BODY"
+            rm -f "$BODY"
+          done
+
+      # #630 – Prune the corpus: dedup by content hash and cap the persisted
+      # seed count so the corpus stays reviewable and bounded.
+      - name: Prune corpus
+        if: always()
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          set -uo pipefail
+          CORPUS_DIR="corpus/${{ matrix.target }}"
+          [ -d "$CORPUS_DIR" ] || exit 0
+          declare -A seen
+          for file in "$CORPUS_DIR"/*; do
+            [ -f "$file" ] || continue
+            HASH=$(sha256sum "$file" | cut -d' ' -f1)
+            if [ -n "${seen[$HASH]+x}" ]; then
+              rm -f "$file"
+            else
+              seen[$HASH]=1
+            fi
+          done
+          COUNT=$(find "$CORPUS_DIR" -maxdepth 1 -type f | wc -l)
+          if [ "$COUNT" -gt 2000 ]; then
+            echo "Corpus exceeds 2000 seeds ($COUNT) — pruning oldest entries."
+            find "$CORPUS_DIR" -maxdepth 1 -type f | sort | head -n "$((COUNT - 2000))" | xargs -r rm -f
+          fi
+          echo "Corpus for ${{ matrix.target }} after prune: $(find "$CORPUS_DIR" -maxdepth 1 -type f | wc -l) files"
+
       - name: Persist corpus back to repo
         if: success() && github.event_name == 'schedule'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add apexchainx_calculator/fuzz/corpus/ || true
+          git add apexchainx_calculator/fuzz/corpus/ apexchainx_calculator/fuzz/.fuzz-reports/ || true
           git diff --cached --quiet || git commit -m "chore(fuzz): update corpus from nightly run [skip ci]"
           git push || true
