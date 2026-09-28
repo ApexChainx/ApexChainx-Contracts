@@ -241,7 +241,8 @@ const OUT = JSON.stringify(manifest, null, 2) + "\n";
 
 let current = "";
 try {
-  current = readFileSync(OUT_PATH, "utf8");
+  // Git may check out text fixtures with CRLF on Windows; compare their content.
+  current = readFileSync(OUT_PATH, "utf8").replace(/\r\n/g, "\n");
 } catch {
   current = "";
 }

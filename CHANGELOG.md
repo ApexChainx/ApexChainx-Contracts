@@ -1,5 +1,7 @@
 # Changelog
 
+- #674: Require release safety preflight with nightly fuzz health/triage, generated freshness, TS parity and offchain budgets; retain per-gate proof and exact-candidate waivers.
+
 > All interface-affecting changes to `apexchainx-contracts` are recorded here.
 > This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 > and follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) conventions.

@@ -101,6 +101,11 @@ export function runStep(step: string, command: string, cwd?: string, timeoutMs?:
 
 function main(): void {
   const args = process.argv.slice(2);
+  const unknown = args.filter(arg => !["--full", "--json", "--help", "-h"].includes(arg));
+  if (unknown.length) {
+    console.error(`Unknown option: ${unknown.join(", ")}`);
+    process.exit(2);
+  }
   const full = args.includes("--full");
   const json = args.includes("--json");
 

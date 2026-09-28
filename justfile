@@ -182,7 +182,7 @@ ts-typecheck:
 
 # Run the TypeScript parity suite against those artefacts.  [CI: ts-parity]
 ts-parity: ts-typecheck
-    npx tsx --test ts/parity/readSemanticsParity.test.ts
+    npm run test:parity
 
 # Full TS parity gate: regenerate, fail on an uncommitted diff, then compare.
 #
@@ -250,7 +250,7 @@ lint-orphans:
     ./scripts/check-orphan-modules.sh
 
 # sha256 of the release WASM.            [CI: Generate hash]
-hash: wasm-release
+hash: release-preflight wasm-release
     #!/usr/bin/env bash
     set -euo pipefail
     # Workspace build — artifacts land in the ROOT target/, not {{crate}}/target/.
@@ -267,7 +267,7 @@ hash: wasm-release
     fi
 
 # Save release WASM hash to artifacts/.    [CI: Save hash for provenance]
-hash-save: wasm-release
+hash-save: release-preflight wasm-release
     #!/usr/bin/env bash
     set -euo pipefail
     wasm="target/{{wasm_target}}/release/{{crate}}.wasm"
@@ -286,7 +286,7 @@ hash-save: wasm-release
     cat "$hash_file"
 
 # Verify release WASM hash against committed file. [CI: Verify hash provenance]
-hash-verify: wasm-release
+hash-verify: release-preflight wasm-release
     #!/usr/bin/env bash
     set -euo pipefail
     wasm="target/{{wasm_target}}/release/{{crate}}.wasm"
@@ -373,3 +373,7 @@ clean:
 # Everything CI gates on, in CI's order. Run before opening a PR.
 ci: fmt-check lint check no-std lint-orphans test fuzz fuzz-spec parity-check ts-check wasm machete udeps verify-snapshots
     @echo "✓ local CI equivalent passed"
+
+# Full release safety gate; records evidence even on failure.
+release-preflight:
+    npm run release:preflight

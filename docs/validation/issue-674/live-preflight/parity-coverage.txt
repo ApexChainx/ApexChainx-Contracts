@@ -1,0 +1,1 @@
+{"methods":63,"covered":8,"skipped":55,"contractTypes":37}

@@ -18,6 +18,9 @@ const WASM = "apexchainx_calculator/target/wasm32-unknown-unknown/release/apexch
 const WASM_SIZE_LIMIT_KB = 100;
 
 const checks: CheckResult[] = [
+  run("Release safety preflight", () =>
+    execSync("npm run release:preflight", { stdio: "inherit" })),
+
   run("cargo test passes", () =>
     execSync("cargo test", { cwd: "apexchainx_calculator", stdio: "pipe" })),
 

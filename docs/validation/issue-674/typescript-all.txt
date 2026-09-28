@@ -1,0 +1,419 @@
+[run-ts-tests] suite: all (21 file(s))
+  ⏳ Echo test... ✅ (0.1s)
+  ⏳ Failing test... ❌ (0.1s)
+  ⏳ Nonexistent... ❌ (0.1s)
+  ⏳ Type check... ✅ (0.1s)
+  ⏳ Type check fail... ❌ (0.1s)
+✔ --help prints usage and exits 0 (1077.739ms)
+✔ -h (short flag) prints usage and exits 0 (1175.2348ms)
+✔ unknown options fail before starting validation (702.5697ms)
+✔ --json flag with --help prints help and exits 0 (help takes precedence) (733.2419ms)
+✔ runStep returns success for a passing command (59.7006ms)
+✔ runStep returns failure for a failing command (51.547ms)
+✔ runStep returns failure for a nonexistent command (56.6853ms)
+✔ StepResult has correct shape on success (59.3541ms)
+✔ StepResult has correct shape on failure (57.7558ms)
+✔ ReplayResult interface is structurally sound (3.4185ms)
+✔ just replay recipes invoke the tested CLI with the correct mode (801.8983ms)
+▶ SC-045 Authorization Matrix
+  ✔ initialize allows authorized caller (4.2925ms)
+  ✔ migrate rejects operator (0.6167ms)
+  ✔ migrate rejects stranger (0.3208ms)
+  ✔ migrate allows authorized caller (0.3086ms)
+  ✔ set_config rejects operator (0.4747ms)
+  ✔ set_config rejects stranger (0.4664ms)
+  ✔ set_config allows authorized caller (0.424ms)
+  ✔ pause rejects operator (0.3439ms)
+  ✔ pause rejects stranger (0.5955ms)
+  ✔ pause allows authorized caller (0.5315ms)
+  ✔ unpause rejects operator (0.3184ms)
+  ✔ unpause rejects stranger (0.1735ms)
+  ✔ unpause allows authorized caller (0.1507ms)
+  ✔ prune_history rejects operator (0.1442ms)
+  ✔ prune_history rejects stranger (0.1449ms)
+  ✔ prune_history allows authorized caller (0.143ms)
+  ✔ prune_history_by_age rejects operator (0.1355ms)
+  ✔ prune_history_by_age rejects stranger (0.1394ms)
+  ✔ prune_history_by_age allows authorized caller (0.1319ms)
+  ✔ propose_admin rejects operator (0.1273ms)
+  ✔ propose_admin rejects stranger (0.1729ms)
+  ✔ propose_admin allows authorized caller (0.1454ms)
+  ✔ accept_admin rejects stranger (0.2062ms)
+  ✔ accept_admin allows authorized caller (0.1565ms)
+  ✔ cancel_admin_proposal rejects operator (0.1335ms)
+  ✔ cancel_admin_proposal rejects stranger (0.1353ms)
+  ✔ cancel_admin_proposal allows authorized caller (0.1444ms)
+  ✔ renounce_admin rejects operator (0.1274ms)
+  ✔ renounce_admin rejects stranger (0.1257ms)
+  ✔ renounce_admin allows authorized caller (0.1223ms)
+  ✔ set_operator rejects operator (0.1286ms)
+  ✔ set_operator rejects stranger (0.1311ms)
+  ✔ set_operator allows authorized caller (0.1291ms)
+  ✔ propose_operator rejects operator (0.1293ms)
+  ✔ propose_operator rejects stranger (0.1473ms)
+  ✔ propose_operator allows authorized caller (0.1617ms)
+  ✔ accept_operator rejects stranger (0.1284ms)
+  ✔ accept_operator allows authorized caller (0.1905ms)
+  ✔ cancel_operator_proposal rejects operator (0.2657ms)
+  ✔ cancel_operator_proposal rejects stranger (0.193ms)
+  ✔ cancel_operator_proposal allows authorized caller (0.1359ms)
+  ✔ calculate_sla rejects admin (0.1262ms)
+  ✔ calculate_sla rejects stranger (0.1246ms)
+  ✔ calculate_sla allows authorized caller (0.1333ms)
+  ✔ matrix covers all known privileged methods (0.415ms)
+✔ SC-045 Authorization Matrix (20.7834ms)
+▶ SC-W5-060 Backend Replay Idempotency Parity
+  ✔ first call is not idempotent (new) (3.6047ms)
+  ✔ replayed call is flagged as idempotent (0.9677ms)
+  ✔ verdict is stable across original and replay (3.082ms)
+  ✔ full sequence produces expected verdicts in order (0.8847ms)
+✔ SC-W5-060 Backend Replay Idempotency Parity (31.8004ms)
+▶ SC-W5-059 Blocked/Paused Error Parity
+  ✔ PAUSED maps to 503 Service Unavailable (19.6878ms)
+  ✔ BLOCKED maps to 403 Forbidden (0.4334ms)
+  ✔ NOT_FOUND maps to 404 (0.3465ms)
+  ✔ INVALID_INPUT maps to 400 (0.3499ms)
+  ✔ all contract errors have a defined API status (1.7405ms)
+  ✔ PAUSED and BLOCKED produce different status codes (1.617ms)
+✔ SC-W5-059 Blocked/Paused Error Parity (29.0682ms)
+▶ SC-W5-057 Contract Response Shape Parity
+  ✔ met response has zero penalty and correct fields (3.921ms)
+  ✔ violated response carries penalty_bps (0.6685ms)
+  ✔ invalid response has zero penalty regardless of bps (1.9873ms)
+  ✔ response always contains all required fields (0.5132ms)
+✔ SC-W5-057 Contract Response Shape Parity (11.3403ms)
+▶ SC-W5-061 Deterministic Simulation Harness
+  ✔ sweep produces identical results on repeated runs (4.9991ms)
+  ✔ boundary value at exactly threshold is always met (0.5537ms)
+  ✔ one unit above threshold is always violated (0.5346ms)
+  ✔ zero threshold is always invalid regardless of mttr (0.5079ms)
+  ✔ sweep order does not affect individual verdicts (1.8533ms)
+✔ SC-W5-061 Deterministic Simulation Harness (12.8032ms)
+sla_calc: 152B / 152B (Rust XDR verified)
+set_int: 164B / 164B (Rust XDR verified)
+cfg_upd: 60B / 60B (Rust XDR verified)
+paused: 20B / 20B (Rust XDR verified)
+unpause: 20B / 20B (Rust XDR verified)
+adm_prop: 56B / 56B (Rust XDR verified)
+op_prop: 56B / 56B (Rust XDR verified)
+✔ event payload budgets match actual contract XDR fixtures (5.4159ms)
+✔ XDR estimator counts discriminants, padding and full-length symbols (1.0385ms)
+▶ SC-W5-068 Config Mutation Sequences and Freeze Toggles
+  ✔ mutation succeeds when not frozen (5.1247ms)
+  ✔ mutation is rejected when frozen (0.49ms)
+  ✔ freeze then unfreeze allows mutations again (0.4032ms)
+  ✔ mutation sequence: mutate → freeze → mutate fails → unfreeze → mutate succeeds (0.4215ms)
+✔ SC-W5-068 Config Mutation Sequences and Freeze Toggles (10.0213ms)
+▶ SC-W5-067 Fuzzing Malformed Outage IDs
+  ✔ valid ids pass validation (2.2783ms)
+  ✔ invalid ids are rejected (0.5587ms)
+  ✔ boundary: 3 chars is valid, 2 chars is invalid (0.3394ms)
+  ✔ boundary: 64 chars is valid, 65 chars is invalid (0.3743ms)
+✔ SC-W5-067 Fuzzing Malformed Outage IDs (7.213ms)
+▶ SC-W5-069 Idempotent Duplicate Submissions
+  ✔ first submission is accepted (5.0217ms)
+  ✔ duplicate submission returns duplicate — not accepted again (0.7059ms)
+  ✔ idempotent: repeated duplicate calls always return duplicate (0.6126ms)
+  ✔ negative mttr is rejected as invalid (0.6249ms)
+  ✔ distinct ids are each accepted once (1.5301ms)
+✔ SC-W5-069 Idempotent Duplicate Submissions (12.4159ms)
+▶ SC-W5-063 Large Input Simulation Coverage
+  ✔ large mttr equal to large threshold is met (2.4382ms)
+  ✔ large mttr one above large threshold is violated (0.4239ms)
+  ✔ zero mttr is always met for any valid threshold (0.3844ms)
+  ✔ large threshold with small mttr is always met (0.3284ms)
+  ✔ negative large values are invalid (1.5192ms)
+  ✔ evaluation never throws on extreme values (0.6171ms)
+✔ SC-W5-063 Large Input Simulation Coverage (9.6132ms)
+▶ SC-W5-066 MTTR Monotonicity and Payout Gradients
+  ✔ penalty is non-decreasing as mttr increases (5.8062ms)
+  ✔ penalty at threshold is zero (boundary) (0.5822ms)
+  ✔ penalty below threshold is always zero (0.4285ms)
+  ✔ payout gradient is positive for non-zero penalty (0.5361ms)
+✔ SC-W5-066 MTTR Monotonicity and Payout Gradients (12.8086ms)
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: FAIL
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: FAIL
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: PASS
+parity-coverage: FAIL
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: FAIL
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: FAIL
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: FAIL
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: FAIL
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: FAIL
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: PASS
+fixture-freshness: FAIL
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: FAIL
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: FAIL
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: FAIL
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: FAIL
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: FAIL
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: FAIL
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: FAIL
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: FAIL
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: PASS
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+candidate-clean: PASS
+nightly-fuzz: WAIVED
+fixture-freshness: PASS
+parity-coverage: PASS
+ts-typecheck: PASS
+ts-parity: FAIL
+offchain-eventSizeRegression: PASS
+offchain-readCostRegression: PASS
+offchain-governanceConsistency: PASS
+offchain-contractMetadata: PASS
+persistence-freshness: PASS
+✔ nightly evidence fails closed on red, stale, absent, pending, or wrong source (4.7157ms)
+✔ waivers must bind this candidate and run, have review evidence, and remain unexpired (0.8548ms)
+✔ #674 clean preflight executes every safety gate and records reviewable proof (61.276ms)
+✔ #674 gate failures preserve all logs and do not skip independent checks (343.6649ms)
+✔ #674 regeneration errors, tracked drift and newly generated files fail freshness (125.892ms)
+✔ #674 latest red/missing evidence, API errors, unrelated history and triage debt fail closed (351.6161ms)
+✔ #674 an exact reviewed waiver is visibly tracked and cannot waive parity failures (85.8952ms)
+✔ #674 workflow retains failed preflight evidence and hash recipes depend on the gate (5.5914ms)
+✔ #674 a waiver cannot substitute feature/manual evidence for the nightly (0.8664ms)
+▶ SC-W5-058 Severity Symbol Mapping Parity
+  ✔ all contract severities map to a backend enum value (2.1722ms)
+  ✔ enum values are unique integers (0.4966ms)
+  ✔ unknown severity returns null — not a silent default (0.3425ms)
+  ✔ contract severity order matches backend enum order (3.9637ms)
+  ✔ critical has lowest numeric value (highest priority) (0.4265ms)
+✔ SC-W5-058 Severity Symbol Mapping Parity (11.045ms)
+▶ SC-W5-062 Simulation Reproducibility
+  ✔ matches pinned snapshot outputs (8.7389ms)
+  ✔ same input always produces same output (0.5248ms)
+  ✔ snapshot is exhaustive for all verdict states (0.8327ms)
+✔ SC-W5-062 Simulation Reproducibility (15.9793ms)
+▶ SC-W5-064 Simulation Snapshots — Governance Params
+  ✔ before update: mttr=300 is violated (under cap) (2.3555ms)
+  ✔ after update: mttr=300 is capped (over new maxMttr) (0.4485ms)
+  ✔ before update: mttr=60 is met (2.5196ms)
+  ✔ after update: mttr=60 is still met — cap only affects large values (0.839ms)
+  ✔ snapshots are stable across repeated calls (5.8739ms)
+✔ SC-W5-064 Simulation Snapshots — Governance Params (15.9007ms)
+▶ SC-W5-065 Simulation vs Live Equivalence
+  ✔ simulation output matches live output for all test cases (5.6898ms)
+  ✔ verdict is identical between paths (0.5294ms)
+  ✔ penalty is identical between paths (0.3889ms)
+✔ SC-W5-065 Simulation vs Live Equivalence (14.1452ms)
+▶ SC-046 Threshold Edge Cases
+  ✔ zero MTTR always meets any positive threshold (9.1156ms)
+  ✔ MTTR of 1 meets threshold when threshold >= 1 (0.5894ms)
+  ✔ MTTR exactly at threshold is met (inclusive boundary) (0.4757ms)
+  ✔ exact-threshold results are deterministic for backend replay (0.4859ms)
+  ✔ MTTR one above threshold is violated (0.3981ms)
+  ✔ exact threshold does not drift into violation due to boundary math (0.5822ms)
+  ✔ zero threshold is rejected as invalid — not a silent pass (0.9227ms)
+  ✔ negative MTTR is rejected as invalid (0.7081ms)
+  ✔ uses a documented canonical severity order for backend fixtures (4.427ms)
+  ✔ near-zero MTTR (0.001) treated as zero — rounds to met (5.551ms)
+✔ SC-046 Threshold Edge Cases (29.3956ms)
+✔ per-name dispatch isolates versions and supports explicit historical decoders (4.7747ms)
+✔ generated event versions agree with the Rust per-name registry (6.5284ms)
+✔ correlation IDs preserve the ledger and reproduce the Rust golden vector (1.6888ms)
+✔ event emitters resolve topic versions by their own event name (70.904ms)
+{"methods":63,"covered":8,"skipped":55,"contractTypes":37}
+✔ contract manifest and type surface have explicit parity coverage (131.0378ms)
+✔ new methods, stale coverage and missing fixtures cannot pass (23.802ms)
+✔ new contracttype fields and type changes alter the inventory (2.5514ms)
+✔ #678 nested Rust modules are discovered instead of silently omitted (12.0615ms)
+✔ mirrored constants match the values the contract reported (5.1974ms)
+✔ the result symbol vocabulary matches the contract's schema (2.4252ms)
+✔ event topic names and the schema version match the contract (1.1322ms)
+✔ every recorded status, payment type and rating is a known symbol (0.9262ms)
+✔ getHistoryPage reproduces every contract-recorded page (1.2585ms)
+✔ a limit above MAX_PAGE_SIZE is clamped, not honoured (0.407ms)
+✔ limit 0 yields an empty page and reports no more (0.4003ms)
+✔ getHistoryByOutage and getLatestByOutage match contract lookups (0.9295ms)
+✔ pruneByMinAge reproduces the contract's retained-set sizes (1.5962ms)
+✔ min age just below the ledger timestamp keeps the full history (0.8154ms)
+✔ configVersionHash reproduces the contract's hash exactly (0.9116ms)
+✔ configVersionHash is order-independent but field-sensitive (2.0161ms)
+✔ configVersionHash refuses a partial snapshot (22.7765ms)
+ℹ tests 156
+ℹ suites 15
+ℹ pass 156
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5466.1704
+
+[run-ts-tests] ✓ suite "all" passed (21 file(s))

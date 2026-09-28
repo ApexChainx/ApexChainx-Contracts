@@ -77,3 +77,14 @@ Before committing snapshot changes, run `just verify-snapshots` to ensure they m
 - [ ] SHA-256 hash verified and saved in `artifacts/`.
 - [ ] Snapshot files normalized to POSIX LF line endings.
 - [ ] All contract tests and API compatibility checks pass cleanly.
+
+- [ ] Release preflight checklist and logs attached to the release ticket.
+- [ ] Latest scheduled main fuzz run is successful and fresh, with all five
+      retained evidence artifacts and no unresolved crash reports (or an exact
+      candidate/run waiver with reviewer, reason, ticket and expiry).
+- [ ] Generated Rust/TS fixtures and constants are fresh; manifest coverage and
+      TypeScript parity pass; all offchain budget checks pass.
+
+For a repository with no scheduled fuzz evidence yet, enabling the workflow is
+only the bootstrap step. A completed scheduled main run with its retained
+artifacts is required before release. Missing evidence is not a passing gate.

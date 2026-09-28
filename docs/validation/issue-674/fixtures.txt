@@ -1,0 +1,10 @@
+   Compiling apexchainx_calculator v0.1.0 (C:\Users\PC\Documents\fun\ApexChainx-Contracts\validation-results\release-preflight\apexchainx_calculator)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 00s
+     Running unittests src\lib.rs (C:\Users\PC\Documents\fun\ApexChainx-Contracts\target\debug\deps\apexchainx_calculator-c05885d2382ee880.exe)
+
+running 3 tests
+test ts_parity_fixtures::event_abi_v2_migration_preserves_v3_history_and_is_idempotent ... ok
+test ts_parity_fixtures::parity_manifest_has_no_unaccounted_methods ... ok
+test ts_parity_fixtures::generate_ts_parity_fixtures ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 795 filtered out; finished in 20.62s

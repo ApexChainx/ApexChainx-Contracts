@@ -487,6 +487,7 @@ fn seed_contract(env: &Env) -> (SLACalculatorContractClient<'_>, StdVec<String>)
 /// semantics fails the build; see the module docs.
 #[test]
 fn generate_ts_parity_fixtures() {
+    generate_event_size_fixtures();
     let mut env = Env::default();
     // Each `Env` in this test is dropped while the fixture is being written;
     // the default drop-time snapshot capture would write stray files into the
@@ -864,4 +865,70 @@ fn event_abi_v2_migration_preserves_v3_v4_history_and_is_idempotent() {
             crate::RESULT_SCHEMA_VERSION
         );
     }
+}
+
+/// A maximum-length outage and the longest rating exercise the variable widths.
+fn generate_event_size_fixtures() {
+    use soroban_sdk::testutils::Events;
+    use soroban_sdk::xdr::ToXdr;
+    use soroban_sdk::{TryFromVal, Val, Vec};
+    let mut env = Env::default();
+    env.set_config(EnvTestConfig {
+        capture_snapshot_at_drop: false,
+    });
+    env.mock_all_auths();
+    env.budget().reset_unlimited();
+    let contract = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &contract);
+    let admin = Address::generate(&env);
+    let operator = Address::generate(&env);
+    client.initialize(&admin, &operator);
+    client.calculate_sla(
+        &operator,
+        &Symbol::new(&env, "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345"),
+        &symbol_short!("critical"),
+        &8,
+    );
+    client.set_config(&admin, &symbol_short!("critical"), &15, &100, &750);
+    client.pause(&admin, &soroban_sdk::String::from_str(&env, "size fixture"));
+    client.unpause(&admin);
+    // Account addresses are four bytes larger than contract addresses in XDR.
+    let account = Address::from_string(&soroban_sdk::String::from_str(
+        &env,
+        "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+    ));
+    client.propose_admin(&admin, &account);
+    client.propose_operator(&admin, &account);
+    let names = [
+        "sla_calc", "set_int", "cfg_upd", "paused", "unpause", "adm_prop", "op_prop",
+    ];
+    let mut rows = StdVec::new();
+    for name in names {
+        let (_, topics, payload) = env
+            .events()
+            .all()
+            .iter()
+            .find(|(_, topics, _)| {
+                Symbol::try_from_val(&env, &topics.get(0).unwrap()).ok() == Some(Symbol::new(&env, name))
+            })
+            .expect("required live contract event");
+        let fields = Vec::<Val>::try_from_val(&env, &payload).expect("tuple payload");
+        rows.push(json_object(&[
+            ("name", json_string(name)),
+            (
+                "version",
+                json_string(
+                    &Symbol::try_from_val(&env, &topics.get(1).unwrap())
+                        .unwrap()
+                        .to_string(),
+                ),
+            ),
+            ("fields", fields.len().to_string()),
+            ("xdrBytes", payload.to_xdr(&env).len().to_string()),
+        ]));
+    }
+    write_if_changed(
+        &ts_path(&["fixtures", "event-size-semantics.json"]),
+        &pretty(&json_array(&rows)),
+    );
 }

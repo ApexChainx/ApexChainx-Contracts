@@ -1,0 +1,7 @@
+sla_calc: 152B / 152B (Rust XDR verified)
+set_int: 164B / 164B (Rust XDR verified)
+cfg_upd: 60B / 60B (Rust XDR verified)
+paused: 20B / 20B (Rust XDR verified)
+unpause: 20B / 20B (Rust XDR verified)
+adm_prop: 56B / 56B (Rust XDR verified)
+op_prop: 56B / 56B (Rust XDR verified)

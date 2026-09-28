@@ -1,0 +1,53 @@
+name: Release preflight acceptance
+on:
+  push:
+    branches: [fix/release-safety-preflight]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p validation-results
+      - name: Gate acceptance and all TypeScript regressions
+        run: |
+          npm test 2>&1 | tee validation-results/typescript-all.log
+          npm run typecheck 2>&1 | tee validation-results/typecheck.log
+      - name: Full Rust regressions and generated fixture freshness
+        run: |
+          cargo test --locked --lib 2>&1 | tee validation-results/rust-full.log
+          git diff --exit-code -- ts/fixtures ts/generated
+          test -z "$(git ls-files --others --exclude-standard -- ts/fixtures ts/generated)"
+      - name: Budgets and persistence freshness
+        run: |
+          npm run test:offchain 2>&1 | tee validation-results/offchain.log
+          npm run check:pers-store 2>&1 | tee validation-results/persistence.log
+      - name: Format, lint and production no_std
+        run: |
+          cargo fmt --all --check 2>&1 | tee validation-results/format.log
+          cargo clippy --locked --all-targets -- -D warnings 2>&1 | tee validation-results/clippy.log
+          bash scripts/check-no-std.sh 2>&1 | tee validation-results/no-std.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-preflight-acceptance
+          path: validation-results/
+          retention-days: 90

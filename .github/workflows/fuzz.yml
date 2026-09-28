@@ -1,29 +1,39 @@
 name: Nightly Fuzz Testing
 
-# CI temporarily disabled – triggers commented out below.
-# on:
-#   schedule:
-#     - cron: '0 2 * * *' # Nightly at 02:00 UTC
-#   workflow_dispatch:
-#     inputs:
-#       duration:
-#         description: 'Fuzz duration in seconds'
-#         required: false
-#         default: '600'
-#       seed:
-#         description: 'Deterministic seed for reproducibility (leave empty for random)'
-#         required: false
-#         default: ''
+on:
+  push:
+    branches: [fix/release-safety-preflight]
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzz duration in seconds'
+        required: false
+        default: '600'
+      seed:
+        description: 'Deterministic seed (empty uses current time)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  issues: write
 
 env:
   CARGO_TERM_COLOR: always
-  FUZZ_DURATION: ${{ github.event.inputs.duration || '600' }}
+  # Branch verification is a two-minute smoke run; scheduled campaigns stay ten minutes.
+  FUZZ_DURATION: ${{ github.event.inputs.duration || (github.event_name == 'push' && '120') || '600' }}
   FUZZ_SEED: ${{ github.event.inputs.seed || '' }}
 
 jobs:
   fuzz:
     name: Fuzz ${{ matrix.target }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
@@ -60,6 +70,8 @@ jobs:
       - name: Record seed
         id: seed
         run: |
+          [[ "$FUZZ_DURATION" =~ ^[0-9]+$ ]] && (( FUZZ_DURATION >= 1 && FUZZ_DURATION <= 1200 )) || exit 1
+          [[ -z "$FUZZ_SEED" || "$FUZZ_SEED" =~ ^[0-9]+$ ]] || exit 1
           if [ -n "$FUZZ_SEED" ]; then
             echo "seed=$FUZZ_SEED" >> $GITHUB_OUTPUT
             echo "Using provided seed: $FUZZ_SEED"
@@ -74,7 +86,9 @@ jobs:
       # `2>/dev/null || true` hid compile errors and crashes alike.
       - name: Build fuzz targets
         working-directory: apexchainx_calculator/fuzz
-        run: cargo +nightly fuzz build ${{ matrix.target }}
+        run: |
+          mkdir -p ../../fuzz-evidence
+          cargo +nightly fuzz build ${{ matrix.target }} 2>&1 | tee ../../fuzz-evidence/build.log
 
       # The exit code is deliberately NOT swallowed. The targets now assert the
       # contract's documented semantics (docs/FUZZING_GUARANTEES.md), so a
@@ -83,11 +97,16 @@ jobs:
       # libFuzzer exits 0 when -max_total_time elapses without a finding.
       - name: Run fuzz target
         working-directory: apexchainx_calculator/fuzz
+        env:
+          SEED: ${{ steps.seed.outputs.seed }}
         run: |
+          mkdir -p ../../fuzz-evidence
+          mkdir -p artifacts/${{ matrix.target }}
           cargo +nightly fuzz run ${{ matrix.target }} \
             -- \
-            -max_total_time=${{ env.FUZZ_DURATION }} \
-            -artifact_prefix=fuzz/artifacts/${{ matrix.target }}/
+            -max_total_time="$FUZZ_DURATION" \
+            -seed="$SEED" \
+            -artifact_prefix="$PWD/artifacts/${{ matrix.target }}/" 2>&1 | tee ../../fuzz-evidence/fuzz.log
 
       - name: Generate summary
         if: always()
@@ -96,7 +115,7 @@ jobs:
           echo "## Fuzz Test Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Target:** \`${{ matrix.target }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "**Duration:** ${{ env.FUZZ_DURATION }}s" >> $GITHUB_STEP_SUMMARY
+          echo "**Duration:** ${FUZZ_DURATION}s" >> $GITHUB_STEP_SUMMARY
           echo "**Seed:** \`${{ steps.seed.outputs.seed }}\`" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Corpus" >> $GITHUB_STEP_SUMMARY
@@ -165,7 +184,7 @@ jobs:
 
       # #630 – File one issue per new unique crash with a repro command.
       - name: File issues for new unique crashes
-        if: always()
+        if: always() && github.event_name == 'schedule'
         env:
           GH_TOKEN: ${{ github.token }}
         working-directory: apexchainx_calculator/fuzz
@@ -196,7 +215,7 @@ jobs:
             - [ ] Root-cause (implementation vs spec — see docs/FUZZING_GUARANTEES.md)
             - [ ] Land the fix with a corpus seed added
             - [ ] Delete the report marker for this hash so the crash stops being re-filed
-            EOF
+          EOF
             sed -i 's/^[[:space:]]*//' "$BODY"
             gh issue create \
               --title "Fuzz crash: ${{ matrix.target }} sha256:${HASH:0:12}" \
@@ -238,3 +257,21 @@ jobs:
           git add apexchainx_calculator/fuzz/corpus/ apexchainx_calculator/fuzz/.fuzz-reports/ || true
           git diff --cached --quiet || git commit -m "chore(fuzz): update corpus from nightly run [skip ci]"
           git push || true
+
+      - name: Record nightly evidence
+        if: always()
+        env:
+          TARGET: ${{ matrix.target }}
+          JOB_STATUS: ${{ job.status }}
+          SEED: ${{ steps.seed.outputs.seed }}
+        run: |
+          mkdir -p fuzz-evidence
+          printf 'target=%s\ncommit=%s\nstatus=%s\nseed=%s\nrun=%s\n' "$TARGET" "$GITHUB_SHA" "$JOB_STATUS" "$SEED" "$GITHUB_RUN_ID" > "fuzz-evidence/$TARGET.txt"
+
+      - name: Upload nightly evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-evidence-${{ matrix.target }}
+          path: fuzz-evidence/
+          retention-days: 90

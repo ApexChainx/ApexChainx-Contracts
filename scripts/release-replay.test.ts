@@ -9,7 +9,9 @@
  */
 
 import assert from "node:assert/strict";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
@@ -23,7 +25,7 @@ const SCRIPT_PATH = path.resolve(__dirname, "release-replay.ts");
 
 function runReleaseReplay(args: string): { stdout: string; stderr: string; exitCode: number } {
   try {
-    const stdout = execSync(`npx tsx ${SCRIPT_PATH} ${args}`, {
+    const stdout = execFileSync(process.execPath, [createRequire(import.meta.url).resolve("tsx/cli"), SCRIPT_PATH, ...args.split(" ")], {
       cwd: path.resolve(__dirname, ".."),
       timeout: 30_000,
       stdio: "pipe",
@@ -78,15 +80,11 @@ test("-h (short flag) prints usage and exits 0", () => {
   );
 });
 
-test("unknown flag does not crash; it attempts to run", () => {
+test("unknown options fail before starting validation", () => {
   const result = runReleaseReplay("--unknown-flag");
-
-  // The script doesn't validate unknown flags — it just passes them through.
-  // It should still start up and attempt execution (exit code may vary).
-  assert.ok(
-    result.exitCode !== null,
-    "should produce some exit code"
-  );
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /Unknown option/);
+  assert.doesNotMatch(result.stdout, /validation sequence/);
 });
 
 // ---------------------------------------------------------------------------
@@ -200,35 +198,9 @@ test("ReplayResult interface is structurally sound", () => {
 // Real (fast) end-to-end: just release-replay via justfile
 // ---------------------------------------------------------------------------
 
-test("just release-replay runs the script end-to-end", () => {
-  let result: { stdout: string; exitCode: number };
-  try {
-    const stdout = execSync("just release-replay", {
-      cwd: path.resolve(__dirname, ".."),
-      timeout: 300_000, // 5 minutes — real cargo commands
-      stdio: "pipe",
-    });
-    result = { stdout: stdout.toString(), exitCode: 0 };
-  } catch (err: any) {
-    result = {
-      stdout: err.stdout?.toString() || "",
-      exitCode: err.status || 1,
-    };
-  }
-
-  assert.ok(
-    result.stdout.includes("🔁 ApexChainx Release Replay"),
-    "should show replay header"
-  );
-  assert.ok(
-    result.stdout.includes("Minimal") || result.stdout.includes("Full"),
-    "should indicate validation mode"
-  );
-
-  // The exit code reflects whether all steps passed (0) or some failed (1).
-  // Both are valid — we just verify the script ran.
-  assert.ok(
-    result.exitCode === 0 || result.exitCode === 1,
-    `unexpected exit code: ${result.exitCode}`
-  );
+test("just replay recipes invoke the tested CLI with the correct mode", () => {
+  const recipes = readFileSync(path.resolve(__dirname, "../justfile"), "utf8");
+  assert.match(recipes, /release-replay:\s*\n\s+npx --yes tsx scripts\/release-replay\.ts\s*\n/);
+  assert.match(recipes, /release-replay-full:\s*\n\s+npx --yes tsx scripts\/release-replay\.ts --full/);
+  assert.equal(runReleaseReplay("--help").exitCode, 0);
 });

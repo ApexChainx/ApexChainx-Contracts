@@ -49,3 +49,5 @@ node_modules/
 *.wasm
 # Local validation evidence
 validation-results/
+
+/offchain/readCostMeasurements.json

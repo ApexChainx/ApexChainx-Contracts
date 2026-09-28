@@ -1,0 +1,11 @@
+[SC-018] Governance event/state consistency checks:
+  ✓ admin_proposed: event/state consistent
+  ✓ admin_accepted: event/state consistent
+  ✓ contract_paused: event/state consistent
+  ✓ contract_unpaused: event/state consistent
+[SC-W5-029] Version negotiation consistency checks:
+  ✓ version_info: storage_v=1 schema_v=1 needs_migration=false paused=false
+  ✓ ready contract: consistent
+  ✓ version_info: storage_v=1 schema_v=1 needs_migration=false paused=true
+  ✓ paused contract: consistent
+All consistency checks passed.

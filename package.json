@@ -2,7 +2,7 @@
   "name": "apexchainx-contracts",
   "version": "0.1.0",
   "private": true,
-  "description": "ApexChainx smart contract tooling — TypeScript scripts for CI, testing, and release validation",
+  "description": "ApexChainx smart contract tooling \u2014 TypeScript scripts for CI, testing, and release validation",
   "scripts": {
     "test": "tsx scripts/run-ts-tests.ts all",
     "test:all": "tsx scripts/run-ts-tests.ts all",
@@ -12,7 +12,8 @@
     "release-replay": "tsx scripts/release-replay.ts",
     "test:parity": "tsx scripts/run-ts-tests.ts parity",
     "typecheck": "tsc --noEmit",
-    "check:parity-coverage": "tsx scripts/check-parity-coverage.ts"
+    "check:parity-coverage": "tsx scripts/check-parity-coverage.ts",
+    "release:preflight": "tsx scripts/release-preflight.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
