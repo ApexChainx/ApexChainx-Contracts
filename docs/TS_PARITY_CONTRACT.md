@@ -150,3 +150,24 @@ just ts-fixtures   # regenerate the contract-derived artefacts
 just ts-parity     # run the parity suite against them
 just ts-check      # both, plus the generated-artefact freshness check CI runs
 ```
+
+## Manifest and type coverage gate (#678)
+
+`npm run check:parity-coverage` reconciles the public method manifest with
+contract entrypoints and `PARITY_METHOD_COVERAGE` in `ts_parity_fixtures.rs`.
+The Rust fixture test also compares that inventory with the runtime descriptor.
+Every method needs exactly one fixture target or an explicit skip explanation.
+The checker verifies fixture targets exist, are nonempty, and invoke the method.
+It reports covered/skipped counts; a skipped method is not parity-tested.
+
+The parity suite recursively scans Rust modules and compares every discovered `#[contracttype]` declaration
+against `ts/parity/contract-types.json`. Adding or changing fields/types/variants
+requires fixture review and an explicit inventory update:
+`npx tsx scripts/check-parity-coverage.ts --write-types`. Review the resulting
+diff alongside the relevant fixture or skip. This inventory is a review gate,
+not automatic generation of semantic tests for arbitrary new methods.
+
+`npm run test:parity`, `just ts-check`, and CI parity include
+these gates. No automatically generated default skip is permitted.
+Commented calls and calls in unrelated tests do not satisfy fixture coverage:
+the invocation must appear in `generate_ts_parity_fixtures` itself.

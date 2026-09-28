@@ -3,7 +3,7 @@ mod event_state_tests {
     #![allow(clippy::module_inception, clippy::len_zero)]
     use crate::{
         SLACalculatorContract, SLACalculatorContractClient, SLAConfig, EVENT_CONFIG_UPD, EVENT_PRUNED,
-        EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_VERSION,
+        EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
     };
     use soroban_sdk::{
         symbol_short, testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, Symbol,
@@ -539,7 +539,11 @@ mod event_state_tests {
             let (_, topics, _) = events.get(i).unwrap();
             if topics.len() >= 2 {
                 let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
-                assert_eq!(version, EVENT_VERSION, "All events must use version v1");
+                assert_eq!(
+                    version,
+                    crate::event_schema::event_version(topics.get(0).unwrap().try_into_val(&env).unwrap()),
+                    "topic[1] must match the per-name schema"
+                );
             }
         }
     }

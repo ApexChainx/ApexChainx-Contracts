@@ -29,8 +29,8 @@ use soroban_sdk::{symbol_short, Address, Env, Symbol, Vec};
 
 use crate::{
     SLAConfig, SLAError, SLAResult, SLAStats, SeverityTelemetry, CUSTOM_CONFIG_KEY, CUSTOM_TELEMETRY_KEY,
-    CUSTOM_TELEMETRY_SEVERITY, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_VERSION,
-    HISTORY_KEY, HISTORY_LEN_KEY, LAST_CALCULATION_TS_KEY, LAST_VIOLATION_TS_KEY, MAX_HISTORY_SIZE, MAX_MTTR,
+    CUSTOM_TELEMETRY_SEVERITY, EVENT_DUP_INPUT, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, HISTORY_KEY,
+    HISTORY_LEN_KEY, LAST_CALCULATION_TS_KEY, LAST_VIOLATION_TS_KEY, MAX_HISTORY_SIZE, MAX_MTTR,
     MAX_RECALCS_PER_OUTAGE, PAUSED_KEY, RETENTION_LIMIT_KEY, SEVERITY_CALC_COUNTS_KEY,
     SEVERITY_VIOL_COUNTS_KEY, STATS_KEY, TOTAL_ENTRIES_KEY,
 };
@@ -259,7 +259,7 @@ pub fn get_severity_telemetry(env: &Env) -> Result<Vec<SeverityTelemetry>, SLAEr
         .get(&CUSTOM_CONFIG_KEY)
         .unwrap_or_else(|| soroban_sdk::Map::new(env));
     let custom_counters = load_counts(env, &CUSTOM_TELEMETRY_KEY);
-    if custom.len() > 0 || custom_counters != 0 {
+    if !custom.is_empty() || custom_counters != 0 {
         let calc_count = count_lane(custom_counters, 0);
         let violation_count = count_lane(custom_counters, 1);
         let violation_rate = if calc_count == 0 {
@@ -538,14 +538,22 @@ pub fn increment_stats(env: &Env, met: bool, reward: i128, penalty: i128) {
 
 fn emit_stats_saturated(env: &Env, counter: Symbol, previous_value: i128, attempted_increment: i128) {
     env.events().publish(
-        (crate::EVENT_STATS_SAT, EVENT_VERSION, counter.clone()),
+        (
+            crate::EVENT_STATS_SAT,
+            crate::event_schema::event_version(crate::EVENT_STATS_SAT),
+            counter.clone(),
+        ),
         (counter, previous_value, attempted_increment),
     );
 }
 
 fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
     env.events().publish(
-        (EVENT_SLA_CALC, EVENT_VERSION, severity),
+        (
+            EVENT_SLA_CALC,
+            crate::event_schema::event_version(EVENT_SLA_CALC),
+            severity,
+        ),
         (
             result.outage_id.clone(),
             result.status.clone(),
@@ -562,7 +570,11 @@ fn publish_sla_event(env: &Env, severity: Symbol, result: &SLAResult) {
 
 fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResult, correlation_id: u64) {
     env.events().publish(
-        (EVENT_SETTLE_INTENT, EVENT_VERSION, severity),
+        (
+            EVENT_SETTLE_INTENT,
+            crate::event_schema::event_version(EVENT_SETTLE_INTENT),
+            severity,
+        ),
         (
             result.outage_id.clone(),
             result.status.clone(),
@@ -580,7 +592,11 @@ fn publish_settlement_intent_event(env: &Env, severity: Symbol, result: &SLAResu
 
 fn publish_duplicate_input_event(env: &Env, severity: Symbol, existing: &SLAResult) {
     env.events().publish(
-        (EVENT_DUP_INPUT, EVENT_VERSION, severity),
+        (
+            EVENT_DUP_INPUT,
+            crate::event_schema::event_version(EVENT_DUP_INPUT),
+            severity,
+        ),
         (
             existing.outage_id.clone(),
             existing.status.clone(),

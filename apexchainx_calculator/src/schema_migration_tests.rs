@@ -266,9 +266,7 @@ mod tests {
         // Synthesize the v3 metadata shape: a recorded sequence with no
         // actor key (v3 contracts never wrote one).
         env.as_contract(&cid, || {
-            env.storage()
-                .instance()
-                .set(&crate::STORAGE_VERSION_KEY, &3u32);
+            env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &3u32);
             config_metadata::record_config_update_legacy_sequence(&env, 1234);
         });
 

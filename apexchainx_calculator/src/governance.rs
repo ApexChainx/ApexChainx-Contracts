@@ -73,9 +73,8 @@ use soroban_sdk::{Address, Env, Symbol};
 
 use crate::{
     SLAError, ADMIN_KEY, EVENT_ADMIN_ACC, EVENT_ADMIN_CAN, EVENT_ADMIN_PROP, EVENT_ADMIN_REN,
-    EVENT_ADMIN_SUP, EVENT_ADMIN_XP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET,
-    EVENT_OP_SUP, EVENT_OP_XP, EVENT_VERSION, OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY,
-    PENDING_OP_KEY, PENDING_OP_TS_KEY,
+    EVENT_ADMIN_SUP, EVENT_ADMIN_XP, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_OP_SET, EVENT_OP_SUP,
+    EVENT_OP_XP, OPERATOR_KEY, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, PENDING_OP_KEY, PENDING_OP_TS_KEY,
 };
 
 /// Window (in ledger seconds) after which a pending admin or operator proposal
@@ -86,12 +85,9 @@ pub(crate) const PROPOSAL_EXPIRY_WINDOW: u64 = 90 * 24 * 60 * 60;
 
 /// Requires that the stored proposal is still within its expiry window.
 ///
-/// On the FIRST observation of a lapsed proposal this both emits the typed
-/// expiry event (`adm_xp`/`op_xp`) carrying the stale candidate and clears the
-/// pending keys, then returns `ProposalExpired`. Later attempts observe no
-/// pending proposal at all (`NoPendingTransfer`) and emit nothing, so the
-/// expiry transition is published **at most once** and stays idempotent for
-/// indexers. (#589)
+/// A lapsed proposal emits a failed-call diagnostic and returns ProposalExpired.
+/// Soroban rolls back key removal on error; cancellation or replacement must
+/// clear the pending slot. Repeated failed accepts can repeat the diagnostic.
 fn require_proposal_valid(
     env: &Env,
     caller: &Address,
@@ -114,8 +110,14 @@ fn require_proposal_valid(
         // and EVENT_OP_XP for the operator handoff — the emit-site audit in
         // event_schema.rs (`test_every_declared_event_has_an_emit_site`) picks
         // both names up from this publish site.
-        env.events()
-            .publish((expiry_event, EVENT_VERSION, caller.clone()), (stale,));
+        env.events().publish(
+            (
+                expiry_event.clone(),
+                crate::event_schema::event_version(expiry_event),
+                caller.clone(),
+            ),
+            (stale,),
+        );
     }
     env.storage().instance().remove(&pending_key);
     env.storage().instance().remove(&ts_key);
@@ -155,12 +157,20 @@ pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result
         // supersession first so the event stream records the replacement
         // before the new proposal, letting consumers reconstruct the slot.
         env.events().publish(
-            (EVENT_ADMIN_SUP, EVENT_VERSION, caller.clone()),
+            (
+                EVENT_ADMIN_SUP,
+                crate::event_schema::event_version(EVENT_ADMIN_SUP),
+                caller.clone(),
+            ),
             (previous, new_admin.clone()),
         );
     }
     env.events().publish(
-        (EVENT_ADMIN_PROP, EVENT_VERSION, caller.clone()),
+        (
+            EVENT_ADMIN_PROP,
+            crate::event_schema::event_version(EVENT_ADMIN_PROP),
+            caller.clone(),
+        ),
         (new_admin.clone(),),
     );
     Ok(())
@@ -176,15 +186,27 @@ pub fn accept_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
         .instance()
         .get(&PENDING_ADMIN_KEY)
         .ok_or(SLAError::NoPendingTransfer)?;
-    require_proposal_valid(env, caller, PENDING_ADMIN_KEY, PENDING_ADMIN_TS_KEY, EVENT_ADMIN_XP)?;
+    require_proposal_valid(
+        env,
+        caller,
+        PENDING_ADMIN_KEY,
+        PENDING_ADMIN_TS_KEY,
+        EVENT_ADMIN_XP,
+    )?;
     if *caller != pending {
         return Err(SLAError::Unauthorized);
     }
     env.storage().instance().set(&ADMIN_KEY, caller);
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
     env.storage().instance().remove(&PENDING_ADMIN_TS_KEY);
-    env.events()
-        .publish((EVENT_ADMIN_ACC, EVENT_VERSION, caller.clone()), ());
+    env.events().publish(
+        (
+            EVENT_ADMIN_ACC,
+            crate::event_schema::event_version(EVENT_ADMIN_ACC),
+            caller.clone(),
+        ),
+        (),
+    );
     Ok(())
 }
 
@@ -198,8 +220,14 @@ pub fn cancel_admin_proposal(env: &Env, caller: &Address) -> Result<(), SLAError
     }
     env.storage().instance().remove(&PENDING_ADMIN_KEY);
     env.storage().instance().remove(&PENDING_ADMIN_TS_KEY);
-    env.events()
-        .publish((EVENT_ADMIN_CAN, EVENT_VERSION, caller.clone()), ());
+    env.events().publish(
+        (
+            EVENT_ADMIN_CAN,
+            crate::event_schema::event_version(EVENT_ADMIN_CAN),
+            caller.clone(),
+        ),
+        (),
+    );
     Ok(())
 }
 
@@ -234,12 +262,20 @@ pub fn propose_operator(env: &Env, caller: &Address, new_operator: &Address) -> 
         .set(&PENDING_OP_TS_KEY, &env.ledger().timestamp());
     if let Some(previous) = superseded {
         env.events().publish(
-            (EVENT_OP_SUP, EVENT_VERSION, caller.clone()),
+            (
+                EVENT_OP_SUP,
+                crate::event_schema::event_version(EVENT_OP_SUP),
+                caller.clone(),
+            ),
             (previous, new_operator.clone()),
         );
     }
     env.events().publish(
-        (EVENT_OP_PROP, EVENT_VERSION, caller.clone()),
+        (
+            EVENT_OP_PROP,
+            crate::event_schema::event_version(EVENT_OP_PROP),
+            caller.clone(),
+        ),
         (new_operator.clone(),),
     );
     Ok(())
@@ -270,8 +306,14 @@ pub fn accept_operator(env: &Env, caller: &Address) -> Result<(), SLAError> {
     env.storage().instance().set(&OPERATOR_KEY, caller);
     env.storage().instance().remove(&PENDING_OP_KEY);
     env.storage().instance().remove(&PENDING_OP_TS_KEY);
-    env.events()
-        .publish((EVENT_OP_ACC, EVENT_VERSION, caller.clone()), ());
+    env.events().publish(
+        (
+            EVENT_OP_ACC,
+            crate::event_schema::event_version(EVENT_OP_ACC),
+            caller.clone(),
+        ),
+        (),
+    );
     Ok(())
 }
 
@@ -285,8 +327,14 @@ pub fn cancel_operator_proposal(env: &Env, caller: &Address) -> Result<(), SLAEr
     }
     env.storage().instance().remove(&PENDING_OP_KEY);
     env.storage().instance().remove(&PENDING_OP_TS_KEY);
-    env.events()
-        .publish((EVENT_OP_CAN, EVENT_VERSION, caller.clone()), ());
+    env.events().publish(
+        (
+            EVENT_OP_CAN,
+            crate::event_schema::event_version(EVENT_OP_CAN),
+            caller.clone(),
+        ),
+        (),
+    );
     Ok(())
 }
 
@@ -310,11 +358,23 @@ pub fn renounce_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
         // adminless contract must not allow a stale operator handoff to fire.
         env.storage().instance().remove(&PENDING_OP_KEY);
         env.storage().instance().remove(&PENDING_OP_TS_KEY);
-        env.events()
-            .publish((EVENT_OP_CAN, EVENT_VERSION, caller.clone()), ());
+        env.events().publish(
+            (
+                EVENT_OP_CAN,
+                crate::event_schema::event_version(EVENT_OP_CAN),
+                caller.clone(),
+            ),
+            (),
+        );
     }
-    env.events()
-        .publish((EVENT_ADMIN_REN, EVENT_VERSION, caller.clone()), ());
+    env.events().publish(
+        (
+            EVENT_ADMIN_REN,
+            crate::event_schema::event_version(EVENT_ADMIN_REN),
+            caller.clone(),
+        ),
+        (),
+    );
     Ok(())
 }
 
@@ -374,12 +434,22 @@ pub fn set_operator(env: &Env, caller: &Address, new_operator: &Address) -> Resu
         // stale handoff can never override the admin's single-step decision.
         env.storage().instance().remove(&PENDING_OP_KEY);
         env.storage().instance().remove(&PENDING_OP_TS_KEY);
-        env.events()
-            .publish((EVENT_OP_CAN, EVENT_VERSION, caller.clone()), ());
+        env.events().publish(
+            (
+                EVENT_OP_CAN,
+                crate::event_schema::event_version(EVENT_OP_CAN),
+                caller.clone(),
+            ),
+            (),
+        );
     }
     env.storage().instance().set(&OPERATOR_KEY, new_operator);
     env.events().publish(
-        (EVENT_OP_SET, EVENT_VERSION, caller.clone()),
+        (
+            EVENT_OP_SET,
+            crate::event_schema::event_version(EVENT_OP_SET),
+            caller.clone(),
+        ),
         (new_operator.clone(),),
     );
     Ok(())

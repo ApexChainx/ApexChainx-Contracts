@@ -1,0 +1,9 @@
+cargo :    Compiling apexchainx_calculator v0.1.0
+(C:\Users\PC\Documents\fun\ApexChainx-Contracts\validation-results\pr-verified\apexchainx_calculator)
+At line:3 char:1
++ cargo build --locked --target wasm32-unknown-unknown --release *> val ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ap...inx_calculator):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `release` profile [optimized] target(s) in 12.63s

@@ -4,10 +4,7 @@
 ///
 /// Public read-only methods should use this helper instead of
 /// calling `unwrap()` directly.
-pub fn resolve_or_default<T: Clone>(
-    value: Option<T>,
-    default: T,
-) -> T {
+pub fn resolve_or_default<T: Clone>(value: Option<T>, default: T) -> T {
     match value {
         Some(value) => value,
         None => default,
@@ -15,8 +12,6 @@ pub fn resolve_or_default<T: Clone>(
 }
 
 /// Returns whether a fallback value was used.
-pub fn used_default<T>(
-    value: &Option<T>,
-) -> bool {
+pub fn used_default<T>(value: &Option<T>) -> bool {
     value.is_none()
 }

@@ -20,7 +20,7 @@ export const MAX_RECALCS_PER_OUTAGE = 16;
 export const DEFAULT_RETENTION_LIMIT = 1000;
 
 /** Numeric `SLAResult` schema version. */
-export const RESULT_SCHEMA_VERSION = 1;
+export const RESULT_SCHEMA_VERSION = 2;
 
 /** Number of named fields in `SLAResult` at this schema version. */
 export const RESULT_FIELD_COUNT = 9;
@@ -63,5 +63,35 @@ export const EVENT_TOPICS = {
   retentionLimitSet: "ret_lim",
 } as const;
 
-/** Schema version carried in topic position 2 of every event. */
-export const EVENT_VERSION = "v1";
+/** Global ABI version; dispatch events using EVENT_VERSIONS[name]. */
+export const EVENT_VERSION = "v2";
+export const EVENT_VERSIONS = {
+  "sla_calc": "v1",
+  "set_int": "v2",
+  "cfg_upd": "v1",
+  "cfg_rem": "v1",
+  "sev_add": "v1",
+  "sev_upd": "v1",
+  "paused": "v1",
+  "unpause": "v1",
+  "op_set": "v1",
+  "pruned": "v1",
+  "pruned_a": "v1",
+  "adm_prop": "v1",
+  "adm_acc": "v1",
+  "adm_can": "v1",
+  "adm_ren": "v1",
+  "op_prop": "v1",
+  "op_acc": "v1",
+  "op_can": "v1",
+  "adm_sup": "v1",
+  "adm_xp": "v1",
+  "op_sup": "v1",
+  "op_xp": "v1",
+  "cfg_frz": "v1",
+  "cfg_unfrz": "v1",
+  "stats_sat": "v1",
+  "dup_input": "v1",
+  "mig_done": "v1",
+  "ret_lim": "v1",
+} as const;

@@ -1,0 +1,33 @@
+[run-ts-tests] suite: parity (3 file(s))
+✔ per-name dispatch isolates versions and supports explicit historical decoders (3.5958ms)
+✔ generated event versions agree with the Rust per-name registry (8.0923ms)
+✔ correlation IDs preserve the ledger and reproduce the Rust golden vector (1.4362ms)
+✔ event emitters resolve topic versions by their own event name (54.8306ms)
+{"methods":63,"covered":8,"skipped":55,"contractTypes":37}
+✔ contract manifest and type surface have explicit parity coverage (165.0705ms)
+✔ new methods, stale coverage and missing fixtures cannot pass (36.9019ms)
+✔ new contracttype fields and type changes alter the inventory (14.0504ms)
+✔ #678 nested Rust modules are discovered instead of silently omitted (7.8226ms)
+✔ mirrored constants match the values the contract reported (3.2318ms)
+✔ the result symbol vocabulary matches the contract's schema (9.7326ms)
+✔ event topic names and the schema version match the contract (0.728ms)
+✔ every recorded status, payment type and rating is a known symbol (1.023ms)
+✔ getHistoryPage reproduces every contract-recorded page (1.4025ms)
+✔ a limit above MAX_PAGE_SIZE is clamped, not honoured (0.4668ms)
+✔ limit 0 yields an empty page and reports no more (0.4416ms)
+✔ getHistoryByOutage and getLatestByOutage match contract lookups (0.8932ms)
+✔ pruneByMinAge reproduces the contract's retained-set sizes (1.7579ms)
+✔ min age just below the ledger timestamp keeps the full history (0.7641ms)
+✔ configVersionHash reproduces the contract's hash exactly (0.8737ms)
+✔ configVersionHash is order-independent but field-sensitive (1.6963ms)
+✔ configVersionHash refuses a partial snapshot (1.5442ms)
+ℹ tests 21
+ℹ suites 0
+ℹ pass 21
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1576.5783
+
+[run-ts-tests] ✓ suite "parity" passed (3 file(s))

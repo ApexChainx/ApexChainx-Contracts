@@ -28,7 +28,8 @@
  *   list      print the resolved files per suite and exit
  */
 
-import { execSync } from "child_process";
+import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { existsSync, readdirSync } from "fs";
 
 // ─── Suite definitions ────────────────────────────────────────────────────
@@ -56,7 +57,7 @@ function allSuiteFiles(): string[] {
 // Declared after the helper so the initializer can call it.
 const SUITES: Record<string, string[]> = {
   replay: ["scripts/release-replay.test.ts"],
-  parity: ["ts/parity/readSemanticsParity.test.ts"],
+  parity: readdirSync("ts/parity").filter(name => name.endsWith(".test.ts")).sort().map(name => `ts/parity/${name}`),
 };
 
 const SUITE_RESOLVERS: Record<string, () => string[]> = {
@@ -125,14 +126,11 @@ if (suite === "list") {
 
 const files = resolveSuite(suite);
 
-// Quote each path (no spaces today, but cheap insurance) and rely on forward
-// slashes, which Node accepts on every platform. No shell globs anywhere.
-const cmd = `npx tsx --test ${files.map((f) => `"${f}"`).join(" ")}`;
+// Invoke the locked local runner directly: no shell quoting or npx resolution.
+const tsx = createRequire(import.meta.url).resolve("tsx/cli");
 console.log(`[run-ts-tests] suite: ${suite} (${files.length} file(s))`);
-console.log(`[run-ts-tests] $ ${cmd}\n`);
-
 try {
-  execSync(cmd, { stdio: "inherit" });
+  execFileSync(process.execPath, [tsx, "--test", ...files], { stdio: "inherit" });
 } catch (err) {
   const status = (err as { status?: number | null }).status ?? 1;
   console.error(`\n[run-ts-tests] ✗ suite "${suite}" failed (exit ${status})`);

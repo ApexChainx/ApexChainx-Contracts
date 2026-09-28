@@ -52,6 +52,17 @@ fn setup() -> (Env, SLACalculatorContractClient<'static>, Actors) {
     (env, client, actors)
 }
 
+// SDK Events::all() includes failed-call diagnostic events; the snapshot
+// retains the flag needed to distinguish those from committed contract events.
+fn committed_contract_event_count(env: &Env) -> usize {
+    env.to_snapshot()
+        .events
+        .0
+        .iter()
+        .filter(|e| !e.failed_call && e.event.type_ == soroban_sdk::xdr::ContractEventType::Contract)
+        .count()
+}
+
 // ============================================================
 // Initialisation
 // ============================================================
@@ -144,8 +155,8 @@ fn test_result_schema_is_explicit_and_stable() {
     let (_env, client, _actors) = setup();
 
     let schema = client.get_result_schema();
-    assert_eq!(schema.version, symbol_short!("v1"));
-    assert_eq!(schema.schema_version, 1);
+    assert_eq!(schema.version, symbol_short!("v2"));
+    assert_eq!(schema.schema_version, 2);
     assert_eq!(schema.status_met, symbol_short!("met"));
     assert_eq!(schema.status_violated, symbol_short!("viol"));
     assert_eq!(schema.payment_reward, symbol_short!("rew"));
@@ -190,7 +201,7 @@ fn test_calculate_sla_emits_versioned_integration_event() {
     ) = data.try_into_val(&env).unwrap();
 
     assert_eq!(topic_0, EVENT_SLA_CALC);
-    assert_eq!(topic_1, EVENT_VERSION);
+    assert_eq!(topic_1, crate::event_schema::event_version(topic_0));
     assert_eq!(topic_2, symbol_short!("critical"));
 
     // Every payload field matches the stored decision in canonical order.
@@ -220,7 +231,7 @@ fn test_set_config_emits_versioned_config_event() {
     let event_data: (u32, i128, i128) = data.try_into_val(&env).unwrap();
 
     assert_eq!(topic_0, EVENT_CONFIG_UPD);
-    assert_eq!(topic_1, EVENT_VERSION);
+    assert_eq!(topic_1, crate::event_schema::event_version(topic_0));
     assert_eq!(topic_2, symbol_short!("critical"));
     assert_eq!(event_data, (20u32, 200i128, 1000i128));
 }
@@ -2295,7 +2306,7 @@ fn test_repeated_set_config_events_preserve_call_and_payload_order() {
         let payload: (u32, i128, i128) = data.try_into_val(&env).unwrap();
 
         assert_eq!(event_name, EVENT_CONFIG_UPD);
-        assert_eq!(version, EVENT_VERSION);
+        assert_eq!(version, crate::event_schema::event_version(event_name));
         assert_eq!(severity, expected_severity);
         assert_eq!(payload, expected_payload);
     }
@@ -2646,8 +2657,7 @@ fn test_operator_proposal_expiry_emits_event_once_and_clears_keys() {
     client.propose_operator(&actors.admin, &new_op);
     assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
 
-    env.ledger()
-        .set_timestamp(1_000_000 + 90 * 24 * 60 * 60 + 1);
+    env.ledger().set_timestamp(1_000_000 + 90 * 24 * 60 * 60 + 1);
 
     // First attempt observes the expiry: reject and emit op_xp.
     assert!(client.try_accept_operator(&new_op).is_err());
@@ -2681,7 +2691,7 @@ fn test_operator_proposal_expiry_emits_event_once_and_clears_keys() {
 /// writes, so the pending admin proposal survives and the active admin is
 /// unchanged; only the typed `adm_xp` expiry event is observable.
 #[test]
-fn test_admin_proposal_expiry_emits_adm_xp_and_clears_keys() {
+fn test_admin_proposal_expiry_rolls_back_effects_on_error() {
     let (env, client, actors) = setup();
     let new_admin = soroban_sdk::Address::generate(&env);
 
@@ -2689,24 +2699,22 @@ fn test_admin_proposal_expiry_emits_adm_xp_and_clears_keys() {
     client.propose_admin(&actors.admin, &new_admin);
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
 
-    env.ledger()
-        .set_timestamp(2_000_000 + 90 * 24 * 60 * 60 + 1);
+    env.ledger().set_timestamp(2_000_000 + 90 * 24 * 60 * 60 + 1);
 
     assert!(client.try_accept_admin(&new_admin).is_err());
+    // A failed Soroban invocation rolls back its writes and events.
     assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
 
-    let events = env.events().all();
-    let mut xp_count = 0u32;
-    for i in 0..events.len() {
-        let (_, topics, _) = events.get(i).unwrap();
-        if !topics.is_empty() {
-            let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-            if name == EVENT_ADMIN_XP {
-                xp_count += 1;
-            }
-        }
-    }
-    assert_eq!(xp_count, 1, "admin expiry must emit exactly one adm_xp event");
+    // The diagnostic event exists but is explicitly marked as failed.
+    assert_eq!(committed_contract_event_count(&env), 1);
+    let failed = env
+        .to_snapshot()
+        .events
+        .0
+        .into_iter()
+        .filter(|e| e.failed_call && e.event.type_ == soroban_sdk::xdr::ContractEventType::Contract)
+        .count();
+    assert_eq!(failed, 1);
 }
 
 /// Renouncing admin invalidates a pending operator proposal; the proposed
@@ -2761,7 +2769,7 @@ fn test_get_contract_metadata_returns_expected_fields() {
     let meta = client.get_contract_metadata();
     assert_eq!(meta.contract_name, symbol_short!("sla_calc"));
     assert_eq!(meta.storage_version, STORAGE_VERSION);
-    assert_eq!(meta.result_schema_version, 1);
+    assert_eq!(meta.result_schema_version, RESULT_SCHEMA_VERSION);
     assert_eq!(meta.supported_severities.len(), 4);
     assert_eq!(meta.features.len(), 10);
 }
@@ -3509,6 +3517,10 @@ fn test_max_page_size_is_single_exported_constant_and_clamps() {
     // lift it as the other bulk-history tests do.
     _env.budget().reset_unlimited();
 
+    // Fixture construction spans many transactions; do not charge all 220
+    // setup calls against one invocation's shared test-host budget.
+    _env.budget().reset_unlimited();
+
     // Exceeds MAX_PAGE_SIZE so the clamp is provable in both methods.
     for i in 0..(exported_max_page_size + 20) {
         let oid = Symbol::new(&_env, &alloc::format!("PG_CLAMP_{}", i));
@@ -3516,9 +3528,11 @@ fn test_max_page_size_is_single_exported_constant_and_clamps() {
     }
 
     // A limit above the exported value is clamped, not honoured.
+    _env.budget().reset_default();
     let page = client.get_history_page(&0, &(exported_max_page_size + 50));
     assert_eq!(page.len(), exported_max_page_size);
 
+    _env.budget().reset_default();
     let meta = client.get_history_page_with_meta(&0, &(exported_max_page_size + 50));
     assert_eq!(meta.items.len(), exported_max_page_size);
     assert_eq!(meta.total, exported_max_page_size + 20);
@@ -4081,7 +4095,7 @@ fn test_get_full_audit_state_single_pass_efficiency() {
     assert_eq!(state.config_snapshot.entries.len(), 4);
     assert_eq!(state.stats.total_calculations, 0);
     assert_eq!(state.history_len, 0);
-    assert_eq!(state.result_schema.version, symbol_short!("v1"));
+    assert_eq!(state.result_schema.version, symbol_short!("v2"));
 }
 
 // ============================================================
@@ -4446,15 +4460,27 @@ fn test_decision_events_share_canonical_payload_order() {
         &30,
     );
 
+    // Rejected invocations roll back contract events. Exercise the emitter
+    // directly in contract context to pin the diagnostic payload layout.
+    env.as_contract(&client.address, || {
+        SLACalculatorContract::publish_duplicate_input_event(
+            &env,
+            symbol_short!("high"),
+            &_stored,
+            30,
+            _stored.threshold_minutes,
+        );
+    });
+
     // Canonical 9-field order shared by all three decision events (#429);
     // set_int appends the trailing correlation_id (#566) and dup_input appends
     // the attempted (rejected) mttr/threshold (#667) — both append-only.
     type DecisionPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64);
     type SettlementPayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64);
-    type DuplicatePayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u32, u32);
 
     let mut sla_calc_payload: Option<DecisionPayload> = None;
     let mut set_int_payload: Option<SettlementPayload> = None;
+    type DuplicatePayload = (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u32, u32);
     let mut dup_input_payload: Option<DuplicatePayload> = None;
 
     let events = env.events().all();
@@ -4477,7 +4503,7 @@ fn test_decision_events_share_canonical_payload_order() {
         } else if name == EVENT_DUP_INPUT {
             dup_input_payload = Some(
                 data.try_into_val(&env)
-                    .expect("dup_input must decode as 11 fields (9 canonical + attempted mttr/threshold)"),
+                    .expect("dup_input must decode as 9 canonical fields plus 2 attempted inputs"),
             );
         }
     }
@@ -4497,13 +4523,21 @@ fn test_decision_events_share_canonical_payload_order() {
     );
     assert_ne!(set_int.9, 0, "#566: set_int must carry a non-zero correlation_id");
 
-    // dup_input's first nine fields must equal the canonical decision order;
-    // a trailing (attempted_mttr, attempted_threshold) pair is appended (#667).
-    let dup_input_shared: DecisionPayload = (
-        dup_input.0, dup_input.1, dup_input.2, dup_input.3, dup_input.4, dup_input.5, dup_input.6, dup_input.7, dup_input.8,
-    );
+    assert_eq!(dup_input.9, 30);
+    assert_eq!(dup_input.10, _stored.threshold_minutes);
     assert_eq!(
-        dup_input_shared, sla_calc,
+        (
+            dup_input.0,
+            dup_input.1,
+            dup_input.2,
+            dup_input.3,
+            dup_input.4,
+            dup_input.5,
+            dup_input.6,
+            dup_input.7,
+            dup_input.8
+        ),
+        sla_calc,
         "dup_input must share the canonical order with sla_calc"
     );
     assert_eq!(dup_input.9, 30u32, "dup_input must carry the attempted mttr");
@@ -5586,7 +5620,7 @@ fn test_get_version_info_returns_correct_versions_after_init() {
     let (_env, client, _actors) = setup();
     let info = client.get_version_info();
     assert_eq!(info.storage_version, STORAGE_VERSION);
-    assert_eq!(info.result_schema_version, 1);
+    assert_eq!(info.result_schema_version, RESULT_SCHEMA_VERSION);
     assert!(!info.needs_migration);
     assert!(!info.is_paused);
     assert_eq!(info.contract_name, symbol_short!("sla_calc"));
@@ -6807,13 +6841,19 @@ fn test_mttr_at_max_boundary_accepted_all_entry_points() {
     // rejection); values above it are rejected with InvalidInput before any
     // arithmetic runs (asserted by the should_panic case above and the shared
     // validate_mttr_bound helper in lib.rs).
-    let (env, client, actors) = setup();
+    let (_env, client, actors) = setup();
     let m = crate::spec::MAX_MTTR_MINUTES;
     let view = client.calculate_sla_view(&symbol_short!("M0"), &symbol_short!("critical"), &m);
     assert_eq!(view.status, symbol_short!("viol"));
-    let (replay, _hash) = client.replay_calculate_sla(&symbol_short!("M1"), &symbol_short!("critical"), &m, &1);
+    let (replay, _hash) =
+        client.replay_calculate_sla(&symbol_short!("M1"), &symbol_short!("critical"), &m, &1);
     assert_eq!(replay.status, symbol_short!("viol"));
-    let calc = client.calculate_sla(&actors.operator, &symbol_short!("M2"), &symbol_short!("critical"), &m);
+    let calc = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("M2"),
+        &symbol_short!("critical"),
+        &m,
+    );
     assert_eq!(calc.status, symbol_short!("viol"));
 }
 
@@ -6897,7 +6937,11 @@ fn test_extreme_penalty_large_overtime_no_i128_overflow() {
     client2.set_config(&admin2, &symbol_short!("medium"), &1, &10000, &100000);
     client2.set_config(&admin2, &symbol_short!("low"), &1, &100, &151);
 
-    let result = client2.calculate_sla_view(&symbol_short!("OVF"), &symbol_short!("low"), &crate::spec::MAX_MTTR_MINUTES);
+    let result = client2.calculate_sla_view(
+        &symbol_short!("OVF"),
+        &symbol_short!("low"),
+        &crate::spec::MAX_MTTR_MINUTES,
+    );
     assert_eq!(result.status, symbol_short!("viol"));
     // Largest accepted mttr: overtime = MAX_MTTR_MINUTES - 1; penalty = that * 100.
     let expected = -((crate::spec::MAX_MTTR_MINUTES - 1) as i128 * 100);
@@ -7685,7 +7729,7 @@ fn test_failed_accept_admin_wrong_caller_leaves_admin_unchanged() {
     // Admin must still be the original
     assert_eq!(client.get_admin(), actors.admin);
     // Pending must still be new_admin
-    assert_eq!(client.get_pending_admin(), Some(new_admin));
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
 }
 
 // ============================================================
@@ -7747,7 +7791,7 @@ fn test_admin_proposal_expires_at_window_plus_one_second() {
         &result.unwrap_err().unwrap()
     ));
     assert_eq!(client.get_admin(), actors.admin);
-    assert_eq!(client.get_pending_admin(), Some(new_admin));
+    assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
 }
 
 #[test]
@@ -8320,54 +8364,22 @@ fn test_255_duplicate_outage_id_with_different_mttr_panics() {
 // transaction instead of issuing a follow-up `get_latest_by_outage` call.
 
 #[test]
-fn test_385_conflicting_duplicate_emits_dup_input_with_stored_result() {
+fn test_385_conflicting_duplicate_rolls_back_events_and_state() {
     let (env, client, actors) = setup();
     let outage_id = symbol_short!("DUP_EVT");
     let severity = symbol_short!("high");
-
-    // First submission stores a result.
-    let stored = client.calculate_sla(&actors.operator, &outage_id, &severity, &10u32);
-
-    // Conflicting resubmission is rejected with DuplicateOutageInput.
-    let conflict_err = client
-        .try_calculate_sla(&actors.operator, &outage_id, &severity, &20u32)
+    let stored = client.calculate_sla(&actors.operator, &outage_id, &severity, &10);
+    let before = committed_contract_event_count(&env);
+    let stats = client.get_stats();
+    let error = client
+        .try_calculate_sla(&actors.operator, &outage_id, &severity, &20)
         .unwrap_err()
         .unwrap();
-    assert!(error_responses::is_duplicate_outage_input(&conflict_err));
-
-    // The rejection must have emitted a dup_input event carrying the stored result.
-    let events = env.events().all();
-    let mut found = false;
-    for i in 0..events.len() {
-        let (_, topics, data) = events.get(i).unwrap();
-        let topic_0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
-        if topic_0 != EVENT_DUP_INPUT {
-            continue;
-        }
-        found = true;
-
-        let topic_1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
-        let topic_2: Symbol = topics.get(2).unwrap().try_into_val(&env).unwrap();
-        assert_eq!(topic_1, EVENT_VERSION);
-        assert_eq!(topic_2, severity);
-
-        // #667 – the stored decision (9 fields) is followed by the attempted
-        // (rejected) mttr/threshold so reconcilers need no follow-up read.
-        let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u32, u32) =
-            data.try_into_val(&env).unwrap();
-        assert_eq!(payload.0, outage_id);
-        assert_eq!(payload.1, stored.status);
-        assert_eq!(payload.2, stored.mttr_minutes);
-        assert_eq!(payload.3, stored.threshold_minutes);
-        assert_eq!(payload.4, stored.amount);
-        assert_eq!(payload.5, stored.payment_type);
-        assert_eq!(payload.6, stored.rating);
-        assert_eq!(payload.7, stored.config_version_hash);
-        assert_eq!(payload.8, stored.recorded_at);
-        assert_eq!(payload.9, 20u32, "attempted mttr must be carried");
-        assert_eq!(payload.10, stored.threshold_minutes);
-    }
-    assert!(found, "expected a dup_input event carrying the stored result");
+    assert!(error_responses::is_duplicate_outage_input(&error));
+    assert_eq!(committed_contract_event_count(&env), before);
+    assert_eq!(client.get_stats(), stats);
+    assert_eq!(client.get_history().len(), 1);
+    assert_eq!(client.get_latest_by_outage(&outage_id), Some(stored));
 }
 
 #[test]
@@ -8991,7 +9003,11 @@ fn test_issue671_actor_replaced_by_later_update() {
 
     client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
     let first = client.get_last_config_update().unwrap();
-    assert_eq!(first.actor, Some(admin.clone()), "first update attributes the original admin");
+    assert_eq!(
+        first.actor,
+        Some(admin.clone()),
+        "first update attributes the original admin"
+    );
 
     // Hand admin to a different address, then update the config again in a
     // later ledger so the recorded sequence advances (the test env does not
@@ -9470,7 +9486,7 @@ fn test_568_unrelated_tier_edits_preserve_outage_recalc_budget() {
     // The full recalc cap survived the unrelated churn: the outage can still
     // accumulate entries up to MAX_RECALCS_PER_OUTAGE on its own tier's churn.
     // (Two entries already exist from the phase above, so only 14 more fit.)
-    for i in 1..(MAX_RECALCS_PER_OUTAGE as u32 - 1) {
+    for i in 1..(MAX_RECALCS_PER_OUTAGE - 1) {
         client.set_config(&actors.admin, &severity, &(35 + i), &55, &775);
         let _ = client.calculate_sla(&actors.operator, &outage, &severity, &10);
     }
@@ -10543,7 +10559,7 @@ fn test_historical_parity_golden_results() {
     // Validate result schema stability
     let schema = client.get_result_schema();
     assert_eq!(
-        schema.schema_version, 1,
+        schema.schema_version, 2,
         "Result schema version changed — check migration notes"
     );
     assert_eq!(
@@ -10644,7 +10660,7 @@ fn test_261_fingerprint_includes_all_required_fields() {
 
     assert_eq!(fingerprint.contract_name, symbol_short!("sla_calc"));
     assert_eq!(fingerprint.storage_version, STORAGE_VERSION);
-    assert_eq!(fingerprint.result_schema_version, 1);
+    assert_eq!(fingerprint.result_schema_version, RESULT_SCHEMA_VERSION);
     assert!(
         fingerprint.config_version_hash > 0,
         "config hash must be non-zero"
@@ -11192,6 +11208,7 @@ const CANONICAL_PUBLIC_METHODS: &[(&str, bool, &str, &str)] = &[
     ("get_config_bundle", false, "none", ""),
     ("get_config_count", false, "none", ""),
     ("get_config_snapshot", false, "none", ""),
+    ("get_config_snapshot_by_version", false, "none", ""),
     ("get_config_version_hash", false, "none", ""),
     ("get_contract_info", false, "none", ""),
     ("get_contract_metadata", false, "none", ""),
@@ -11216,7 +11233,6 @@ const CANONICAL_PUBLIC_METHODS: &[(&str, bool, &str, &str)] = &[
     ("get_rent_estimate", false, "none", ""),
     ("get_result_schema", false, "none", ""),
     ("get_retention_limit", false, "none", ""),
-    ("get_retention_metrics", false, "none", ""),
     ("get_severity_telemetry", false, "none", ""),
     ("get_stats", false, "none", ""),
     ("get_storage_footprint_estimate", false, "none", ""),
@@ -11425,10 +11441,10 @@ fn test_get_result_schema_version_change_requires_migration_note() {
     let (_env, client, _actors) = setup();
     let schema = client.get_result_schema();
     assert_eq!(
-        schema.schema_version, 1,
+        schema.schema_version, 2,
         "RESULT_SCHEMA_VERSION has changed! Add migration notes before bumping."
     );
-    assert_eq!(schema.version, symbol_short!("v1"));
+    assert_eq!(schema.version, symbol_short!("v2"));
 }
 
 #[test]
@@ -11456,7 +11472,7 @@ fn test_get_result_schema_deprecated_symbols_empty_in_v1() {
 fn test_get_result_schema_requires_migration_version_if_not_v1() {
     let (_env, client, _actors) = setup();
     let schema = client.get_result_schema();
-    if schema.schema_version != 1 {
+    if schema.schema_version != 2 {
         // If this test fails, you have bumped RESULT_SCHEMA_VERSION without
         // updating the migration notes. Go back and document what changed.
         panic!(

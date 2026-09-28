@@ -1,0 +1,9 @@
+cargo :     Checking apexchainx_calculator v0.1.0
+(C:\Users\PC\Documents\fun\ApexChainx-Contracts\validation-results\pr-verified\apexchainx_calculator)
+At line:4 char:1
++ cargo clippy --locked --all-targets -- -D warnings *> validation-resu ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (    Checking ap...inx_calculator):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 29.46s

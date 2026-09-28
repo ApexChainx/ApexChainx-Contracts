@@ -9,7 +9,7 @@ use soroban_sdk::{Address, Env, Map, Symbol, Vec};
 use crate::{
     config_freeze, config_metadata, SLAConfig, SLAConfigEntry, SLAConfigSnapshot, SLAError, CONFIG_KEY,
     CONFIG_SNAPSHOT_SCHEMA_VERSION, CUSTOM_CONFIG_KEY, EVENT_CONFIG_REM, EVENT_CONFIG_UPD, EVENT_SEV_ADD,
-    EVENT_SEV_UPD, EVENT_VERSION,
+    EVENT_SEV_UPD,
 };
 
 /// Sets the SLA configuration for a given severity level.
@@ -60,7 +60,11 @@ pub fn set_config(
     config_metadata::record_config_update(env, caller);
 
     env.events().publish(
-        (EVENT_CONFIG_UPD, EVENT_VERSION, severity),
+        (
+            EVENT_CONFIG_UPD,
+            crate::event_schema::event_version(EVENT_CONFIG_UPD),
+            severity,
+        ),
         (threshold_minutes, penalty_per_minute, reward_base),
     );
     Ok(())
@@ -200,7 +204,11 @@ pub fn set_custom_severity(
 
     let event_name = if is_update { EVENT_SEV_UPD } else { EVENT_SEV_ADD };
     env.events().publish(
-        (event_name, EVENT_VERSION, severity),
+        (
+            event_name.clone(),
+            crate::event_schema::event_version(event_name),
+            severity,
+        ),
         (threshold_minutes, penalty_per_minute, reward_base),
     );
     Ok(())
@@ -224,8 +232,14 @@ pub fn remove_custom_severity(env: &Env, severity: Symbol) -> Result<(), SLAErro
     custom.remove(severity.clone());
     env.storage().instance().set(&CUSTOM_CONFIG_KEY, &custom);
 
-    env.events()
-        .publish((EVENT_CONFIG_REM, EVENT_VERSION, severity), ());
+    env.events().publish(
+        (
+            EVENT_CONFIG_REM,
+            crate::event_schema::event_version(EVENT_CONFIG_REM),
+            severity,
+        ),
+        (),
+    );
     Ok(())
 }
 

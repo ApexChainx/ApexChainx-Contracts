@@ -1,0 +1,54 @@
+   Compiling apexchainx_calculator v0.1.0 (C:\Users\PC\Documents\fun\ApexChainx-Contracts\validation-results\pr-verified\apexchainx_calculator)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 16.71s
+     Running unittests src\lib.rs (C:/Users/PC/Documents/fun/ApexChainx-Contracts/target\debug\deps\apexchainx_calculator-c05885d2382ee880.exe)
+
+running 47 tests
+test api_stability::tests::test_225_assess_stability_returns_a_for_current_state ... ok
+test api_stability::tests::test_225_error_enum_length_is_stable ... ok
+test api_stability::tests::test_225_event_symbols_are_well_known ... ok
+test api_stability::tests::test_225_field_counts_match_declared_types ... ok
+test api_stability::tests::test_225_sla_error_count_consistent_with_lib_enum ... ok
+test api_stability::tests::test_225_storage_keys_are_distinct ... ok
+test api_stability::tests::test_event_name_symbols_matches_event_schema_catalog ... ok
+test auth_matrix_tests::auth_matrix_tests::test_admin_cannot_calculate_sla - should panic ... ok
+test auth_matrix_tests::auth_matrix_tests::test_calculate_sla_view_is_public_read_only ... ok
+test auth_matrix_tests::auth_matrix_tests::test_no_role_equivalence_bypass_does_not_panic ... ok
+test auth_matrix_tests::auth_matrix_tests::test_only_admin_can_pause ... ok
+test auth_matrix_tests::auth_matrix_tests::test_only_admin_can_set_operator ... ok
+test auth_matrix_tests::auth_matrix_tests::test_only_admin_can_set_config ... ok
+test auth_matrix_tests::auth_matrix_tests::test_only_operator_can_calculate_sla ... ok
+test auth_matrix_tests::auth_matrix_tests::test_operator_cannot_set_config - should panic ... ok
+test auth_matrix_tests::auth_matrix_tests::test_replay_calculate_sla_has_no_side_effects ... ok
+test auth_matrix_tests::auth_matrix_tests::test_repeated_calls_by_same_operator_succeed ... ok
+test auth_matrix_tests::auth_matrix_tests::test_stranger_cannot_calculate_sla - should panic ... ok
+test auth_matrix_tests::auth_matrix_tests::test_replay_calculate_sla_is_public ... ok
+test auth_matrix_tests::auth_matrix_tests::test_stranger_cannot_mutate_via_view_endpoints - should panic ... ok
+test auth_matrix_tests::auth_matrix_tests::test_stranger_cannot_pause - should panic ... ok
+test auth_matrix_tests::auth_matrix_tests::test_stranger_cannot_set_config - should panic ... ok
+test auth_matrix_tests::auth_matrix_tests::test_stranger_cannot_set_operator - should panic ... ok
+test auth_matrix_tests::auth_matrix_tests::test_unauthorized_caller_cannot_calculate ... ok
+test config_bundle::tests::test_config_bundle_available_after_init ... ok
+test config_bundle::tests::test_config_bundle_panics_before_initialize - should panic ... ok
+test config_bundle::tests::test_config_bundle_panics_on_storage_version_mismatch - should panic ... ok
+test config_bundle::tests::test_config_bundle_cache_serves_unchanged_hash_reads ... ok
+test config_bundle::tests::test_config_bundle_reflects_admin_config_updates ... ok
+test config_bundle::tests::test_config_bundle_round_trips_through_client ... ok
+test config_bundle::tests::test_config_bundle_schema_matches_get_result_schema ... ok
+test config_bundle::tests::test_config_bundle_snapshot_matches_get_config_snapshot ... ok
+test config_bundle::tests::test_stranger_cannot_call_set_config_via_contract - should panic ... ok
+test config_freeze::tests::test_config_unfrozen_by_default ... ok
+test config_freeze::tests::test_freeze_and_query ... ok
+test config_freeze::tests::test_frozen_config_flag ... ok
+test config_freeze::tests::test_freeze_does_not_block_calculate_sla ... ok
+test config_freeze::tests::test_propose_admin_fails_when_frozen - should panic ... ok
+test config_freeze::tests::test_propose_operator_fails_when_frozen - should panic ... ok
+test config_freeze::tests::test_renounce_admin_fails_when_frozen - should panic ... ok
+test config_freeze::tests::test_set_config_fails_when_frozen - should panic ... ok
+test config_freeze::tests::test_stranger_cannot_set_config_when_unfrozen - should panic ... ok
+test config_freeze::tests::test_set_operator_fails_when_frozen - should panic ... ok
+test config_freeze::tests::test_unfreeze_restores_mutable_state ... ok
+test storage_estimation::tests::test_byte_constants_are_reasonable ... ok
+test config_freeze::tests::test_unfreeze_allows_set_config ... ok
+test storage_estimation::tests::test_storage_footprint_estimate_grows_with_history ... ok
+
+test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 751 filtered out; finished in 3.09s

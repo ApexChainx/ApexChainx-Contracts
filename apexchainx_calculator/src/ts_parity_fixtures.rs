@@ -386,8 +386,16 @@ fn render_constants_module(
     }
     out.push_str("} as const;\n\n");
 
-    out.push_str("/** Schema version carried in topic position 2 of every event. */\n");
-    out.push_str("export const EVENT_VERSION = \"v1\";\n");
+    out.push_str("/** Global ABI version; dispatch events using EVENT_VERSIONS[name]. */\n");
+    out.push_str(&format!(
+        "export const EVENT_VERSION = \"v{}\";\n",
+        crate::event_schema::EVENT_ABI_GENERATION
+    ));
+    out.push_str("export const EVENT_VERSIONS = {\n");
+    for (name, _, version, _) in crate::event_schema::EVENT_SCHEMAS {
+        out.push_str(&format!("  \"{}\": \"v{}\",\n", name, version));
+    }
+    out.push_str("} as const;\n");
     out
 }
 
@@ -678,7 +686,19 @@ fn generate_ts_parity_fixtures() {
         ("constants", constants),
         ("symbols", symbols),
         ("eventTopics", event_topics),
-        ("eventVersion", json_string("v1")),
+        (
+            "eventVersion",
+            json_string(&format!("v{}", crate::event_schema::EVENT_ABI_GENERATION)),
+        ),
+        (
+            "eventVersions",
+            json_object(
+                &crate::event_schema::EVENT_SCHEMAS
+                    .iter()
+                    .map(|(name, _, version, _)| (*name, json_string(&format!("v{}", version))))
+                    .collect::<StdVec<_>>(),
+            ),
+        ),
         ("configSnapshot", config_snapshot),
         ("history", json_array(&history_entries)),
         ("paginationCases", json_array(&pagination_cases)),
@@ -700,4 +720,148 @@ fn generate_ts_parity_fixtures() {
         &ts_path(&["generated", "contractConstants.ts"]),
         &render_constants_module(client.get_retention_limit(), &symbol_pairs, &topic_pairs),
     );
+}
+
+/// Explicit parity inventory. New methods MUST add a fixture target or a reviewed skip.
+/// Skips are counted, not silently treated as behavioral coverage (#678).
+const PARITY_METHOD_COVERAGE: &[(&str, &str, &str)] = &[
+    ("accept_admin", "skip", "No TS governance/configuration mutation mirror for accept_admin."),
+    ("accept_operator", "skip", "No TS governance/configuration mutation mirror for accept_operator."),
+    ("calculate_sla", "skip", "Used to seed fixtures; full mutation/auth/event parity is not mirrored in TS."),
+    ("calculate_sla_view", "skip", "Pure calculation has separate golden-vector tests; no TS read-fixture target yet."),
+    ("cancel_admin_proposal", "skip", "No TS governance/configuration mutation mirror for cancel_admin_proposal."),
+    ("cancel_operator_proposal", "skip", "No TS governance/configuration mutation mirror for cancel_operator_proposal."),
+    ("freeze_config", "skip", "No TS governance/configuration mutation mirror for freeze_config."),
+    ("get_admin", "skip", "No TS read-semantics fixture for get_admin; Rust contract tests remain the current coverage."),
+    ("get_config", "skip", "No TS read-semantics fixture for get_config; Rust contract tests remain the current coverage."),
+    ("get_config_bundle", "skip", "No TS read-semantics fixture for get_config_bundle; Rust contract tests remain the current coverage."),
+    ("get_config_count", "skip", "No TS read-semantics fixture for get_config_count; Rust contract tests remain the current coverage."),
+    ("get_config_snapshot", "fixture", "configSnapshot"),
+    ("get_config_snapshot_by_version", "skip", "Historical snapshot lookup has no TS behavioral mirror."),
+    ("get_config_version_hash", "fixture", "configSnapshot"),
+    ("get_contract_info", "skip", "No TS read-semantics fixture for get_contract_info; Rust contract tests remain the current coverage."),
+    ("get_contract_metadata", "skip", "No TS read-semantics fixture for get_contract_metadata; Rust contract tests remain the current coverage."),
+    ("get_contract_state_fingerprint", "skip", "No TS read-semantics fixture for get_contract_state_fingerprint; Rust contract tests remain the current coverage."),
+    ("get_custom_config_snapshot", "skip", "No TS read-semantics fixture for get_custom_config_snapshot; Rust contract tests remain the current coverage."),
+    ("get_custom_severity", "skip", "No TS read-semantics fixture for get_custom_severity; Rust contract tests remain the current coverage."),
+    ("get_economic_exposure", "skip", "No TS read-semantics fixture for get_economic_exposure; Rust contract tests remain the current coverage."),
+    ("get_failure_schema", "skip", "No TS read-semantics fixture for get_failure_schema; Rust contract tests remain the current coverage."),
+    ("get_full_audit_state", "skip", "No TS read-semantics fixture for get_full_audit_state; Rust contract tests remain the current coverage."),
+    ("get_history", "skip", "Full-history reads have no TS behavioral mirror; pagination is covered."),
+    ("get_history_by_outage", "fixture", "byOutageCases"),
+    ("get_history_page", "fixture", "history"),
+    ("get_history_page_with_meta", "fixture", "paginationCases"),
+    ("get_last_config_update", "skip", "No TS read-semantics fixture for get_last_config_update; Rust contract tests remain the current coverage."),
+    ("get_latest_by_outage", "fixture", "byOutageCases"),
+    ("get_migration_state", "skip", "No TS read-semantics fixture for get_migration_state; Rust contract tests remain the current coverage."),
+    ("get_operator", "skip", "No TS read-semantics fixture for get_operator; Rust contract tests remain the current coverage."),
+    ("get_pause_info", "skip", "No TS read-semantics fixture for get_pause_info; Rust contract tests remain the current coverage."),
+    ("get_pending_admin", "skip", "No TS read-semantics fixture for get_pending_admin; Rust contract tests remain the current coverage."),
+    ("get_pending_operator", "skip", "No TS read-semantics fixture for get_pending_operator; Rust contract tests remain the current coverage."),
+    ("get_public_api", "skip", "Covered by manifest reconciliation; no TS behavioral mirror."),
+    ("get_rent_estimate", "skip", "No TS read-semantics fixture for get_rent_estimate; Rust contract tests remain the current coverage."),
+    ("get_result_schema", "skip", "No TS read-semantics fixture for get_result_schema; Rust contract tests remain the current coverage."),
+    ("get_retention_limit", "fixture", "constants"),
+    ("get_severity_telemetry", "skip", "No TS read-semantics fixture for get_severity_telemetry; Rust contract tests remain the current coverage."),
+    ("get_stats", "skip", "No TS read-semantics fixture for get_stats; Rust contract tests remain the current coverage."),
+    ("get_storage_footprint_estimate", "skip", "No TS read-semantics fixture for get_storage_footprint_estimate; Rust contract tests remain the current coverage."),
+    ("get_storage_version", "skip", "No TS read-semantics fixture for get_storage_version; Rust contract tests remain the current coverage."),
+    ("get_version_info", "skip", "No TS read-semantics fixture for get_version_info; Rust contract tests remain the current coverage."),
+    ("get_version_negotiation_info", "skip", "No TS read-semantics fixture for get_version_negotiation_info; Rust contract tests remain the current coverage."),
+    ("healthcheck", "skip", "No TS read-semantics fixture for healthcheck; Rust contract tests remain the current coverage."),
+    ("initialize", "skip", "Fixture setup only; no TS lifecycle implementation."),
+    ("is_config_frozen", "skip", "No TS read-semantics fixture for is_config_frozen; Rust contract tests remain the current coverage."),
+    ("is_paused", "skip", "No TS read-semantics fixture for is_paused; Rust contract tests remain the current coverage."),
+    ("list_configs", "skip", "No TS read-semantics fixture for list_configs; Rust contract tests remain the current coverage."),
+    ("migrate", "skip", "No TS governance/configuration mutation mirror for migrate."),
+    ("pause", "skip", "No TS governance/configuration mutation mirror for pause."),
+    ("propose_admin", "skip", "No TS governance/configuration mutation mirror for propose_admin."),
+    ("propose_operator", "skip", "No TS governance/configuration mutation mirror for propose_operator."),
+    ("prune_history", "skip", "No TS governance/configuration mutation mirror for prune_history."),
+    ("prune_history_by_age", "fixture", "pruneByAgeCases"),
+    ("remove_custom_severity", "skip", "No TS governance/configuration mutation mirror for remove_custom_severity."),
+    ("renounce_admin", "skip", "No TS governance/configuration mutation mirror for renounce_admin."),
+    ("replay_calculate_sla", "skip", "Replay behavior is not yet represented in the TS fixture generator."),
+    ("set_config", "skip", "No TS governance/configuration mutation mirror for set_config."),
+    ("set_custom_severity", "skip", "No TS governance/configuration mutation mirror for set_custom_severity."),
+    ("set_operator", "skip", "No TS governance/configuration mutation mirror for set_operator."),
+    ("set_retention_limit", "skip", "No TS governance/configuration mutation mirror for set_retention_limit."),
+    ("unfreeze_config", "skip", "No TS governance/configuration mutation mirror for unfreeze_config."),
+    ("unpause", "skip", "No TS governance/configuration mutation mirror for unpause."),
+];
+
+#[test]
+fn parity_manifest_has_no_unaccounted_methods() {
+    let mut env = Env::default();
+    env.set_config(EnvTestConfig {
+        capture_snapshot_at_drop: false,
+    });
+    env.mock_all_auths();
+    let id = env.register_contract(None, SLACalculatorContract);
+    let client = SLACalculatorContractClient::new(&env, &id);
+    client.initialize(&Address::generate(&env), &Address::generate(&env));
+    let manifest = client.get_public_api();
+    assert_eq!(manifest.methods.len() as usize, PARITY_METHOD_COVERAGE.len());
+    for method in manifest.methods.iter() {
+        let matches = PARITY_METHOD_COVERAGE
+            .iter()
+            .filter(|(name, _, _)| method.name == Symbol::new(&env, name))
+            .count();
+        assert_eq!(
+            matches, 1,
+            "every manifest method needs exactly one coverage entry"
+        );
+    }
+    let skipped = PARITY_METHOD_COVERAGE
+        .iter()
+        .filter(|(_, mode, _)| *mode == "skip")
+        .count();
+    std::println!(
+        "Parity coverage: {} methods, {} fixture targets, {} explicit skips",
+        PARITY_METHOD_COVERAGE.len(),
+        PARITY_METHOD_COVERAGE.len() - skipped,
+        skipped
+    );
+}
+
+#[test]
+fn event_abi_v2_migration_preserves_v3_v4_history_and_is_idempotent() {
+    for source_version in [3u32, 4u32] {
+        let mut env = Env::default();
+        env.set_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        });
+        env.mock_all_auths();
+        let id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("migrate"),
+            &symbol_short!("critical"),
+            &5,
+        );
+        if source_version == 4 {
+            client.set_config(&admin, &symbol_short!("critical"), &16, &100, &500);
+        }
+        let metadata_before = client.get_last_config_update();
+        let before = client.get_history_page(&0, &10);
+        env.as_contract(&id, || {
+            env.storage()
+                .instance()
+                .set(&crate::STORAGE_VERSION_KEY, &source_version);
+        });
+        client.migrate(&admin);
+        assert_eq!(client.get_storage_version(), crate::STORAGE_VERSION);
+        assert_eq!(client.get_last_config_update(), metadata_before);
+        assert_eq!(client.get_history_page(&0, &10), before);
+        client.migrate(&admin);
+        assert_eq!(client.get_history_page(&0, &10), before);
+        assert_eq!(
+            client.get_result_schema().schema_version,
+            crate::RESULT_SCHEMA_VERSION
+        );
+    }
 }

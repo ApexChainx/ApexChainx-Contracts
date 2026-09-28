@@ -301,8 +301,8 @@ mod tests {
             + BYTES_LAST_CALC_TS_KEY
             + BYTES_LAST_VIOL_TS_KEY
             + BYTES_STORAGE_VERSION_KEY
-            + BYTES_CFGCNT_KEY
             + BYTES_HISTORY_META_BASE
+            + BYTES_CFGCNT_KEY
             + BYTES_CUSTOM_CONFIG_KEY_BASE;
         assert_eq!(
             initial_footprint, expected_initial,

@@ -14,7 +14,7 @@ mod topic_stability_tests {
     #![allow(clippy::module_inception, clippy::len_zero)]
     use crate::{
         SLACalculatorContract, SLACalculatorContractClient, EVENT_CONFIG_UPD, EVENT_PAUSED,
-        EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED, EVENT_VERSION,
+        EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED,
     };
     use soroban_sdk::{
         symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
@@ -79,7 +79,11 @@ mod topic_stability_tests {
         let _context = topics.get(2).unwrap();
 
         assert_eq!(name, expected_name, "topic[0] must be the event name");
-        assert_eq!(version, EVENT_VERSION, "topic[1] must be the event version v1");
+        assert_eq!(
+            version,
+            crate::event_schema::event_version(name),
+            "topic[1] must match the event name"
+        );
     }
 
     // ── sla_calc topic stability ────────────────────────────────────────
@@ -228,7 +232,11 @@ mod topic_stability_tests {
             let (_, topics, _) = events.get(i).unwrap();
             if topics.len() >= 2 {
                 let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
-                assert_eq!(version, EVENT_VERSION, "topic[1] must always be event version v1");
+                assert_eq!(
+                    version,
+                    crate::event_schema::event_version(topics.get(0).unwrap().try_into_val(&env).unwrap()),
+                    "topic[1] must match the per-name schema"
+                );
             }
         }
     }

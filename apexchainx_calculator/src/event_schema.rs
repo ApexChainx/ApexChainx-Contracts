@@ -5,7 +5,7 @@
 //!
 //! Topic layout (3 topics):
 //!   topic[0] = event name (Symbol constant)
-//!   topic[1] = event version ("v1")
+//!   topic[1] = per-name schema version (see EVENT_SCHEMAS)
 //!   topic[2] = event-specific context (severity, caller address, etc.)
 //!
 //! Payload field ordering and types are documented below per event variant.
@@ -36,6 +36,8 @@
 //!
 //! ## set_int (`set_int`)
 //! Settlement intent emitted alongside sla_calc for backend reconciliation.
+//! Per-name v2 uses the ledger-bound correlation encoding documented in
+//! `docs/EVENT_VERSION_MIGRATION.md`; historical v1 uses the earlier encoding.
 //! Carries the full decision (including `mttr_minutes`, `threshold_minutes`,
 //! and `rating`) so a settlement-only consumer can reconstruct the SLA
 //! decision without a follow-up read (#428).
@@ -50,18 +52,19 @@
 //! `event_correlation::generate_correlation_id`'s output for the (outage_id,
 //! ledger sequence) pair of the emitting calculation, so a backend can join
 //! the `set_int` to its originating calculation deterministically. It is the
-//! only decision event that carries the id — `sla_calc` and `dup_input` stay
-//! at nine fields. (`#565`)
+//! only decision event that carries the id — `sla_calc` has nine fields; `dup_input` appends two attempted-input fields. (`#565`)
 //!
 //! ## dup_input (`dup_input`)
 //! Emitted when `calculate_sla` rejects a conflicting duplicate `outage_id`
 //! (the `DuplicateOutageInput` error path). Carries the previously stored
 //! `SLAResult` so consumers can reconcile the rejection without a separate
-//! `get_latest_by_outage` read. (#385)
+//! `get_latest_by_outage` read. It is a failed-call diagnostic, not a committed
+//! event: consumers must inspect the failed-call flag. (#385)
 //! - topic[2]: severity Symbol
 //! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
 //!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
-//!   rating: Symbol, config_version_hash: u64, recorded_at: u64)
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64,
+//!   attempted_mttr: u32, attempted_threshold: u32)
 //!
 //! ## cfg_upd (`cfg_upd`)
 //! Emitted on every successful `set_config` call.
@@ -263,36 +266,34 @@
 
 use soroban_sdk::{symbol_short, Symbol};
 
-/// Canonical event version symbol used by all events.
-pub const EVENT_VERSION: Symbol = symbol_short!("v1");
+/// Global event ABI generation symbol; topic[1] uses event_version(name).
+pub const EVENT_VERSION: Symbol = symbol_short!("v2");
 
 /// 1-based event-ABI generation number for the current `EVENT_VERSION`.
 ///
 /// This is the mechanical index that ties the event symbol to the rest of the
 /// contract's version posture. Generation 1 corresponds to `"v1"`; a breaking
-/// event change MUST bump `EVENT_VERSION` to `"v2"` **and** this constant to
-/// `2` in the same commit (the two can never diverge). Removals/removals of
+/// event change MUST advance `EVENT_VERSION` and this generation together. Removals/removals of
 /// event fields are tracked by generation, not by the symbol string, so the
 /// co-bump rules in `contract_info.rs` and `docs/UPGRADE_PLAYBOOK.md` can be
 /// enforced numerically instead of by parsing symbols. (#497)
-pub const EVENT_ABI_GENERATION: u32 = 1;
+pub const EVENT_ABI_GENERATION: u32 = 2;
 
-/// Required minimum `STORAGE_VERSION` / `RESULT_SCHEMA_VERSION` for each event
-/// ABI generation. Indexed by `EVENT_ABI_GENERATION - 1`.
+/// Required minimum result schema per global event ABI generation (index g - 1).
+/// Storage has its own table because its versions advance independently.
 ///
-/// A release that bumps the event ABI to generation `g` MUST also ship a
-/// storage schema and result schema at least the value in this table for index
-/// `g - 1`. In other words, a breaking event change can never ride along on an
-/// unchanged `STORAGE_VERSION`/`RESULT_SCHEMA_VERSION`:
+/// | event ABI | result schema | storage schema |
+/// |-----------|---------------|----------------|
+/// | v1        | 1             | 1              |
+/// | v2        | 2             | 4              |
 ///
-/// | `EVENT_VERSION` | generation | required schema version |
-/// |-----------------|------------|-------------------------|
-/// | `"v1"`          | `1`        | `1`                     |
-/// | `"v2"`          | `2`        | `2`                     |
-///
-/// The enforcement test `test_event_abi_cobump_invariant` in `contract_info.rs`
-/// fails CI if the current generation's requirement is not met. (#497)
+/// `test_event_abi_cobump_invariant` enforces both dimensions (#497).
 pub const EVENT_ABI_TO_SCHEMA_VERSION: &[u32] = &[1, 2];
+
+/// Storage requirements are independent of result schema numbers: storage was
+/// already v3 before event ABI generation 2, so requiring merely v2 would not
+/// enforce a storage co-bump. Generation 2 must acknowledge storage v5 (#497).
+pub const EVENT_ABI_TO_STORAGE_VERSION: &[u32] = &[1, 5];
 
 /// Event name constants — these form topic[0] of every event.
 pub const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
@@ -340,7 +341,55 @@ pub const EVENT_DUP_INPUT: Symbol = symbol_short!("dup_input");
 /// limit like every sibling event-name constant (#573).
 pub const EVENT_MIGRATE_DONE: Symbol = symbol_short!("mig_done");
 
-/// Returns the canonical event version string for consumer documentation.
+/// Per-name schema registry: (wire name, topic symbol, version, last changed ABI generation).
+/// A breaking per-name bump must also advance the global ABI and schema policy (#497).
+/// Unchanged events retain v1 even when the global ABI advances.
+pub const EVENT_SCHEMAS: &[(&str, Symbol, u32, u32)] = &[
+    ("sla_calc", EVENT_SLA_CALC, 1, 1),
+    ("set_int", EVENT_SETTLE_INTENT, 2, 2),
+    ("cfg_upd", EVENT_CONFIG_UPD, 1, 1),
+    ("cfg_rem", EVENT_CONFIG_REM, 1, 1),
+    ("sev_add", EVENT_SEV_ADD, 1, 1),
+    ("sev_upd", EVENT_SEV_UPD, 1, 1),
+    ("paused", EVENT_PAUSED, 1, 1),
+    ("unpause", EVENT_UNPAUSED, 1, 1),
+    ("op_set", EVENT_OP_SET, 1, 1),
+    ("pruned", EVENT_PRUNED, 1, 1),
+    ("pruned_a", EVENT_PRUNED_AGE, 1, 1),
+    ("adm_prop", EVENT_ADMIN_PROP, 1, 1),
+    ("adm_acc", EVENT_ADMIN_ACC, 1, 1),
+    ("adm_can", EVENT_ADMIN_CAN, 1, 1),
+    ("adm_ren", EVENT_ADMIN_REN, 1, 1),
+    ("op_prop", EVENT_OP_PROP, 1, 1),
+    ("op_acc", EVENT_OP_ACC, 1, 1),
+    ("op_can", EVENT_OP_CAN, 1, 1),
+    ("adm_sup", EVENT_ADMIN_SUP, 1, 1),
+    ("adm_xp", EVENT_ADMIN_XP, 1, 1),
+    ("op_sup", EVENT_OP_SUP, 1, 1),
+    ("op_xp", EVENT_OP_XP, 1, 1),
+    ("cfg_frz", EVENT_CONFIG_FREEZE, 1, 1),
+    ("cfg_unfrz", EVENT_CONFIG_UNFREEZE, 1, 1),
+    ("stats_sat", EVENT_STATS_SAT, 1, 1),
+    ("dup_input", EVENT_DUP_INPUT, 1, 1),
+    ("mig_done", EVENT_MIGRATE_DONE, 1, 1),
+    ("ret_lim", crate::EVENT_RET_LIM, 1, 1),
+];
+
+/// Look up a known name. Unknown names fail closed instead of inheriting a global version.
+pub fn event_version(name: Symbol) -> Symbol {
+    for (_, event, version, _) in EVENT_SCHEMAS {
+        if *event == name {
+            return match version {
+                1 => symbol_short!("v1"),
+                2 => symbol_short!("v2"),
+                _ => panic!("unsupported per-event version"),
+            };
+        }
+    }
+    panic!("unknown event name")
+}
+
+/// Returns the global event ABI symbol for version negotiation.
 pub fn current_event_version() -> Symbol {
     EVENT_VERSION
 }
@@ -358,7 +407,7 @@ mod tests {
 
     #[test]
     fn test_event_version_is_stable() {
-        assert_eq!(current_event_version(), symbol_short!("v1"));
+        assert_eq!(current_event_version(), symbol_short!("v2"));
     }
 
     #[test]
@@ -370,8 +419,25 @@ mod tests {
             EVENT_ABI_GENERATION
         );
         // Generation 1 is always "v1".
-        assert_eq!(EVENT_ABI_GENERATION, 1);
-        assert_eq!(current_event_version(), symbol_short!("v1"));
+        assert_eq!(EVENT_ABI_GENERATION, 2);
+        assert_eq!(current_event_version(), symbol_short!("v2"));
+    }
+
+    #[test]
+    fn per_name_versions_are_independent_and_cobumped() {
+        assert_eq!(event_version(EVENT_SETTLE_INTENT), symbol_short!("v2"));
+        assert_eq!(event_version(EVENT_PAUSED), symbol_short!("v1"));
+        for (name, symbol, version, generation) in EVENT_SCHEMAS {
+            assert!(*version >= 1 && *generation <= EVENT_ABI_GENERATION);
+            assert!(*generation >= *version, "{} version escaped ABI co-bump", name);
+            assert_eq!(*symbol, Symbol::new(&soroban_sdk::Env::default(), name));
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown event name")]
+    fn unknown_names_do_not_inherit_a_version() {
+        event_version(symbol_short!("unknown"));
     }
 
     #[test]
@@ -506,7 +572,7 @@ mod tests {
             let prev_is_word = text
                 .as_bytes()
                 .get(idx.wrapping_sub(1))
-                .map_or(false, |b| b.is_ascii_alphanumeric() || *b == b'_');
+                .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
             if prev_is_word {
                 continue; // "constant", "const_" etc., not a `const` declaration
             }
@@ -573,7 +639,7 @@ mod tests {
     /// site that reaches an `EVENT_*` constant missing from
     /// [`EMIT_SITE_CATALOG`] fails this test.
     ///
-    /// `EVENT_VERSION` is the shared topic[1] constant, not an event name, and
+    /// `EVENT_VERSION` is global ABI metadata, not an event name, and
     /// is deliberately excluded; prose tokens that are not declared `const`s
     /// are ignored.
     #[test]

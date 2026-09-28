@@ -1,11 +1,5 @@
 //! History storage: sharded per-entry layout with a per-outage index (v3).
 //!
-//! This module is the **single implementation** of every history concern the
-//! contract exposes (`get_history`, pagination, per-outage lookup, retention
-//! limit, pruning). [`crate::SLACalculatorContract`] delegates its history
-//! methods here so there is no second copy that can drift (#563); fuzz and
-//! parity targets therefore exercise exactly the code the contract runs.
-//!
 //! Since v3 (#580/#581/#582) the SLA history is no longer a single `Vec`
 //! stored under one instance-storage key (which forced a full-vector rewrite
 //! on every append and a full scan for every outage lookup). Instead:
@@ -32,8 +26,8 @@
 use soroban_sdk::{Address, Env, Symbol, Vec};
 
 use crate::{
-    HistoryPage, SLAError, SLAResult, HISTORY_LEN_KEY, HIST_ENTRY_KEY, HIST_HEAD_KEY, HIST_INDEX_KEY,
-    HIST_TAIL_KEY, MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
+    HistoryPage, SLAError, SLAResult, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_RET_LIM, HISTORY_LEN_KEY,
+    HIST_ENTRY_KEY, HIST_HEAD_KEY, HIST_INDEX_KEY, HIST_TAIL_KEY, MAX_HISTORY_SIZE, RETENTION_LIMIT_KEY,
 };
 
 /// Upper bound on the number of entries a single pagination call may return.
@@ -222,105 +216,6 @@ pub fn prune_oldest(env: &Env, keep_count: u32) -> u32 {
     kept_from.saturating_sub(h)
 }
 
-/// Returns a bounded page of history entries.
-///
-/// Encapsulates the pagination policy defined in
-/// `docs/HISTORY_PAGINATION_POLICY.md`:
-///
-/// - `limit` is clamped to [`MAX_PAGE_SIZE`].
-/// - `offset >= len` (or `limit == 0`) yields an empty page — the canonical
-///   end-of-history signal.
-/// - The interior `offset + limit` computation uses saturating arithmetic so
-///   extreme `u32` inputs can never wrap into a wrong slice.
-///
-/// Issue #563: this is the single implementation of the slicing policy —
-/// `SLACalculatorContract`'s contract method delegates here instead of
-/// duplicating it, so the two can no longer drift apart.
-pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
-    crate::SLACalculatorContract::check_version(env)?;
-    let (head, tail) = (head(env), tail(env));
-    let total = tail.saturating_sub(head);
-    let limit = limit.min(MAX_PAGE_SIZE);
-    if offset >= total || limit == 0 {
-        return Ok(Vec::new(env));
-    }
-    // Clamp the end index with saturating arithmetic so extreme u32 inputs
-    // cannot wrap into a wrong slice.
-    let end_rel = offset.saturating_add(limit).min(total);
-    Ok(read_range(env, head + offset, end_rel - offset))
-}
-
-/// Returns a bounded page of history entries together with pagination
-/// metadata.
-///
-/// This is a metadata-carrying companion to [`get_history_page`]. The `items`
-/// slice is identical to what [`get_history_page`] returns for the same
-/// `(offset, limit)`; `total` is the full history length and `has_more` is
-/// `true` when the requested range ends before the end of history **and**
-/// `limit > 0`. When `limit == 0`, `has_more` is `false` (empty page signals
-/// end-of-history).
-///
-/// Pagination semantics (offset-based, oldest-first, saturating
-/// `offset + limit`, empty page when `offset >= len` or `limit == 0`) are
-/// identical to [`get_history_page`] — see
-/// `docs/HISTORY_PAGINATION_POLICY.md`.
-pub fn get_history_page_with_meta(env: &Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
-    crate::SLACalculatorContract::check_version(env)?;
-    let (head, tail) = (head(env), tail(env));
-    let total = tail.saturating_sub(head);
-    let limit = limit.min(MAX_PAGE_SIZE);
-
-    // The number of indices read is exactly the page width — no full-history
-    // traversal.
-    let mut items = Vec::new(env);
-    let end_rel = if offset < total && limit != 0 {
-        let end_rel = offset.saturating_add(limit).min(total);
-        items = read_range(env, head + offset, end_rel - offset);
-        end_rel
-    } else {
-        offset.min(total)
-    };
-
-    // `has_more` is true when the requested range stops before the end of
-    // history and limit > 0. When limit == 0, the empty page signals
-    // end-of-history per docs/HISTORY_PAGINATION_POLICY.md.
-    let has_more = if limit == 0 { false } else { end_rel < total };
-    Ok(HistoryPage {
-        items,
-        total,
-        has_more,
-    })
-}
-
-/// Sets the retention limit for history entries. Admin only.
-///
-/// The new limit is persisted immediately and the retained history is trimmed
-/// to it in the same call by the caller via [`prune_oldest`] (a `pruned` event
-/// is emitted when entries are dropped). Rejected while the configuration is
-/// frozen.
-pub fn set_retention_limit(env: &Env, caller: &Address, limit: u32) -> Result<(), SLAError> {
-    crate::SLACalculatorContract::check_version(env)?;
-    crate::SLACalculatorContract::require_admin(env, caller)?;
-    crate::SLACalculatorContract::require_not_frozen(env)?;
-    if limit == 0 || limit > MAX_HISTORY_SIZE {
-        return Err(SLAError::RetentionLimitOutOfRange);
-    }
-    env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
-    env.events()
-        .publish((crate::EVENT_RET_LIM, crate::EVENT_VERSION, caller.clone()), (limit,));
-    // Trim the oldest entries down to the new limit in place — survivors keep
-    // their absolute indices, so only the dropped range is rewritten
-    // (O(dropped) writes) rather than a full retained-set sweep (#582).
-    let remove_count = prune_oldest(env, limit);
-    if remove_count > 0 {
-        env.events().publish(
-            (crate::EVENT_PRUNED, crate::EVENT_VERSION, caller),
-            (remove_count, limit),
-        );
-    }
-    Ok(())
-}
-
 /// Rebuilds the whole sharded history from `entries` (oldest-first), keeping
 /// index keys consistent with the new set.
 ///
@@ -386,4 +281,182 @@ pub fn rebuild_history(env: &Env, entries: &Vec<SLAResult>) {
 /// migration is idempotent (#580/#581/#582).
 pub fn migrate_to_sharded(env: &Env, legacy: &Vec<SLAResult>) {
     rebuild_history(env, legacy);
+}
+
+/// Checked history accessor shared with the contract entrypoint.
+pub fn get_history(env: &Env) -> Result<Vec<SLAResult>, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    Ok(read_all_entries(env))
+}
+
+/// Checked history accessor shared with the contract entrypoint.
+pub fn prune_history(env: &Env, caller: &Address, keep_latest: u32) -> Result<(), SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    crate::SLACalculatorContract::require_admin(env, caller)?;
+
+    let remove_count = prune_oldest(env, keep_latest);
+    env.events().publish(
+        (
+            EVENT_PRUNED,
+            crate::event_schema::event_version(EVENT_PRUNED),
+            caller,
+        ),
+        (remove_count, keep_latest),
+    );
+    Ok(())
+}
+
+/// Checked history accessor shared with the contract entrypoint.
+pub fn prune_history_by_age(env: &Env, caller: &Address, min_age_seconds: u64) -> Result<(), SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    crate::SLACalculatorContract::require_admin(env, caller)?;
+
+    let now = env.ledger().timestamp();
+    if min_age_seconds >= now {
+        return Err(SLAError::InvalidInput);
+    }
+    let cutoff = now.saturating_sub(min_age_seconds);
+
+    let history = read_all_entries(env);
+
+    let mut new_history = Vec::new(env);
+    let mut removed: u32 = 0;
+
+    for i in 0..history.len() {
+        let entry = history.get(i).unwrap();
+        // Keep entries that are recent enough
+        if entry.recorded_at >= cutoff {
+            new_history.push_back(entry);
+        } else {
+            removed += 1;
+        }
+    }
+
+    if removed > 0 {
+        rebuild_history(env, &new_history);
+    }
+    let kept = new_history.len();
+    env.events().publish(
+        (
+            EVENT_PRUNED_AGE,
+            crate::event_schema::event_version(EVENT_PRUNED_AGE),
+            caller,
+        ),
+        (removed, kept),
+    );
+
+    Ok(())
+}
+
+/// Checked history accessor shared with the contract entrypoint.
+pub fn get_history_page(env: &Env, offset: u32, limit: u32) -> Result<Vec<SLAResult>, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    let (head, tail) = (head(env), tail(env));
+    let total = tail.saturating_sub(head);
+    let limit = limit.min(MAX_PAGE_SIZE);
+    if offset >= total || limit == 0 {
+        return Ok(Vec::new(env));
+    }
+    // Shadow compute_page_slice: clamp the end index with saturating
+    // arithmetic so extreme u32 inputs cannot wrap into a wrong slice.
+    let end_rel = offset.saturating_add(limit).min(total);
+    Ok(read_range(env, head + offset, end_rel - offset))
+}
+
+/// Checked history accessor shared with the contract entrypoint.
+pub fn get_history_page_with_meta(env: &Env, offset: u32, limit: u32) -> Result<HistoryPage, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    let (head, tail) = (head(env), tail(env));
+    let total = tail.saturating_sub(head);
+    let limit = limit.min(MAX_PAGE_SIZE);
+
+    // Header comment documents offset/limit semantics; the number of
+    // indices read is exactly the page width — no full-history traversal.
+    let mut items = Vec::new(env);
+    let end_rel = if offset < total && limit != 0 {
+        let end_rel = offset.saturating_add(limit).min(total);
+        items = read_range(env, head + offset, end_rel - offset);
+        end_rel
+    } else {
+        offset.min(total)
+    };
+
+    // `has_more` is true when the requested range stops before the end of
+    // history and limit > 0. When limit == 0, the empty page signals
+    // end-of-history per docs/HISTORY_PAGINATION_POLICY.md.
+    let has_more = if limit == 0 { false } else { end_rel < total };
+    Ok(HistoryPage {
+        items,
+        total,
+        has_more,
+    })
+}
+
+/// Checked history accessor shared with the contract entrypoint.
+pub fn get_history_by_outage(env: &Env, outage_id: Symbol) -> Result<Vec<SLAResult>, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    // Read only the outage's index subset instead of scanning the whole
+    // retained history (#581): cost is proportional to the matching entries.
+    Ok(entries_for_outage(env, &outage_id))
+}
+
+/// Checked history accessor shared with the contract entrypoint.
+pub fn get_latest_by_outage(env: &Env, outage_id: Symbol) -> Result<Option<SLAResult>, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    // The per-outage index stores the newest index last, so this reads a
+    // single entry instead of scanning the whole retained history (#581).
+    Ok(latest_for_outage(env, &outage_id))
+}
+
+/// Checked history accessor shared with the contract entrypoint.
+pub fn set_retention_limit(env: &Env, caller: &Address, limit: u32) -> Result<(), SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    crate::SLACalculatorContract::require_admin(env, caller)?;
+    crate::SLACalculatorContract::require_not_frozen(env)?;
+    if limit == 0 || limit > MAX_HISTORY_SIZE {
+        return Err(SLAError::RetentionLimitOutOfRange);
+    }
+    env.storage().instance().set(&RETENTION_LIMIT_KEY, &limit);
+    env.events().publish(
+        (
+            EVENT_RET_LIM,
+            crate::event_schema::event_version(EVENT_RET_LIM),
+            caller.clone(),
+        ),
+        (limit,),
+    );
+    // Trim the oldest entries down to the new limit in place — survivors
+    // keep their absolute indices, so only the dropped range is rewritten
+    // (O(dropped) writes) rather than a full retained-set sweep (#582).
+    let remove_count = prune_oldest(env, limit);
+    if remove_count > 0 {
+        env.events().publish(
+            (
+                EVENT_PRUNED,
+                crate::event_schema::event_version(EVENT_PRUNED),
+                caller,
+            ),
+            (remove_count, limit),
+        );
+    }
+    Ok(())
+}
+
+/// Cached configuration count, maintained alongside the source config map.
+pub fn get_config_count(env: &Env) -> Result<u32, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    env.storage()
+        .instance()
+        .get(&crate::CONFIG_COUNT_KEY)
+        .ok_or(SLAError::NotInitialized)
+}
+
+/// Current retention limit, defaulting to the contract maximum.
+pub fn get_retention_limit(env: &Env) -> Result<u32, SLAError> {
+    crate::SLACalculatorContract::check_version(env)?;
+    Ok(env
+        .storage()
+        .instance()
+        .get(&RETENTION_LIMIT_KEY)
+        .unwrap_or(MAX_HISTORY_SIZE))
 }

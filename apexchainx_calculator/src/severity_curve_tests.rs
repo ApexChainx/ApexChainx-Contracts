@@ -31,7 +31,14 @@ mod severity_curve_tests {
         client.set_config(admin, &symbol_short!("critical"), &60, &50, &500);
     }
 
-    fn accepts(client: &SLACalculatorContractClient<'_>, admin: &Address, sev: Symbol, t: u32, p: i128, r: i128) {
+    fn accepts(
+        client: &SLACalculatorContractClient<'_>,
+        admin: &Address,
+        sev: Symbol,
+        t: u32,
+        p: i128,
+        r: i128,
+    ) {
         assert_eq!(
             client.try_set_config(admin, &sev, &t, &p, &r).map(|_| ()),
             Ok(()),
@@ -43,7 +50,14 @@ mod severity_curve_tests {
         );
     }
 
-    fn rejects(client: &SLACalculatorContractClient<'_>, admin: &Address, sev: Symbol, t: u32, p: i128, r: i128) {
+    fn rejects(
+        client: &SLACalculatorContractClient<'_>,
+        admin: &Address,
+        sev: Symbol,
+        t: u32,
+        p: i128,
+        r: i128,
+    ) {
         assert!(
             client.try_set_config(admin, &sev, &t, &p, &r).is_err(),
             "expected reject for boundary ({:?}_{}_{}_{})",
@@ -163,7 +177,7 @@ mod severity_curve_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
         seed_baseline(&client, &admin); // crit 60, high 120, medium 240, low 1440
-        // In-order edges.
+                                        // In-order edges.
         accepts(&client, &admin, symbol_short!("high"), 120, 25, 500);
         accepts(&client, &admin, symbol_short!("medium"), 240, 10, 500);
         accepts(&client, &admin, symbol_short!("low"), 1440, 10, 500);
@@ -178,14 +192,14 @@ mod severity_curve_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
         seed_baseline(&client, &admin); // crit 50, high 50, medium 10, low 10
-        // In-order edges.
+                                        // In-order edges.
         accepts(&client, &admin, symbol_short!("critical"), 60, 50, 500);
         accepts(&client, &admin, symbol_short!("medium"), 240, 50, 500);
         accepts(&client, &admin, symbol_short!("high"), 120, 50, 500);
         // Inversions are rejected.
         rejects(&client, &admin, symbol_short!("medium"), 240, 51, 500); // > high 50
         rejects(&client, &admin, symbol_short!("high"), 120, 51, 500); // > critical 50
-        // Low exemption: 60 exceeds medium (50) yet is within the low cap 100.
+                                                                       // Low exemption: 60 exceeds medium (50) yet is within the low cap 100.
         accepts(&client, &admin, symbol_short!("low"), 1440, 60, 500);
         // Critical must never drop below high.
         rejects(&client, &admin, symbol_short!("critical"), 60, 49, 500);

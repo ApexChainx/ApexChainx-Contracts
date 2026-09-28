@@ -270,12 +270,20 @@ mod tests {
         paused: bool,
         needs_mig: bool,
     ) -> VersionNegotiationInfo {
-        // Default schema/event dims match build_negotiation_info's
-        // (RESULT_SCHEMA_VERSION = 1, EVENT_VERSION = "v1").
-        let event_v1 = symbol_short!("v1");
-        make_info_full(name, protocol, storage, min_compat, paused, needs_mig, 1, &event_v1)
+        make_info_full(
+            name,
+            protocol,
+            storage,
+            min_compat,
+            paused,
+            needs_mig,
+            crate::RESULT_SCHEMA_VERSION,
+            &crate::event_schema::EVENT_VERSION,
+        )
     }
 
+    // Each argument pins an independent advertised handshake dimension.
+    #[allow(clippy::too_many_arguments)]
     fn make_info_full(
         name: &str,
         protocol: u32,
@@ -396,7 +404,16 @@ mod tests {
         let env = Env::default();
         let our = build_negotiation_info(1, 1, false); // storage 1
         let mut peers = Vec::new(&env);
-        let peer = make_info_full("pay_escro", 1, 2, 1, false, true, 1, &symbol_short!("v1"));
+        let peer = make_info_full(
+            "pay_escro",
+            1,
+            2,
+            1,
+            false,
+            true,
+            crate::RESULT_SCHEMA_VERSION,
+            &crate::event_schema::EVENT_VERSION,
+        );
         peers.push_back(peer);
 
         let result = negotiate_contract_versions(&env, &our, &peers);
@@ -415,15 +432,24 @@ mod tests {
         let env = Env::default();
         let our = build_negotiation_info(1, 1, false); // result schema 1
         let mut peers = Vec::new(&env);
-        peers.push_back(make_info_full("settle", 1, 1, 1, false, false, 2, &symbol_short!("v1")));
+        peers.push_back(make_info_full(
+            "settle",
+            1,
+            1,
+            1,
+            false,
+            false,
+            crate::RESULT_SCHEMA_VERSION + 1,
+            &crate::event_schema::EVENT_VERSION,
+        ));
 
         let result = negotiate_contract_versions(&env, &our, &peers);
         assert_eq!(result.outcome, NegotiationOutcome::Incompatible);
         let d = result.mismatches.get(0).unwrap();
         assert_eq!(d.contract_name, symbol_short!("settle"));
         assert_eq!(d.dimension, Symbol::new(&env, "result_schema"));
-        assert_eq!(d.reported_protocol, 2);
-        assert_eq!(d.required_min, 1);
+        assert_eq!(d.reported_protocol, crate::RESULT_SCHEMA_VERSION + 1);
+        assert_eq!(d.required_min, crate::RESULT_SCHEMA_VERSION);
     }
 
     #[test]
@@ -433,7 +459,16 @@ mod tests {
         let env = Env::default();
         let our = build_negotiation_info(1, 1, false); // event v1
         let mut peers = Vec::new(&env);
-        let peer = make_info_full("pay_escro", 1, 1, 1, false, false, 1, &symbol_short!("v2"));
+        let peer = make_info_full(
+            "pay_escro",
+            1,
+            1,
+            1,
+            false,
+            false,
+            crate::RESULT_SCHEMA_VERSION,
+            &symbol_short!("v1"),
+        );
         peers.push_back(peer);
 
         let result = negotiate_contract_versions(&env, &our, &peers);

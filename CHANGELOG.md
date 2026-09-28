@@ -8,6 +8,15 @@
 
 ## [Unreleased]
 
+- Breaking event ABI generation 2 (#675): topics carry per-name versions;
+  `set_int` advances to v2 while unchanged names retain v1. Storage v5 and
+  result schema v2 enforce the global breaking-change co-bump policy (#497).
+- Ledger-bound correlation IDs (#677): upper 32 bits store the ledger sequence,
+  lower 32 bits fingerprint the raw outage symbol. Same-ledger collisions remain
+  possible and are explicitly documented; see docs/EVENT_VERSION_MIGRATION.md.
+- Manifest parity coverage (#678): every public method requires a fixture or an
+  explicit counted skip, and contracttype field changes require inventory review.
+
 ### Changed
 - **Config-update metadata now records the acting admin (#671).** `set_config` and `set_custom_severity` persist the authorized caller alongside the ledger sequence under a new `LCFGUPDA` instance-storage key, and `get_last_config_update()` returns `{ sequence, actor }`. The pair is written in the same storage generation so it is always self-consistent — post-incident forensics can answer "who tuned severity X right before the outage" without correlating config events. `actor` is `None` for updates recorded before storage v4 ("recorded before attribution existed", never a zero address); the field is additive so consumers decoding only `sequence` are unaffected. `STORAGE_VERSION` bumped 3 → 4 with a new v3→v4 migration arm (no data backfill — attribution that never happened cannot be reconstructed), the `KEYS_AT_V4` invariant snapshot, and the `api_stability` key set updated to 28
 - **`get_config_count` now reads an O(1) cached count instead of deserializing the whole config map** (#606): a new instance-storage key `CONFIG_COUNT_KEY` (`CFGCNT`, storage v3) is maintained alongside every `CONFIG_KEY` write (initialize, `set_config`), backfilled once during `migrate()`'s new v2 → v3 arm and in `init_missing_storage_defaults`. The count endpoint — and `history::get_config_count` — now read the counter directly, preserving the pre-init `NotInitialized` posture. `STORAGE_VERSION` bumped 2 → 3 with the `KEYS_AT_V3` snapshot, `api_stability::storage_key_symbols()` updated to the authoritative 23-key set, and tests pin the cached count across updates plus the v2 → v3 backfill

@@ -7,7 +7,7 @@
 //!   and do NOT require a version bump.
 //! - Old consumers can safely ignore unrecognised trailing fields.
 //!
-//! The current canonical event version is "v1" (EVENT_VERSION).
+//! Event schema versions are resolved independently by event name.
 
 #[cfg(test)]
 mod payload_versioning_tests {
@@ -17,10 +17,7 @@ mod payload_versioning_tests {
         clippy::unnecessary_unwrap,
         clippy::type_complexity
     )]
-    use crate::{
-        SLACalculatorContract, SLACalculatorContractClient, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
-        EVENT_VERSION,
-    };
+    use crate::{SLACalculatorContract, SLACalculatorContractClient, EVENT_SETTLE_INTENT, EVENT_SLA_CALC};
     use soroban_sdk::{
         symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
     };
@@ -243,8 +240,9 @@ mod payload_versioning_tests {
             if topics.len() >= 2 {
                 let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
                 assert_eq!(
-                    version, EVENT_VERSION,
-                    "All events must use the current event version"
+                    version,
+                    crate::event_schema::event_version(topics.get(0).unwrap().try_into_val(&env).unwrap()),
+                    "topic[1] must match the per-name schema"
                 );
             }
         }

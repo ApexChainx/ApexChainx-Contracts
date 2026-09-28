@@ -201,7 +201,7 @@ mod tests {
             assert_eq!(info.contract_version, cargo_pkg_version_symbol(&env));
             assert_eq!(info.storage_version, STORAGE_VERSION);
             assert_eq!(info.result_schema_version, RESULT_SCHEMA_VERSION);
-            assert_eq!(info.event_version, symbol_short!("v1"));
+            assert_eq!(info.event_version, crate::event_schema::EVENT_VERSION);
             assert!(!info.needs_migration);
             assert!(!info.is_paused);
             assert!(!info.is_config_frozen);
@@ -263,12 +263,13 @@ mod tests {
     fn test_event_abi_cobump_invariant() {
         let gen = crate::event_schema::EVENT_ABI_GENERATION;
         let required = crate::event_schema::EVENT_ABI_TO_SCHEMA_VERSION[(gen - 1) as usize];
+        let required_storage = crate::event_schema::EVENT_ABI_TO_STORAGE_VERSION[(gen - 1) as usize];
         assert!(
-            STORAGE_VERSION >= required,
+            STORAGE_VERSION >= required_storage,
             "event ABI generation {} requires STORAGE_VERSION >= {} (got {}): a breaking \
              event change must be a coordinated storage release (#497)",
             gen,
-            required,
+            required_storage,
             STORAGE_VERSION
         );
         assert!(
@@ -285,7 +286,7 @@ mod tests {
         let (env, contract_id, _admin, _operator) = setup();
         env.as_contract(&contract_id, || {
             let info = get_contract_info(&env).unwrap();
-            assert!((info.storage_version as i64) >= required as i64);
+            assert!(info.storage_version >= required_storage);
             assert!(info.result_schema_version >= required);
         });
     }

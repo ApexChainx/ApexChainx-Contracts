@@ -159,9 +159,9 @@ pub fn event_name_symbols() -> [&'static str; 26] {
 /// `test_storage_key_set_pinned_to_version_snapshot_or_newer` (#602).
 pub fn storage_key_symbols() -> [&'static str; 28] {
     [
-        "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED",
-        "PAUSEINF", "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT",
-        "VER", "RETLIM", "TPRUNED", "TTOTENT", "LCFGUPD", "LCFGUPDA", "HISTE", "HISTI", "HISTH", "HISTT",
+        "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
+        "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT", "VER", "RETLIM",
+        "TPRUNED", "TTOTENT", "LCFGUPD", "LCFGUPDA", "HISTE", "HISTI", "HISTH", "HISTT",
     ]
 }
 

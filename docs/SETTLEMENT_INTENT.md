@@ -38,7 +38,8 @@ not a property of the contract.
 ## Payload
 
 `set_int` carries the canonical 9-field decision order with the correlation id
-appended (append-only trailing field, #566):
+appended (#566). Dispatch by event name and topic version: `set_int` uses
+`v2` for the ledger-bound ID encoding, while `sla_calc` remains `v1` (#675/#677):
 
 ```
 (outage_id: Symbol, status: Symbol, mttr_minutes: u32, threshold_minutes: u32,
@@ -46,16 +47,16 @@ appended (append-only trailing field, #566):
  recorded_at: u64, correlation_id: u64)
 ```
 
-- `status` (`met` / `violated`) selects which side of the intent applies:
-  a reward for `met`, a penalty for `violated`.
-- `amount` is the magnitude of that intent (positive), not a signed transfer and
-  not a balance delta.
+- `status` (`met` / `viol`) selects which side of the intent applies:
+  a reward for `met`, a penalty for `viol`.
+- `amount` is positive for rewards and negative for penalties. It is a signed
+  SLA decision, not an executed transfer or balance delta.
 - `payment_type` is the contract-computed lane (`rew` / `pen`); it must stay
   consistent with `status` (`calculate_sla` rejects inconsistencies with
   `InconsistentPaymentStatus`).
 - `correlation_id` is deterministic from `(outage_id, ledger_sequence)` via
-  `event_correlation::generate_correlation_id`, so a backend can join the same
-  logical workflow across contracts (#564/#566).
+  `event_correlation::generate_correlation_id`, with the ledger in the upper 32 bits and an outage fingerprint in the lower
+  32 bits. Different ledgers are disjoint; same-ledger fingerprints can collide.
 
 The field-level schema is owned by
 [`apexchainx_calculator/src/event_schema.rs`](../apexchainx_calculator/src/event_schema.rs)
@@ -70,8 +71,9 @@ the semantics.
 2. **Own the execution.** The backend (or a dedicated escrow/settlement service)
    decides whether and how to pay. Record the outcome separately from the
    contract's event stream.
-3. **Join with `correlation_id`.** Match the intent to downstream
-   settlement/escrow events from other contracts on the same id.
+3. **Join with full context.** Use network, originating contract, ledger and full
+   outage ID alongside `correlation_id`. The compact ID alone is neither unique
+   within a ledger nor a payment-deduplication key.
 4. **Reconcile on config generation.** `config_version_hash` identifies the
    config generation that produced the decision; a stale intent from an older
    generation should be reconciled rather than blindly paid.

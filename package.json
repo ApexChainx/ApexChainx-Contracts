@@ -11,7 +11,8 @@
     "check:pers-store": "tsx pers-store/generate-fixtures.ts",
     "release-replay": "tsx scripts/release-replay.ts",
     "test:parity": "tsx scripts/run-ts-tests.ts parity",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:parity-coverage": "tsx scripts/check-parity-coverage.ts"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

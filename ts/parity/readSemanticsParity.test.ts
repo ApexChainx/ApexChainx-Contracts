@@ -43,6 +43,7 @@ import {
   CANONICAL_SEVERITIES,
   EVENT_TOPICS,
   EVENT_VERSION,
+  EVENT_VERSIONS,
   MAX_HISTORY_SIZE,
   MAX_PAGE_SIZE,
   MAX_RECALCS_PER_OUTAGE,
@@ -60,6 +61,7 @@ interface Fixture {
   symbols: Record<string, string>;
   eventTopics: Record<string, string>;
   eventVersion: string;
+  eventVersions: Record<string, string>;
   configSnapshot: {
     versionHash: string;
     entries: {
@@ -159,6 +161,7 @@ test("the result symbol vocabulary matches the contract's schema", () => {
 test("event topic names and the schema version match the contract", () => {
   assert.deepEqual({ ...EVENT_TOPICS }, FIXTURE.eventTopics);
   assert.equal(EVENT_VERSION, FIXTURE.eventVersion);
+  assert.deepEqual(EVENT_VERSIONS, FIXTURE.eventVersions);
 });
 
 test("every recorded status, payment type and rating is a known symbol", () => {

@@ -48,4 +48,5 @@ export {
   CANONICAL_SEVERITIES,
   EVENT_TOPICS,
   EVENT_VERSION,
+  EVENT_VERSIONS,
 } from "./generated/contractConstants";

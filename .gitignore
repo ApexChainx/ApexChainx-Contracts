@@ -47,3 +47,5 @@ node_modules/
 /target/
 **/*.rs.bk
 *.wasm
+# Local validation evidence
+validation-results/

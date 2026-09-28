@@ -5,10 +5,7 @@
 
 use soroban_sdk::{Address, Env, String};
 
-use crate::{
-    PauseInfo, SLAError, EVENT_PAUSED, EVENT_UNPAUSED, EVENT_VERSION, MAX_REASON_LEN, PAUSED_KEY,
-    PAUSE_INFO_KEY,
-};
+use crate::{PauseInfo, SLAError, EVENT_PAUSED, EVENT_UNPAUSED, MAX_REASON_LEN, PAUSED_KEY, PAUSE_INFO_KEY};
 
 /// Pauses the contract, blocking state-changing operations. Admin only.
 pub fn pause(env: &Env, caller: &Address, reason: String) -> Result<(), SLAError> {
@@ -29,8 +26,14 @@ pub fn pause(env: &Env, caller: &Address, reason: String) -> Result<(), SLAError
             paused_by: caller.clone(),
         },
     );
-    env.events()
-        .publish((EVENT_PAUSED, EVENT_VERSION, caller.clone()), (true,));
+    env.events().publish(
+        (
+            EVENT_PAUSED,
+            crate::event_schema::event_version(EVENT_PAUSED),
+            caller.clone(),
+        ),
+        (true,),
+    );
     Ok(())
 }
 
@@ -41,8 +44,14 @@ pub fn unpause(env: &Env, caller: &Address) -> Result<(), SLAError> {
 
     env.storage().instance().set(&PAUSED_KEY, &false);
     env.storage().instance().remove(&PAUSE_INFO_KEY);
-    env.events()
-        .publish((EVENT_UNPAUSED, EVENT_VERSION, caller.clone()), (false,));
+    env.events().publish(
+        (
+            EVENT_UNPAUSED,
+            crate::event_schema::event_version(EVENT_UNPAUSED),
+            caller.clone(),
+        ),
+        (false,),
+    );
     Ok(())
 }
 

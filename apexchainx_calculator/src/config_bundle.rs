@@ -229,9 +229,7 @@ mod tests {
     fn test_config_bundle_cache_serves_unchanged_hash_reads() {
         let (_env, client, admin) = setup();
 
-        let first = client
-            .get_config_bundle()
-            .expect("bundle available after init");
+        let first = client.get_config_bundle().expect("bundle available after init");
 
         // Second read with unchanged config — same hash, same bundle.
         let second = client
@@ -246,9 +244,7 @@ mod tests {
         // Mutate config — cache must be invalidated.
         client.set_config(&admin, &symbol_short!("high"), &50, &60, &800);
 
-        let after_write = client
-            .get_config_bundle()
-            .expect("bundle available after write");
+        let after_write = client.get_config_bundle().expect("bundle available after write");
 
         assert_ne!(
             first.config_version_hash, after_write.config_version_hash,

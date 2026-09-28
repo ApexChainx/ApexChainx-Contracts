@@ -43,8 +43,8 @@ mod coordination_harness_tests {
             min_compatible_protocol: min_compat,
             is_paused: false,
             needs_migration: false,
-            result_schema_version: 1,
-            event_version: symbol_short!("v1"),
+            result_schema_version: crate::RESULT_SCHEMA_VERSION,
+            event_version: crate::event_schema::EVENT_VERSION,
         }
     }
 
@@ -261,15 +261,18 @@ mod coordination_harness_tests {
         let safety = CrossContractSafety::new(&env);
         assert!(!safety.has_pending(), "Step 3: Safety tracker starts empty");
 
-        // Step 4: The workflow's correlation id is deterministic and never
-        // shared with a different outage in the same ledger, so downstream
-        // settlement events can be traced to exactly one incident (SC-W5-079,
+        // Step 4: The workflow's correlation id is deterministic and structurally separates ledgers. Same-ledger
+        // fingerprints can collide; join downstream events using the full outage
+        // and ledger context (SC-W5-079,
         // #564). It is carried in the `set_int` payload (event_schema.rs).
         let rederived = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
         assert_eq!(corr_id, rederived, "Step 4: Correlation ID must be deterministic");
         let other_outage = Symbol::new(&env, "WF_2024_002");
         let other_id = event_correlation::generate_correlation_id(&env, &other_outage, ledger_seq);
-        assert_ne!(corr_id, other_id, "Step 4: Distinct outages must not share an id");
+        assert_ne!(
+            corr_id, other_id,
+            "Step 4: These sample outage fingerprints must differ"
+        );
     }
 
     // ===================================================================
@@ -351,8 +354,8 @@ mod coordination_harness_tests {
                 min_compatible_protocol: 1,
                 is_paused: false,
                 needs_migration: false,
-                result_schema_version: 1,
-                event_version: symbol_short!("v1"),
+                result_schema_version: crate::RESULT_SCHEMA_VERSION,
+                event_version: crate::event_schema::EVENT_VERSION,
             });
         }
 
