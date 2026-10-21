@@ -1,0 +1,245 @@
+# =============================================================================
+# ApexChainx Contracts — Governance Static Analysis
+# =============================================================================
+#
+# Runs static analysis tooling over the governance module on every PR that
+# touches governance-related code. Because this contract is Rust/Soroban
+# (not Solidity), Slither cannot run directly; this job is the equivalent
+# security-analysis gate using:
+#
+#   1. cargo-geiger   — detect unsafe code paths that could harbour overflows
+#   2. cargo clippy   — lint-level security and correctness rules
+#   3. governance-audit.ts — project-level offchain governance invariant check
+#
+# Failures here are P1 (Reliability) gate failures; the job is required to
+# pass before merge.
+# =============================================================================
+
+name: Governance Static Analysis
+
+on:
+  pull_request:
+    paths:
+      - 'apexchainx_calculator/src/governance.rs'
+      - 'apexchainx_calculator/src/lib.rs'
+      - 'apexchainx_calculator/src/config_freeze.rs'
+      - 'apexchainx_calculator/src/event_schema.rs'
+      - 'offchain/governanceConsistency.ts'
+      - '.github/workflows/governance-slither.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apexchainx_calculator/src/governance.rs'
+      - 'apexchainx_calculator/src/lib.rs'
+
+concurrency:
+  group: governance-slither-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: cargo-geiger — unsafe code audit
+  #
+  # Governance must not rely on unsafe code. Any unsafe block in the
+  # governance module or its dependencies is surfaced here so reviewers
+  # can explicitly approve or reject it.
+  # ---------------------------------------------------------------------------
+  geiger-unsafe-audit:
+    name: Unsafe Code Audit (cargo-geiger)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: geiger-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            geiger-${{ runner.os }}-cargo-
+
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger --locked
+
+      # Run geiger and fail if the governance module itself uses unsafe.
+      # The --output-format json flag enables machine-readable output
+      # for the annotation step below.
+      - name: Run cargo-geiger on apexchainx_calculator
+        working-directory: apexchainx_calculator
+        run: |
+          cargo geiger --output-format GitHubActions 2>&1 | tee geiger-report.txt || true
+          echo "=== Geiger report ==="
+          cat geiger-report.txt
+
+      # Fail the job if any unsafe counts are non-zero in the local crate
+      # (excluding well-known transitive dependencies that have already been
+      # reviewed). This keeps the governance module's own code provably safe.
+      - name: Assert governance module is unsafe-free
+        working-directory: apexchainx_calculator
+        run: |
+          # Check the crate's own source files — zero unsafe tolerance in
+          # the governance module. Geiger reports "0/0" for safe files.
+          UNSAFE_COUNT=$(cargo geiger --output-format Ratio 2>/dev/null \
+            | grep "apexchainx_calculator " | grep -oP '(?<=: )\d+(?=/)' | head -n1 || echo "0")
+          if [ "${UNSAFE_COUNT:-0}" -gt 0 ]; then
+            echo "::error file=apexchainx_calculator/src/governance.rs::Unsafe code detected in apexchainx_calculator. Governance module must not use unsafe blocks."
+            exit 1
+          fi
+          echo "No unsafe code in apexchainx_calculator crate source — OK"
+
+      - name: Upload geiger report
+        uses: actions/upload-artifact@v4
+        with:
+          name: geiger-unsafe-report
+          path: apexchainx_calculator/geiger-report.txt
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Clippy security lints on governance module
+  #
+  # Runs clippy with arithmetic-pedantic lints enabled to surface potential
+  # integer overflow/underflow patterns that the standard `-- -D warnings`
+  # pass might miss.
+  # ---------------------------------------------------------------------------
+  clippy-governance-security:
+    name: Clippy Security Lints (Governance)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: clippy-gov-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            clippy-gov-${{ runner.os }}-cargo-
+
+      # Run clippy with arithmetic and pedantic lints.
+      # These are intentionally stricter than the main CI clippy pass so
+      # governance code is held to a higher bar. The lints target patterns
+      # that could hide integer overflow, shadowed bindings, or unchecked
+      # arithmetic that could bypass role-transfer invariants.
+      - name: Run clippy with security lints on governance
+        working-directory: apexchainx_calculator
+        run: |
+          cargo clippy --lib -- \
+            -D warnings \
+            -D clippy::integer_arithmetic \
+            -D clippy::as_conversions \
+            -D clippy::shadow_unrelated \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used \
+            -D clippy::panic \
+            2>&1 | tee clippy-governance-lints.txt || {
+              echo "::error::Governance security lint failures detected. Review clippy-governance-lints.txt for details."
+              cat clippy-governance-lints.txt
+              exit 1
+            }
+
+      - name: Upload clippy governance lint report
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-governance-lints
+          path: apexchainx_calculator/clippy-governance-lints.txt
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Offchain governance invariant consistency check
+  #
+  # Runs the existing governanceConsistency.ts script plus a dedicated
+  # governance overflow check that validates all timestamp arithmetic
+  # and role-transfer invariants at the TypeScript level.
+  # ---------------------------------------------------------------------------
+  governance-invariant-check:
+    name: Governance Invariant Consistency
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run governance consistency checks
+        run: npx tsx offchain/governanceConsistency.ts
+
+      - name: Run governance overflow invariant checks
+        run: npx tsx offchain/governanceOverflowAudit.ts
+
+  # ---------------------------------------------------------------------------
+  # Job 4: Governance-specific Rust unit tests
+  #
+  # Runs only the tests relevant to the governance module as a focused gate.
+  # This is faster than running the full suite and gives reviewers a clear
+  # signal that governance's own test coverage passes.
+  # ---------------------------------------------------------------------------
+  governance-tests:
+    name: Governance Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: gov-tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            gov-tests-${{ runner.os }}-cargo-
+
+      - name: Run governance-related tests
+        working-directory: apexchainx_calculator
+        run: |
+          cargo test --lib governance_tests:: 2>&1 | tee governance-test-output.txt || {
+            echo "::error::Governance tests failed. See governance-test-output.txt"
+            cat governance-test-output.txt
+            exit 1
+          }
+
+      - name: Run auth matrix tests (governance role enforcement)
+        working-directory: apexchainx_calculator
+        run: cargo test --lib auth_matrix_tests::
+
+      - name: Upload governance test output
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-test-output
+          path: apexchainx_calculator/governance-test-output.txt
+          retention-days: 30

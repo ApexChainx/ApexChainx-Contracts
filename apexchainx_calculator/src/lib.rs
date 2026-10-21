@@ -64,6 +64,11 @@ mod event_state_tests;
 /// compiled and unit-tested here. See `docs/FUZZING_GUARANTEES.md`.
 pub mod fuzz_spec;
 pub mod governance;
+/// Governance module tests: role transfers, expiry boundary, integer overflow
+/// guards, frozen-config gating, and break-glass operator assignment.
+/// See docs/STORAGE_GAP_RATIONALE.md for why storage gaps are not used here.
+#[cfg(test)]
+mod governance_tests;
 pub mod history;
 pub mod metadata;
 pub mod metrics;
