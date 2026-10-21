@@ -138,7 +138,7 @@ impl OracleContract {
     pub fn require_admin(env: &Env, caller: &Address) -> Result<(), OracleError> {
         Self::require_initialized(env)?;
         caller.require_auth();
-        let admin: Address = env.storage().instance().get(&ORACLE_ADMIN_KEY).unwrap();
+        let admin: Address = env.storage().instance().get(&ORACLE_ADMIN_KEY).ok_or(OracleError::NotInitialized)?;
         if *caller != admin {
             return Err(OracleError::Unauthorized);
         }
@@ -344,7 +344,7 @@ impl OracleContract {
         Self::require_not_paused(&env)?;
         Self::require_reporter(&env, &reporter)?;
 
-        let config: OracleConfig = env.storage().instance().get(&ORACLE_CONFIG_KEY).unwrap();
+        let config: OracleConfig = env.storage().instance().get(&ORACLE_CONFIG_KEY).ok_or(OracleError::NotInitialized)?;
 
         // Bounds check (#846)
         if value < config.min_allowed_value || value > config.max_allowed_value {
@@ -388,6 +388,7 @@ impl OracleContract {
         let count = reports.len();
         if count == 0 {
             return Err(OracleError::NoDataAvailable);
+            let r = reports.get(i).ok_or(OracleError::NoDataAvailable)?;
         }
 
         let mut sum: u128 = 0;
@@ -794,4 +795,26 @@ mod tests {
         );
         assert!(resumed.is_ok());
     }
+
+    #[test]
+fn test_submit_report_missing_config_returns_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (admin, config) = setup_oracle(&env);
+    let reporter = Address::generate(&env);
+
+    OracleContract::initialize(env.clone(), admin.clone(), config).unwrap();
+    OracleContract::add_reporter(env.clone(), admin.clone(), reporter.clone()).unwrap();
+
+    env.storage().instance().remove(&ORACLE_CONFIG_KEY);
+
+    let res = OracleContract::submit_report(
+        env.clone(),
+        reporter,
+        symbol_short!("MTTR"),
+        100,
+        1000,
+    );
+    assert_eq!(res, Err(OracleError::NotInitialized));
+}
 }
