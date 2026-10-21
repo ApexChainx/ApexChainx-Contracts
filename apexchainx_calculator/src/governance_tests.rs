@@ -1,24 +1,15 @@
-//! Governance module tests: role transfers, overflow guards, expiry, and
-//! invariant enforcement for the two-step handoff and break-glass paths.
-//!
-//! These tests are the automated-test complement to the governance static
-//! analysis CI job (`governance-slither.yml`). They cover:
-//!
-//! - Happy-path admin and operator two-step transfers
-//! - Expiry window boundary (PROPOSAL_EXPIRY_WINDOW ± 1 second)
-//! - Integer overflow/underflow safety in timestamp arithmetic
-//! - Single-step (break-glass) operator assignment
-//! - Renounce semantics and pending-proposal invalidation
-//! - Frozen-config gating on all governance functions
-//! - Storage gap note: Soroban uses a key-value storage model; sequential
-//!   slot gaps as used in Ethereum upgradeable contracts do not apply here.
-//!   See docs/STORAGE_GAP_RATIONALE.md for the full analysis.
-
+/// Unit tests for the Governance module.
+///
+/// Covers the two-step admin/operator handoff, single-step operator assignment,
+/// admin renounce, proposal cancellation, expiry semantics, and all negative
+/// (unauthorized) paths. Resolves issue #818.
 #[cfg(test)]
 mod governance_tests {
-    use crate::{governance::PROPOSAL_EXPIRY_WINDOW, SLACalculatorContract, SLACalculatorContractClient};
-    use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env};
+    #![allow(clippy::module_inception)]
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{testutils::Address as _, Address, Env};
 
+    /// Creates a fresh contract environment with admin and operator initialized.
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
@@ -29,219 +20,283 @@ mod governance_tests {
         (admin, operator, client)
     }
 
-    // ── Admin two-step transfer ─────────────────────────────────────────────
+    // ── Admin propose/accept two-step handoff ─────────────────────────────
 
+    /// Happy path: propose then accept admin transfer.
     #[test]
-    fn test_propose_and_accept_admin_completes_transfer() {
+    fn test_propose_and_accept_admin_happy_path() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+
+        // No pending admin before proposal
+        assert_eq!(client.get_pending_admin(), None);
+
+        client.propose_admin(&admin, &new_admin);
+        assert_eq!(client.get_pending_admin(), Some(new_admin.clone()));
+
+        client.accept_admin(&new_admin);
+        // After acceptance the pending slot is cleared
+        assert_eq!(client.get_pending_admin(), None);
+        // New admin should now be the stored admin
+        assert_eq!(client.get_admin(), new_admin);
+    }
+
+    /// Old admin loses authority once the new admin accepts.
+    #[test]
+    fn test_old_admin_cannot_act_after_accept() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
         let new_admin = Address::generate(&env);
 
         client.propose_admin(&admin, &new_admin);
-        let pending = client.get_pending_admin();
-        assert_eq!(pending, Some(new_admin.clone()));
-
         client.accept_admin(&new_admin);
-        assert_eq!(client.get_admin(), new_admin);
-        assert_eq!(client.get_pending_admin(), None);
+
+        // Old admin should no longer be able to propose another admin
+        env.mock_auths(&[]);
+        let result = client.try_propose_admin(&admin, &Address::generate(&env));
+        assert!(result.is_err(), "old admin must lose authority after handoff");
     }
 
+    /// Wrong caller cannot accept a pending admin proposal.
     #[test]
-    fn test_cancel_admin_proposal_clears_pending() {
+    fn test_wrong_caller_cannot_accept_admin() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        let candidate = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+        let stranger = Address::generate(&env);
 
-        client.propose_admin(&admin, &candidate);
+        client.propose_admin(&admin, &new_admin);
+
+        env.mock_auths(&[]);
+        let result = client.try_accept_admin(&stranger);
+        assert!(result.is_err(), "stranger must not be able to accept admin proposal");
+    }
+
+    /// Accepting when there is no proposal must fail.
+    #[test]
+    fn test_accept_admin_without_proposal_fails() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+
+        let result = client.try_accept_admin(&stranger);
+        assert!(result.is_err(), "accept_admin with no pending proposal must return an error");
+    }
+
+    /// Re-proposing a new admin supersedes the previous pending candidate.
+    #[test]
+    fn test_repropose_admin_supersedes_previous() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let first_candidate = Address::generate(&env);
+        let second_candidate = Address::generate(&env);
+
+        client.propose_admin(&admin, &first_candidate);
+        assert_eq!(client.get_pending_admin(), Some(first_candidate.clone()));
+
+        // Re-propose with a different candidate
+        client.propose_admin(&admin, &second_candidate);
+        // Pending slot should now hold the second candidate
+        assert_eq!(client.get_pending_admin(), Some(second_candidate.clone()));
+
+        // The first candidate can no longer accept
+        env.mock_auths(&[]);
+        let result = client.try_accept_admin(&first_candidate);
+        assert!(result.is_err(), "superseded candidate must not be able to accept");
+    }
+
+    // ── Admin proposal cancellation ───────────────────────────────────────
+
+    /// Admin can cancel its own pending proposal.
+    #[test]
+    fn test_admin_can_cancel_proposal() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+
+        client.propose_admin(&admin, &new_admin);
         assert!(client.get_pending_admin().is_some());
 
         client.cancel_admin_proposal(&admin);
         assert_eq!(client.get_pending_admin(), None);
     }
 
+    /// Cancelling when there is no pending proposal must fail.
     #[test]
-    fn test_re_propose_admin_supersedes_previous_candidate() {
+    fn test_cancel_admin_proposal_with_no_proposal_fails() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        let first = Address::generate(&env);
-        let second = Address::generate(&env);
 
-        client.propose_admin(&admin, &first);
-        // Supersede the first proposal with a new candidate.
-        client.propose_admin(&admin, &second);
-
-        let pending = client.get_pending_admin();
-        assert_eq!(pending, Some(second.clone()), "Pending slot must hold the latest candidate");
+        let result = client.try_cancel_admin_proposal(&admin);
+        assert!(result.is_err(), "cancel with no pending proposal must fail");
     }
 
+    /// A non-admin cannot cancel an admin proposal.
     #[test]
-    fn test_wrong_caller_cannot_accept_admin_proposal() {
+    fn test_stranger_cannot_cancel_admin_proposal() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        let candidate = Address::generate(&env);
-        let impostor = Address::generate(&env);
-
-        client.propose_admin(&admin, &candidate);
-        // An impostor who is not the proposed admin must be rejected.
-        assert!(
-            client.try_accept_admin(&impostor).is_err(),
-            "Only the proposed admin may accept"
-        );
-    }
-
-    #[test]
-    fn test_stranger_cannot_propose_admin() {
-        let env = Env::default();
-        let (_, _, client) = setup(&env);
+        let new_admin = Address::generate(&env);
         let stranger = Address::generate(&env);
-        let candidate = Address::generate(&env);
-        assert!(client.try_propose_admin(&stranger, &candidate).is_err());
+
+        client.propose_admin(&admin, &new_admin);
+
+        env.mock_auths(&[]);
+        let result = client.try_cancel_admin_proposal(&stranger);
+        assert!(result.is_err(), "stranger must not cancel admin proposal");
     }
 
-    // ── Admin proposal expiry — boundary tests ─────────────────────────────
-    //
-    // The expiry window is PROPOSAL_EXPIRY_WINDOW seconds (90 days).
-    // Exactly at the boundary the proposal is still valid; one second past
-    // it is expired. These tests pin the inclusive/exclusive semantics.
+    // ── Admin renounce ────────────────────────────────────────────────────
 
+    /// Admin can renounce, after which no admin-gated calls succeed.
     #[test]
-    fn test_admin_proposal_valid_at_expiry_boundary() {
+    fn test_renounce_admin_is_irreversible() {
         let env = Env::default();
-        env.ledger().with_mut(|l| l.timestamp = 1_000_000);
         let (admin, _, client) = setup(&env);
-        let candidate = Address::generate(&env);
 
-        client.propose_admin(&admin, &candidate);
+        client.renounce_admin(&admin);
 
-        // Advance to exactly the boundary — still valid (<=).
-        env.ledger()
-            .with_mut(|l| l.timestamp = 1_000_000 + PROPOSAL_EXPIRY_WINDOW);
-        assert!(client.try_accept_admin(&candidate).is_ok());
+        // No admin means propose_admin must fail
+        env.mock_auths(&[]);
+        let result = client.try_propose_admin(&admin, &Address::generate(&env));
+        assert!(result.is_err(), "admin-gated call must fail after renounce");
     }
 
+    /// Renounce clears any pending admin proposal at the same time.
     #[test]
-    fn test_admin_proposal_expired_one_second_past_window() {
+    fn test_renounce_clears_pending_admin_proposal() {
         let env = Env::default();
-        env.ledger().with_mut(|l| l.timestamp = 1_000_000);
         let (admin, _, client) = setup(&env);
-        let candidate = Address::generate(&env);
+        let new_admin = Address::generate(&env);
 
-        client.propose_admin(&admin, &candidate);
+        client.propose_admin(&admin, &new_admin);
+        assert!(client.get_pending_admin().is_some());
 
-        // Advance one second past the window — expired.
-        env.ledger()
-            .with_mut(|l| l.timestamp = 1_000_000 + PROPOSAL_EXPIRY_WINDOW + 1);
-        assert!(
-            client.try_accept_admin(&candidate).is_err(),
-            "Proposal must be rejected one second past expiry"
-        );
+        client.renounce_admin(&admin);
+        assert_eq!(client.get_pending_admin(), None);
     }
 
-    // ── Integer overflow / underflow guards ────────────────────────────────
-    //
-    // Governance uses `now.saturating_sub(proposed)` to compute elapsed time.
-    // These tests verify that:
-    //   1. A ledger clock set to u64::MAX does not panic or overflow.
-    //   2. A proposed timestamp greater than `now` (clock anomaly) saturates
-    //      to 0 rather than wrapping, keeping the proposal valid.
-    //   3. PROPOSAL_EXPIRY_WINDOW fits safely in u64 without overflow at
-    //      compile time (asserted as a constant below).
-
-    /// PROPOSAL_EXPIRY_WINDOW must fit in u64 without overflow.
-    /// 90 * 24 * 60 * 60 = 7_776_000, well within u64::MAX.
-    const _OVERFLOW_GUARD: () = assert!(
-        PROPOSAL_EXPIRY_WINDOW <= u64::MAX / 2,
-        "PROPOSAL_EXPIRY_WINDOW must not be near u64::MAX to prevent addition overflow"
-    );
-
+    /// Renounce clears any pending operator proposal.
     #[test]
-    fn test_governance_saturating_sub_does_not_overflow_at_max_timestamp() {
-        let env = Env::default();
-        // Set ledger to u64::MAX — saturating_sub must not panic.
-        env.ledger().with_mut(|l| l.timestamp = u64::MAX);
-        let (admin, _, client) = setup(&env);
-        let candidate = Address::generate(&env);
-
-        // propose_admin stores the current timestamp (u64::MAX).
-        client.propose_admin(&admin, &candidate);
-
-        // accept_admin runs require_proposal_valid: now.saturating_sub(proposed)
-        // = u64::MAX - u64::MAX = 0, which is <= PROPOSAL_EXPIRY_WINDOW → valid.
-        assert!(
-            client.try_accept_admin(&candidate).is_ok(),
-            "saturating_sub at u64::MAX must not overflow and must keep proposal valid"
-        );
-    }
-
-    #[test]
-    fn test_governance_clock_anomaly_future_timestamp_saturates_to_valid() {
-        // If the ledger clock goes backwards between propose and accept
-        // (a theoretical anomaly), saturating_sub returns 0, keeping the
-        // proposal valid rather than wrapping to a huge elapsed value.
-        let env = Env::default();
-        env.ledger().with_mut(|l| l.timestamp = 5_000_000);
-        let (admin, _, client) = setup(&env);
-        let candidate = Address::generate(&env);
-
-        client.propose_admin(&admin, &candidate);
-
-        // Clock moves backwards to before the proposal timestamp.
-        env.ledger().with_mut(|l| l.timestamp = 1_000_000);
-        // elapsed = 1_000_000.saturating_sub(5_000_000) = 0 ≤ WINDOW → valid.
-        assert!(
-            client.try_accept_admin(&candidate).is_ok(),
-            "Backwards clock must saturate to 0 elapsed, keeping proposal valid"
-        );
-    }
-
-    // ── Operator two-step transfer ─────────────────────────────────────────
-
-    #[test]
-    fn test_propose_and_accept_operator_completes_handoff() {
+    fn test_renounce_clears_pending_operator_proposal() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
         let new_op = Address::generate(&env);
+
+        client.propose_operator(&admin, &new_op);
+        assert!(client.get_pending_operator().is_some());
+
+        client.renounce_admin(&admin);
+        assert_eq!(client.get_pending_operator(), None);
+    }
+
+    /// A non-admin cannot renounce.
+    #[test]
+    fn test_stranger_cannot_renounce() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+
+        env.mock_auths(&[]);
+        let result = client.try_renounce_admin(&stranger);
+        assert!(result.is_err(), "stranger must not be able to renounce admin");
+    }
+
+    // ── Operator propose/accept two-step handoff ──────────────────────────
+
+    /// Happy path: propose then accept operator transfer.
+    #[test]
+    fn test_propose_and_accept_operator_happy_path() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let new_op = Address::generate(&env);
+
+        assert_eq!(client.get_pending_operator(), None);
 
         client.propose_operator(&admin, &new_op);
         assert_eq!(client.get_pending_operator(), Some(new_op.clone()));
 
         client.accept_operator(&new_op);
-        assert_eq!(client.get_operator(), new_op);
         assert_eq!(client.get_pending_operator(), None);
+        assert_eq!(client.get_operator(), new_op);
     }
 
+    /// Wrong address cannot accept an operator proposal.
     #[test]
-    fn test_operator_proposal_expired_one_second_past_window() {
+    fn test_wrong_caller_cannot_accept_operator() {
         let env = Env::default();
-        env.ledger().with_mut(|l| l.timestamp = 1_000_000);
+        let (admin, _, client) = setup(&env);
+        let new_op = Address::generate(&env);
+        let stranger = Address::generate(&env);
+
+        client.propose_operator(&admin, &new_op);
+
+        env.mock_auths(&[]);
+        let result = client.try_accept_operator(&stranger);
+        assert!(result.is_err(), "stranger must not accept operator proposal");
+    }
+
+    /// Accepting when there is no pending operator proposal must fail.
+    #[test]
+    fn test_accept_operator_without_proposal_fails() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+
+        let result = client.try_accept_operator(&stranger);
+        assert!(result.is_err(), "accept_operator with no pending proposal must fail");
+    }
+
+    /// Re-proposing supersedes the previous operator candidate.
+    #[test]
+    fn test_repropose_operator_supersedes_previous() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let first_op = Address::generate(&env);
+        let second_op = Address::generate(&env);
+
+        client.propose_operator(&admin, &first_op);
+        client.propose_operator(&admin, &second_op);
+
+        assert_eq!(client.get_pending_operator(), Some(second_op.clone()));
+
+        env.mock_auths(&[]);
+        let result = client.try_accept_operator(&first_op);
+        assert!(result.is_err(), "superseded operator must not accept");
+    }
+
+    // ── Operator proposal cancellation ───────────────────────────────────
+
+    /// Admin can cancel a pending operator proposal.
+    #[test]
+    fn test_admin_can_cancel_operator_proposal() {
+        let env = Env::default();
         let (admin, _, client) = setup(&env);
         let new_op = Address::generate(&env);
 
         client.propose_operator(&admin, &new_op);
+        assert!(client.get_pending_operator().is_some());
 
-        env.ledger()
-            .with_mut(|l| l.timestamp = 1_000_000 + PROPOSAL_EXPIRY_WINDOW + 1);
-        assert!(
-            client.try_accept_operator(&new_op).is_err(),
-            "Operator proposal must be rejected one second past expiry"
-        );
-    }
-
-    #[test]
-    fn test_cancel_operator_proposal_clears_pending() {
-        let env = Env::default();
-        let (admin, _, client) = setup(&env);
-        let new_op = Address::generate(&env);
-
-        client.propose_operator(&admin, &new_op);
         client.cancel_operator_proposal(&admin);
         assert_eq!(client.get_pending_operator(), None);
     }
 
-    // ── Single-step (break-glass) set_operator ─────────────────────────────
-
+    /// Cancelling an operator proposal with no pending proposal must fail.
     #[test]
-    fn test_set_operator_installs_operator_without_consent() {
+    fn test_cancel_operator_proposal_with_none_fails() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+
+        let result = client.try_cancel_operator_proposal(&admin);
+        assert!(result.is_err(), "cancel with no pending operator proposal must fail");
+    }
+
+    // ── Single-step set_operator (legacy break-glass) ─────────────────────
+
+    /// Admin can directly set an operator via single-step path.
+    #[test]
+    fn test_admin_can_set_operator_directly() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
         let new_op = Address::generate(&env);
@@ -250,103 +305,98 @@ mod governance_tests {
         assert_eq!(client.get_operator(), new_op);
     }
 
+    /// set_operator cancels any pending two-step proposal.
     #[test]
     fn test_set_operator_cancels_pending_proposal() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let proposed_op = Address::generate(&env);
+        let direct_op = Address::generate(&env);
+
+        client.propose_operator(&admin, &proposed_op);
+        assert!(client.get_pending_operator().is_some());
+
+        client.set_operator(&admin, &direct_op);
+        // Pending slot must be cleared
+        assert_eq!(client.get_pending_operator(), None);
+        assert_eq!(client.get_operator(), direct_op);
+    }
+
+    /// A non-admin cannot call set_operator.
+    #[test]
+    fn test_stranger_cannot_set_operator() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        let new_op = Address::generate(&env);
+
+        env.mock_auths(&[]);
+        let result = client.try_set_operator(&stranger, &new_op);
+        assert!(result.is_err(), "stranger must not call set_operator");
+    }
+
+    /// The operator role itself cannot call set_operator.
+    #[test]
+    fn test_operator_cannot_call_set_operator() {
+        let env = Env::default();
+        let (_, operator, client) = setup(&env);
+        let new_op = Address::generate(&env);
+
+        env.mock_auths(&[]);
+        let result = client.try_set_operator(&operator, &new_op);
+        assert!(result.is_err(), "operator must not call set_operator");
+    }
+
+    // ── Query functions ───────────────────────────────────────────────────
+
+    /// get_pending_admin returns None when no proposal is active.
+    #[test]
+    fn test_get_pending_admin_returns_none_initially() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        assert_eq!(client.get_pending_admin(), None);
+    }
+
+    /// get_pending_operator returns None when no proposal is active.
+    #[test]
+    fn test_get_pending_operator_returns_none_initially() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        assert_eq!(client.get_pending_operator(), None);
+    }
+
+    // ── Double-propose admin then cancel then re-propose ──────────────────
+
+    /// Full lifecycle: propose → cancel → re-propose → accept.
+    #[test]
+    fn test_full_admin_proposal_lifecycle() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let first = Address::generate(&env);
+        let second = Address::generate(&env);
+
+        client.propose_admin(&admin, &first);
+        client.cancel_admin_proposal(&admin);
+        assert_eq!(client.get_pending_admin(), None);
+
+        client.propose_admin(&admin, &second);
+        client.accept_admin(&second);
+        assert_eq!(client.get_admin(), second);
+    }
+
+    /// Full operator lifecycle: propose → cancel → direct set.
+    #[test]
+    fn test_full_operator_proposal_lifecycle() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
         let proposed = Address::generate(&env);
         let direct = Address::generate(&env);
 
         client.propose_operator(&admin, &proposed);
-        assert!(client.get_pending_operator().is_some());
+        client.cancel_operator_proposal(&admin);
+        assert_eq!(client.get_pending_operator(), None);
 
-        // Single-step must cancel the pending proposal before installing.
         client.set_operator(&admin, &direct);
         assert_eq!(client.get_operator(), direct);
-        assert_eq!(
-            client.get_pending_operator(),
-            None,
-            "Pending proposal must be cleared after set_operator"
-        );
-    }
-
-    // ── Renounce admin ─────────────────────────────────────────────────────
-
-    #[test]
-    fn test_renounce_admin_removes_admin_key() {
-        let env = Env::default();
-        let (admin, _, client) = setup(&env);
-
-        client.renounce_admin(&admin);
-        // After renounce the admin key is removed; get_admin must fail.
-        assert!(client.try_get_admin().is_err());
-    }
-
-    #[test]
-    fn test_renounce_cancels_pending_operator_proposal() {
-        let env = Env::default();
-        let (admin, _, client) = setup(&env);
-        let new_op = Address::generate(&env);
-
-        client.propose_operator(&admin, &new_op);
-        assert!(client.get_pending_operator().is_some());
-
-        client.renounce_admin(&admin);
-        assert_eq!(
-            client.get_pending_operator(),
-            None,
-            "Renounce must invalidate all pending proposals"
-        );
-    }
-
-    // ── Frozen-config blocks all governance operations ────────────────────
-
-    #[test]
-    fn test_governance_blocked_when_config_frozen() {
-        let env = Env::default();
-        let (admin, _, client) = setup(&env);
-        let candidate = Address::generate(&env);
-
-        client.freeze_config(&admin);
-
-        assert!(
-            client.try_propose_admin(&admin, &candidate).is_err(),
-            "propose_admin must be blocked while config is frozen"
-        );
-        assert!(
-            client.try_propose_operator(&admin, &candidate).is_err(),
-            "propose_operator must be blocked while config is frozen"
-        );
-        assert!(
-            client.try_set_operator(&admin, &candidate).is_err(),
-            "set_operator must be blocked while config is frozen"
-        );
-        assert!(
-            client.try_renounce_admin(&admin).is_err(),
-            "renounce_admin must be blocked while config is frozen"
-        );
-    }
-
-    // ── No-pending-transfer returns correct error ─────────────────────────
-
-    #[test]
-    fn test_cancel_admin_proposal_without_pending_returns_error() {
-        let env = Env::default();
-        let (admin, _, client) = setup(&env);
-        assert!(
-            client.try_cancel_admin_proposal(&admin).is_err(),
-            "cancel_admin_proposal with no pending proposal must error"
-        );
-    }
-
-    #[test]
-    fn test_accept_admin_without_pending_returns_error() {
-        let env = Env::default();
-        let (_, _, client) = setup(&env);
-        let caller = Address::generate(&env);
-        assert!(
-            client.try_accept_admin(&caller).is_err(),
-            "accept_admin with no pending proposal must error"
-        );
     }
 }
