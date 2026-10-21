@@ -595,6 +595,7 @@ mod access_control_fuzz_tests {
 mod cross_contract_safety_tests {
     use crate::cross_contract_safety::{
         requires_rollback, safe_invoke_contract, CrossContractCallStatus, CrossContractSafety,
+        MAX_CALL_DEPTH, MAX_COMPENSATION_DEPTH,
     };
     use proptest::prelude::*;
     use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Vec};
@@ -749,6 +750,51 @@ mod cross_contract_safety_tests {
 
             safety.rollback_all(&env);
             prop_assert_eq!(safety.depth(), 0);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(32))]
+
+        /// Arbitrary guard lifecycle sequences preserve depth and capacity invariants.
+        #[test]
+        fn guard_lifecycle_sequences_preserve_invariants(operations in prop::collection::vec(any::<u8>(), 0..128)) {
+            let env = Env::default();
+            let contract_id = target(&env);
+            let mut safety = CrossContractSafety::new(&env);
+
+            for operation in operations {
+                let depth_before = safety.depth();
+                match operation % 3 {
+                    0 => {
+                        let result = safety.call(
+                            &env,
+                            &contract_id,
+                            &symbol_short!("get_admin"),
+                            &[],
+                            symbol_short!("unlck_fnd"),
+                            Vec::new(&env),
+                        );
+
+                        if depth_before < MAX_COMPENSATION_DEPTH {
+                            prop_assert_eq!(result.unwrap().status, CrossContractCallStatus::Success);
+                            prop_assert_eq!(safety.depth(), depth_before + 1);
+                        } else {
+                            prop_assert_eq!(result.unwrap_err().status, CrossContractCallStatus::FatalError);
+                            prop_assert_eq!(safety.depth(), depth_before);
+                        }
+                    }
+                    1 => safety.rollback_all(&env),
+                    _ => safety.finalize(&env),
+                }
+
+                let depth = safety.depth();
+                prop_assert!(depth <= MAX_COMPENSATION_DEPTH);
+                prop_assert!(depth <= MAX_CALL_DEPTH);
+                prop_assert_eq!(safety.checked_remaining_capacity(), Some(MAX_CALL_DEPTH - depth));
+                prop_assert_eq!(safety.can_push(), depth < MAX_CALL_DEPTH);
+                prop_assert_eq!(safety.has_pending(), depth > 0);
+            }
         }
     }
 
