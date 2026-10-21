@@ -11808,3 +11808,122 @@ fn test_overwrite_existing_custom_severity_emits_event() {
     let payload: (u32, i128, i128) = data.try_into_val(&env).unwrap();
     assert_eq!(payload, (15u32, 75i128, 600i128));
 }
+
+// ============================================================
+// #770 – Pausable unit tests
+// ============================================================
+
+#[test]
+fn test_pausable_initial_state_is_unpaused() {
+    let (_env, client, _actors) = setup();
+    assert_eq!(client.is_paused(), false);
+    assert_eq!(client.get_pause_info(), None);
+}
+
+#[test]
+fn test_pausable_admin_can_pause_and_unpause() {
+    let (env, client, actors) = setup();
+    let reason = soroban_sdk::String::from_str(&env, "routine maintenance");
+
+    client.pause(&actors.admin, &reason);
+    assert_eq!(client.is_paused(), true);
+
+    let info = client.get_pause_info().expect("pause info should be present");
+    assert_eq!(info.reason, reason);
+    assert_eq!(info.paused_by, actors.admin);
+
+    client.unpause(&actors.admin);
+    assert_eq!(client.is_paused(), false);
+    assert_eq!(client.get_pause_info(), None);
+}
+
+#[test]
+fn test_pausable_stranger_cannot_pause() {
+    let (env, client, actors) = setup();
+    let reason = soroban_sdk::String::from_str(&env, "unauthorized pause");
+    assert!(client.try_pause(&actors.stranger, &reason).is_err());
+    assert_eq!(client.is_paused(), false);
+}
+
+#[test]
+fn test_pausable_operator_cannot_pause() {
+    let (env, client, actors) = setup();
+    let reason = soroban_sdk::String::from_str(&env, "operator pause");
+    assert!(client.try_pause(&actors.operator, &reason).is_err());
+    assert_eq!(client.is_paused(), false);
+}
+
+#[test]
+fn test_pausable_stranger_cannot_unpause() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "paused"));
+    assert!(client.try_unpause(&actors.stranger).is_err());
+    assert_eq!(client.is_paused(), true);
+}
+
+#[test]
+fn test_pausable_operator_cannot_unpause() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "paused"));
+    assert!(client.try_unpause(&actors.operator).is_err());
+    assert_eq!(client.is_paused(), true);
+}
+
+#[test]
+fn test_pausable_idempotent_unpause() {
+    let (_env, client, actors) = setup();
+    assert_eq!(client.is_paused(), false);
+    // Unpausing when not paused should succeed cleanly without crashing
+    client.unpause(&actors.admin);
+    assert_eq!(client.is_paused(), false);
+}
+
+#[test]
+fn test_pausable_repause_updates_metadata() {
+    let (env, client, actors) = setup();
+    let reason1 = soroban_sdk::String::from_str(&env, "reason 1");
+    let reason2 = soroban_sdk::String::from_str(&env, "reason 2");
+
+    client.pause(&actors.admin, &reason1);
+    assert_eq!(client.get_pause_info().unwrap().reason, reason1);
+
+    client.pause(&actors.admin, &reason2);
+    assert_eq!(client.get_pause_info().unwrap().reason, reason2);
+}
+
+#[test]
+fn test_pausable_blocks_sla_calculation_and_resumes() {
+    let (env, client, actors) = setup();
+    let reason = soroban_sdk::String::from_str(&env, "maintenance");
+    client.pause(&actors.admin, &reason);
+
+    // Calculation should fail when paused
+    let calc_res = client.try_calculate_sla(
+        &actors.operator,
+        &symbol_short!("OUT001"),
+        &symbol_short!("critical"),
+        &15,
+    );
+    assert!(calc_res.is_err());
+
+    // Unpause and verify calculation succeeds
+    client.unpause(&actors.admin);
+    let ok_res = client.calculate_sla(
+        &actors.operator,
+        &symbol_short!("OUT001"),
+        &symbol_short!("critical"),
+        &15,
+    );
+    assert_eq!(ok_res.outage_id, symbol_short!("OUT001"));
+}
+
+#[test]
+fn test_pausable_read_methods_remain_accessible() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+
+    assert_eq!(client.is_paused(), true);
+    assert!(client.get_stats().total_calculations >= 0);
+    assert_eq!(client.get_admin(), actors.admin);
+    assert_eq!(client.get_operator(), actors.operator);
+}

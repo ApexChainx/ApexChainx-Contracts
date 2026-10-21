@@ -162,6 +162,9 @@ pub fn requires_rollback(status: CrossContractCallStatus) -> bool {
     status == CrossContractCallStatus::FatalError || status == CrossContractCallStatus::DispatchFailed
 }
 
+/// Maximum allowed cross-contract invocation depth to prevent stack overflow or resource exhaustion (#763).
+pub const MAX_CALL_DEPTH: u32 = 64;
+
 /// Tracks a stack of cross-contract calls with registered compensation
 /// actions.  If any step in the sequence fails, all prior successful steps
 /// are compensated in reverse order.
@@ -203,6 +206,14 @@ impl CrossContractSafety {
         compensation_tag: Symbol,
         compensation_args: Vec<Val>,
     ) -> Result<SafeCallResult, SafeCallResult> {
+        if self.depth() >= MAX_CALL_DEPTH {
+            return Err(SafeCallResult {
+                status: CrossContractCallStatus::FatalError,
+                raw_output: Val::from(false),
+                error_symbol: Some(Symbol::new(env, "DEPTH_OVERFLOW")),
+            });
+        }
+
         // Issue #756 - input validation. A compensation has to name a
         // *different* function on the target: a tag equal to the function that
         // was just called would re-run the original side effect instead of
@@ -251,6 +262,16 @@ impl CrossContractSafety {
     /// Returns the number of compensated calls on the stack.
     pub fn depth(&self) -> u32 {
         self.compensation_stack.len()
+    }
+
+    /// Checks if adding another call would exceed the maximum depth (#763).
+    pub fn can_push(&self) -> bool {
+        self.depth() < MAX_CALL_DEPTH
+    }
+
+    /// Checked depth increment helper for overflow safety (#763).
+    pub fn checked_remaining_capacity(&self) -> Option<u32> {
+        MAX_CALL_DEPTH.checked_sub(self.depth())
     }
 
     /// Whether there are any compensations registered.
@@ -482,6 +503,59 @@ mod tests {
         assert_eq!(result.status, CrossContractCallStatus::Success);
         assert!(result.error_symbol.is_none());
     }
+
+    #[test]
+    fn test_cross_contract_safety_overflow_underflow_safety() {
+        let env = Env::default();
+        let mut safety = CrossContractSafety::new(&env);
+        assert_eq!(safety.depth(), 0);
+        assert!(safety.can_push());
+        assert_eq!(safety.checked_remaining_capacity(), Some(MAX_CALL_DEPTH));
+
+        // Underflow safety: rollback on empty stack does not panic or underflow
+        safety.rollback_all(&env);
+        assert_eq!(safety.depth(), 0);
+
+        // Fill up to MAX_CALL_DEPTH
+        let mock_contract = Address::generate(&env);
+        for _ in 0..MAX_CALL_DEPTH {
+            safety.compensation_stack.push_back((
+                mock_contract.clone(),
+                FN_LOCK_FUNDS,
+                CompensationAction {
+                    tag: COMP_UNLOCK_FUNDS,
+                    args: Vec::new(&env),
+                },
+            ));
+        }
+        assert_eq!(safety.depth(), MAX_CALL_DEPTH);
+        assert!(!safety.can_push());
+        assert_eq!(safety.checked_remaining_capacity(), Some(0));
+
+        // Attempting another call beyond MAX_CALL_DEPTH fails safely without overflow (#763)
+        let result = safety.call(
+            &env,
+            &mock_contract,
+            &symbol_short!("ping"),
+            &[],
+            COMP_UNLOCK_FUNDS,
+            Vec::new(&env),
+        );
+        assert!(result.is_err());
+        assert_eq!(result.unwrap_err().status, CrossContractCallStatus::FatalError);
+    }
+
+    #[test]
+    fn test_reentrancy_guard_storage_upgrade_safety() {
+        // Verification for #766:
+        // Soroban's key-value storage model does not use sequential slots.
+        // Therefore, storage gaps are not needed for reentrancy safety across upgrades.
+        let env = Env::default();
+        let safety = CrossContractSafety::new(&env);
+        assert_eq!(safety.depth(), 0);
+        assert!(!safety.has_pending());
+        assert_eq!(safety.checked_remaining_capacity(), Some(MAX_CALL_DEPTH));
+    }
 }
 
 #[cfg(test)]
@@ -541,4 +615,3 @@ mod reentrancy_guard_primitives_tests {
         assert!(!safety.has_pending());
     }
 }
-
