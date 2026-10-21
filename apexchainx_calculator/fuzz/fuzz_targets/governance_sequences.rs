@@ -30,10 +30,12 @@ use apexchainx_calculator::SLACalculatorContractClient;
 use libfuzzer_sys::fuzz_target;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::testutils::EnvTestConfig;
+use soroban_sdk::testutils::Ledger as _;
 use soroban_sdk::{Address, Env};
 
 /// Maximum number of operations decoded from a single fuzz input.
 const MAX_OPS: usize = 32;
+const PROPOSAL_EXPIRY_WINDOW: u64 = 90 * 24 * 60 * 60;
 
 const OP_PROPOSE_ADMIN: u8 = 0;
 const OP_ACCEPT_ADMIN: u8 = 1;
@@ -43,7 +45,8 @@ const OP_PROPOSE_OP: u8 = 4;
 const OP_ACCEPT_OP: u8 = 5;
 const OP_CANCEL_OP: u8 = 6;
 const OP_SET_OPERATOR: u8 = 7;
-const OP_COUNT: u8 = 8;
+const OP_ADVANCE_TIME: u8 = 8;
+const OP_COUNT: u8 = 9;
 
 fn read_u32(data: &[u8], pos: &mut usize) -> Option<u32> {
     let end = pos.checked_add(4)?;
@@ -214,6 +217,31 @@ fuzz_target!(|data: &[u8]| {
                         new_op,
                         "set_operator must install the operator"
                     );
+                }
+            }
+            OP_ADVANCE_TIME => {
+                let current_timestamp = env.ledger().timestamp();
+                env.ledger()
+                    .set_timestamp(current_timestamp + PROPOSAL_EXPIRY_WINDOW + 1);
+
+                if let Some(pending_admin) = client.get_pending_admin() {
+                    let current_admin = client.get_admin();
+                    assert!(
+                        client.try_accept_admin(&pending_admin).is_err(),
+                        "an expired admin proposal must not be accepted"
+                    );
+                    assert_eq!(client.get_admin(), current_admin);
+                    assert_eq!(client.get_pending_admin(), Some(pending_admin));
+                }
+
+                if let Some(pending_operator) = client.get_pending_operator() {
+                    let current_operator = client.get_operator();
+                    assert!(
+                        client.try_accept_operator(&pending_operator).is_err(),
+                        "an expired operator proposal must not be accepted"
+                    );
+                    assert_eq!(client.get_operator(), current_operator);
+                    assert_eq!(client.get_pending_operator(), Some(pending_operator));
                 }
             }
             _ => unreachable!(),
