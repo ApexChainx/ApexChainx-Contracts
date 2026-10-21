@@ -37,6 +37,11 @@ pub mod audit_state;
 #[cfg(test)]
 mod auth_matrix_tests;
 
+/// Unit tests for governance (two-step admin/operator handoff, renounce,
+/// single-step set_operator). Resolves issue #818.
+#[cfg(test)]
+mod governance_tests;
+
 pub mod calculation;
 pub mod config;
 pub mod config_bundle;
