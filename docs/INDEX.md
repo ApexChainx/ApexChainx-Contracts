@@ -31,6 +31,7 @@ Legend:
 | [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md) | **Reference** | Community standards |
 | [SECURITY.md](../SECURITY.md) | **Reference** | Vulnerability reporting and binary provenance |
 | [CHANGELOG.md](../CHANGELOG.md) | **Reference** | Release notes, newest first |
+| [ONBOARDING.md](ONBOARDING.md) | **Reference** | First-time contributor onboarding guide (issue #89) |
 
 ## Architecture & project context
 
