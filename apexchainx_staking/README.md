@@ -59,3 +59,17 @@ compact.
 ```bash
 cargo test -p apexchainx_staking
 ```
+
+## Event Emissions (issue #807)
+
+Every state-changing operation emits a Soroban event so that off-chain
+indexers can reconstruct the full staking history without polling storage.
+
+| Operation | Topic\[0\] | Topic\[1\] | Data payload |
+|-----------|-----------|-----------|--------------|
+| `initialize` | `"staking"` | `"init"` | `admin: Address` |
+| `stake` | `"staking"` | `"staked"` | `StakeEventData { staker, amount, new_total }` |
+| `unstake` | `"staking"` | `"unstaked"` | `StakeEventData { staker, amount, new_total }` |
+| `set_reward_rate` | `"staking"` | `"rate_set"` | `new_rate: i128` |
+
+Events are **not** emitted on error paths — a failed call produces no events.

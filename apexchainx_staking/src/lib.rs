@@ -26,6 +26,19 @@
 //!
 //! - **No intermediate heap allocations** on the hot stake/unstake paths:
 //!   arithmetic is done on stack-local `i128` values.
+//!
+//! # Event Emissions (issue #807)
+//!
+//! Every state-changing operation emits a Soroban event so that off-chain
+//! indexers can reconstruct the full staking history without querying contract
+//! storage directly.
+//!
+//! | Operation | Topic[0] | Topic[1] | Data |
+//! |-----------|----------|----------|------|
+//! | `initialize` | `"staking"` | `"init"` | `admin: Address` |
+//! | `stake` | `"staking"` | `"staked"` | `{staker, amount, new_total}` |
+//! | `unstake` | `"staking"` | `"unstaked"` | `{staker, amount, new_total}` |
+//! | `set_reward_rate` | `"staking"` | `"rate_set"` | `new_rate: i128` |
 #![no_std]
 extern crate alloc;
 
@@ -43,6 +56,22 @@ const KEY_ADMIN: Symbol = symbol_short!("ADMIN");
 const KEY_RATE: Symbol = symbol_short!("RATE");
 /// Instance-storage key: total tokens currently staked across all stakers.
 const KEY_TOTAL: Symbol = symbol_short!("TOTAL");
+
+// ---------------------------------------------------------------------------
+// Event topic constants (issue #807)
+// ---------------------------------------------------------------------------
+
+/// Namespace topic shared by every staking event — allows indexers to filter
+/// all staking events in a single subscription.
+const TOPIC_STAKING: Symbol = symbol_short!("staking");
+/// Emitted after a successful `initialize` call.
+const TOPIC_INIT: Symbol = symbol_short!("init");
+/// Emitted after a successful `stake` call.
+const TOPIC_STAKED: Symbol = symbol_short!("staked");
+/// Emitted after a successful `unstake` call.
+const TOPIC_UNSTAKED: Symbol = symbol_short!("unstaked");
+/// Emitted after a successful `set_reward_rate` call.
+const TOPIC_RATE_SET: Symbol = symbol_short!("rate_set");
 
 // ---------------------------------------------------------------------------
 // Contract types
@@ -72,6 +101,21 @@ pub struct StakeInfo {
     pub staked_at: u32,
     /// Pending reward estimate (amount × rate × elapsed_ledgers).
     pub pending_reward: i128,
+}
+
+/// Payload emitted with `staked` and `unstaked` events (issue #807).
+///
+/// A single struct keeps the event data self-contained so indexers can
+/// reconstruct the staking ledger without querying contract storage.
+#[contracttype]
+#[derive(Clone)]
+pub struct StakeEventData {
+    /// The staker address.
+    pub staker: Address,
+    /// The delta amount for this operation.
+    pub amount: i128,
+    /// The updated global staked total after this operation.
+    pub new_total: i128,
 }
 
 // ---------------------------------------------------------------------------
@@ -116,6 +160,8 @@ impl StakingContract {
     /// reward rate. All three values are written to instance storage in one
     /// logical transaction — the cheapest possible initialisation path.
     ///
+    /// **Emits**: `("staking", "init")` → `admin: Address`
+    ///
     /// # Errors
     /// - [`StakingError::AlreadyInitialized`] if the contract is already set up.
     /// - [`StakingError::InvalidRate`] if `reward_rate` is negative.
@@ -141,6 +187,12 @@ impl StakingContract {
         storage.set(&KEY_RATE, &reward_rate);
         storage.set(&KEY_TOTAL, &0_i128);
 
+        // Event emission (issue #807): notify indexers of initialization.
+        env.events().publish(
+            (TOPIC_STAKING, TOPIC_INIT),
+            admin,
+        );
+
         Ok(())
     }
 
@@ -149,6 +201,8 @@ impl StakingContract {
     // -----------------------------------------------------------------------
 
     /// Update the reward rate. Only the admin may call this.
+    ///
+    /// **Emits**: `("staking", "rate_set")` → `new_rate: i128`
     ///
     /// # Errors
     /// - [`StakingError::Unauthorized`] if the caller is not the admin.
@@ -161,6 +215,13 @@ impl StakingContract {
         let admin: Address = env.storage().instance().get(&KEY_ADMIN).unwrap();
         admin.require_auth();
         env.storage().instance().set(&KEY_RATE, &new_rate);
+
+        // Event emission (issue #807): notify indexers of rate change.
+        env.events().publish(
+            (TOPIC_STAKING, TOPIC_RATE_SET),
+            new_rate,
+        );
+
         Ok(())
     }
 
@@ -174,6 +235,8 @@ impl StakingContract {
     /// - Staker record is loaded at most once (`persistent().get`).
     /// - Global total is loaded from instance cache (free after first read).
     /// - The new `StakeRecord` is written back in one persistent write.
+    ///
+    /// **Emits**: `("staking", "staked")` → `StakeEventData { staker, amount, new_total }`
     ///
     /// # Errors
     /// - [`StakingError::InvalidAmount`] if `amount` is not positive.
@@ -211,9 +274,18 @@ impl StakingContract {
             .instance()
             .get(&KEY_TOTAL)
             .unwrap_or(0_i128);
-        env.storage()
-            .instance()
-            .set(&KEY_TOTAL, &total.saturating_add(amount));
+        let new_total = total.saturating_add(amount);
+        env.storage().instance().set(&KEY_TOTAL, &new_total);
+
+        // Event emission (issue #807): broadcast the state change to indexers.
+        env.events().publish(
+            (TOPIC_STAKING, TOPIC_STAKED),
+            StakeEventData {
+                staker,
+                amount,
+                new_total,
+            },
+        );
 
         Ok(())
     }
@@ -224,6 +296,8 @@ impl StakingContract {
     /// - Record loaded once, validated in-memory, written back once.
     /// - If the full balance is withdrawn the key is *removed* rather than
     ///   written with `amount = 0`, freeing storage rent immediately.
+    ///
+    /// **Emits**: `("staking", "unstaked")` → `StakeEventData { staker, amount, new_total }`
     ///
     /// # Errors
     /// - [`StakingError::NoStake`] if the staker has no active position.
@@ -272,6 +346,16 @@ impl StakingContract {
             .unwrap_or(0_i128);
         let new_total = total.saturating_sub(amount);
         env.storage().instance().set(&KEY_TOTAL, &new_total);
+
+        // Event emission (issue #807): broadcast the state change to indexers.
+        env.events().publish(
+            (TOPIC_STAKING, TOPIC_UNSTAKED),
+            StakeEventData {
+                staker,
+                amount,
+                new_total,
+            },
+        );
 
         Ok(())
     }
@@ -345,8 +429,8 @@ impl StakingContract {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
-    use soroban_sdk::Env;
+    use soroban_sdk::testutils::{Address as _, Events, Ledger};
+    use soroban_sdk::{symbol_short, Env, TryIntoVal};
 
     fn setup() -> (Env, Address, Address) {
         let env = Env::default();
@@ -355,6 +439,8 @@ mod tests {
         let admin = Address::generate(&env);
         (env, contract_id, admin)
     }
+
+    // ── #806 gas-optimization tests ────────────────────────────────────────
 
     #[test]
     fn test_initialize_sets_admin_and_rate() {
@@ -474,5 +560,102 @@ mod tests {
         client.initialize(&admin, &1_i128);
         let res = client.try_set_reward_rate(&-1_i128);
         assert!(res.is_err());
+    }
+
+    // ── #807 event-emission tests ───────────────────────────────────────────
+
+    #[test]
+    fn test_initialize_emits_init_event() {
+        let (env, contract_id, admin) = setup();
+        let client = StakingContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &10_i128);
+
+        let all_events = env.events().all();
+        let found = all_events.iter().any(|(_, topics, _)| {
+            if topics.len() < 2 {
+                return false;
+            }
+            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            t0 == TOPIC_STAKING && t1 == TOPIC_INIT
+        });
+        assert!(found, "expected 'staking/init' event");
+    }
+
+    #[test]
+    fn test_stake_emits_staked_event() {
+        let (env, contract_id, admin) = setup();
+        let client = StakingContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &1_i128);
+        let staker = Address::generate(&env);
+        client.stake(&staker, &200_i128);
+
+        let all_events = env.events().all();
+        let found = all_events.iter().any(|(_, topics, _)| {
+            if topics.len() < 2 {
+                return false;
+            }
+            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            t0 == TOPIC_STAKING && t1 == TOPIC_STAKED
+        });
+        assert!(found, "expected 'staking/staked' event");
+    }
+
+    #[test]
+    fn test_unstake_emits_unstaked_event() {
+        let (env, contract_id, admin) = setup();
+        let client = StakingContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &1_i128);
+        let staker = Address::generate(&env);
+        client.stake(&staker, &100_i128);
+        client.unstake(&staker, &50_i128);
+
+        let all_events = env.events().all();
+        let found = all_events.iter().any(|(_, topics, _)| {
+            if topics.len() < 2 {
+                return false;
+            }
+            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            t0 == TOPIC_STAKING && t1 == TOPIC_UNSTAKED
+        });
+        assert!(found, "expected 'staking/unstaked' event");
+    }
+
+    #[test]
+    fn test_set_reward_rate_emits_rate_set_event() {
+        let (env, contract_id, admin) = setup();
+        let client = StakingContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &1_i128);
+        client.set_reward_rate(&7_i128);
+
+        let all_events = env.events().all();
+        let found = all_events.iter().any(|(_, topics, _)| {
+            if topics.len() < 2 {
+                return false;
+            }
+            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            t0 == TOPIC_STAKING && t1 == TOPIC_RATE_SET
+        });
+        assert!(found, "expected 'staking/rate_set' event");
+    }
+
+    #[test]
+    fn test_no_events_emitted_on_error() {
+        let (env, contract_id, admin) = setup();
+        let client = StakingContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &1_i128);
+        // Record event count after initialization.
+        let before_count = env.events().all().len();
+        // Attempt a failing stake (amount = 0) — should not add events.
+        let staker = Address::generate(&env);
+        let _ = client.try_stake(&staker, &0_i128);
+        assert_eq!(
+            env.events().all().len(),
+            before_count,
+            "failing call must not emit events"
+        );
     }
 }
