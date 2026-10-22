@@ -121,7 +121,7 @@ Stating the gaps is as important as stating the coverage.
   `config_mutation_sequences` exercises it only incidentally.
 - **Storage cost and footprint are out of scope.** See
   `storage_footprint_tests.rs` and `docs/STORAGE_FOOTPRINT_POLICY.md`.
-- **Cross-contract behaviour is out of scope.** See `cross_contract_safety.rs`.
+- **Cross-contract behaviour is covered by unit and property tests, not the pure fuzz targets.** `cross_contract_safety.rs` checks call status and depth boundaries; `fuzz_tests.rs` generates call/finalize/rollback sequences and asserts guard depth, remaining capacity, and pending-state invariants after every step.
 - **The pure targets do not construct an `Env`.** They exercise pure functions
   only; nothing about storage, ledger state or the budget is asserted by them.
 - **Fuzzing proves absence of counterexamples found, not absence of bugs.** A
