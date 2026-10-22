@@ -38,6 +38,20 @@ mod auth_matrix_tests {
     }
 
     #[test]
+    fn test_pause_authorization_precedes_invalid_reason_validation() {
+        let env = Env::default();
+        let (_, operator, client) = setup(&env);
+        let reason = alloc::format!("{}", "x".repeat(crate::MAX_REASON_LEN + 1));
+        let reason = soroban_sdk::String::from_str(&env, &reason);
+
+        assert_eq!(
+            client.try_pause(&operator, &reason),
+            Err(Ok(crate::SLAError::Unauthorized))
+        );
+        assert!(!client.is_paused());
+    }
+
+    #[test]
     fn test_only_admin_can_set_operator() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
