@@ -97,6 +97,15 @@ that no sequence leaves the contract inconsistent: canonical snapshot shape and
 ordering, cross-severity penalty ordering, retention bounds, custom severities
 never shadowing canonical names, and history staying bounded and well-formed.
 
+### `governance_sequences`
+
+Stateful. Generates admin and operator role-transfer sequences, including
+proposal, acceptance, cancellation, direct operator updates, renunciation, and
+ledger-time advancement. Advancing time past the 90-day expiry window must
+reject each pending proposal without changing the active role or clearing the
+pending slot. Boundary behavior at exactly 90 days and 90 days plus one second
+is also pinned by the governance unit tests.
+
 ## What the fuzz suite does not guarantee
 
 Stating the gaps is as important as stating the coverage.
