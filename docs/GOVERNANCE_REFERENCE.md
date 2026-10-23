@@ -99,6 +99,22 @@ silent role grant. (#590)
 4. Expiry events (`adm_xp`/`op_xp`) are emitted **at most once** per proposal;
    a subsequent accept attempt emits nothing.
 
+## 6. Governance errors
+
+Governance entrypoints return the contract's typed `SLAError` values; they do
+not use string-based `require` failures. Consumers should branch on the error
+code rather than parse a message:
+
+| Error | Meaning |
+|---|---|
+| `Unauthorized` | Caller does not hold the required role or is not the pending candidate |
+| `NoPendingTransfer` | An accept or cancel was requested without a pending proposal |
+| `ProposalExpired` | The pending proposal is outside its acceptance window |
+| `InvalidInput` | A proposed admin is the current admin or the caller |
+
+These are stable contract error codes. Unit tests pin representative governance
+failure paths to their typed variants in `governance_tests.rs`.
+
 ---
 
 ## Operational Guards: Pause vs Freeze
