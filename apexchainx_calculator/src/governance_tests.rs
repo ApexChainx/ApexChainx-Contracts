@@ -347,6 +347,35 @@ mod governance_tests {
         assert!(result.is_err(), "operator must not call set_operator");
     }
 
+    /// An authenticated operator must not inherit admin governance authority.
+    #[test]
+    fn test_operator_cannot_call_admin_governance_mutations() {
+        let env = Env::default();
+        let (admin, operator, client) = setup(&env);
+        let pending_admin = Address::generate(&env);
+        let pending_operator = Address::generate(&env);
+        let replacement = Address::generate(&env);
+
+        client.propose_admin(&admin, &pending_admin);
+        client.propose_operator(&admin, &pending_operator);
+
+        assert!(client
+            .try_propose_admin(&operator, &replacement)
+            .is_err());
+        assert!(client
+            .try_propose_operator(&operator, &replacement)
+            .is_err());
+        assert!(client.try_cancel_admin_proposal(&operator).is_err());
+        assert!(client.try_cancel_operator_proposal(&operator).is_err());
+        assert!(client.try_renounce_admin(&operator).is_err());
+        assert!(client.try_set_operator(&operator, &replacement).is_err());
+
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_operator(), operator);
+        assert_eq!(client.get_pending_admin(), Some(pending_admin));
+        assert_eq!(client.get_pending_operator(), Some(pending_operator));
+    }
+
     // ── Query functions ───────────────────────────────────────────────────
 
     /// get_pending_admin returns None when no proposal is active.

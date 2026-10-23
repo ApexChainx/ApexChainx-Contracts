@@ -48,6 +48,14 @@ The `get_public_api()` descriptor reflects these tiers in its `auth` column
 | `renounce_admin` | admin |
 | `set_operator` | admin (legacy single-step break-glass) |
 
+Every admin-tier governance mutation checks the caller's current admin role;
+an authenticated operator does not inherit admin authority. The candidate
+address is the only caller that can accept a pending role transfer, while
+pending-role queries remain public. The test
+`test_operator_cannot_call_admin_governance_mutations` pins the operator/admin
+boundary across proposal, cancellation, renunciation, and direct operator
+assignment.
+
 ### Config & admin surface
 
 | Method | Tier |
