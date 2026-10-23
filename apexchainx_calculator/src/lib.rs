@@ -1817,12 +1817,12 @@ impl SLACalculatorContract {
     /// Emits a `paused` event.
     /// Optimized for gas (#771): validates input bounds early and caches instance storage reference.
     pub fn pause(env: Env, caller: Address, reason: String) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+
         if reason.len() > MAX_REASON_LEN as u32 {
             return Err(SLAError::InvalidInput);
         }
-
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
 
         let paused_at = env.ledger().timestamp();
         let storage = env.storage().instance();
