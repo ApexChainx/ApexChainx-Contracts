@@ -6,8 +6,12 @@
 #[cfg(test)]
 mod governance_tests {
     #![allow(clippy::module_inception)]
-    use crate::{SLACalculatorContract, SLACalculatorContractClient};
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::{
+        SLACalculatorContract, SLACalculatorContractClient, EVENT_ADMIN_ACC, EVENT_ADMIN_PROP,
+    };
+    use soroban_sdk::{
+        testutils::Address as _, testutils::Events, Address, Env, TryIntoVal,
+    };
 
     /// Creates a fresh contract environment with admin and operator initialized.
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -40,6 +44,36 @@ mod governance_tests {
         assert_eq!(client.get_pending_admin(), None);
         // New admin should now be the stored admin
         assert_eq!(client.get_admin(), new_admin);
+    }
+
+    /// Admin proposal and acceptance each emit their corresponding event.
+    #[test]
+    fn test_admin_handoff_emits_proposal_and_acceptance_events() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+
+        client.propose_admin(&admin, &new_admin);
+        client.accept_admin(&new_admin);
+
+        let events = env.events().all();
+        let mut proposal_count = 0;
+        let mut acceptance_count = 0;
+        for i in 0..events.len() {
+            let (_, topics, _) = events.get(i).unwrap();
+            if !topics.is_empty() {
+                let name = topics.get(0).unwrap().try_into_val(&env).unwrap();
+                if name == EVENT_ADMIN_PROP {
+                    proposal_count += 1;
+                }
+                if name == EVENT_ADMIN_ACC {
+                    acceptance_count += 1;
+                }
+            }
+        }
+
+        assert_eq!(proposal_count, 1);
+        assert_eq!(acceptance_count, 1);
     }
 
     /// Old admin loses authority once the new admin accepts.
