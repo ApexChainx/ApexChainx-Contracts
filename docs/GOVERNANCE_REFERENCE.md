@@ -43,6 +43,12 @@ A proposal moves through at most four states:
   rejected with `NoPendingTransfer` and emits nothing, so the expiry transition
   is emitted **at most once** and is idempotent for indexers. (#589)
 
+### Gas behavior
+
+`propose_admin` reuses the admin address returned by its authorization check
+when validating that the candidate is distinct. This avoids a second read of
+the admin storage key without changing the authorization or validation rules.
+
 ## 3. Renounce (`renounce_admin`) — invalidation rules
 
 `renounce_admin` permanently removes the admin role. It is **irreversible**.
