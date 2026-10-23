@@ -699,4 +699,73 @@ mod tests {
             "failing call must not emit events"
         );
     }
+
+    // ── #812 access-control audit tests ────────────────────────────────────
+
+    /// Non-admin caller must be rejected by `set_reward_rate`.
+    ///
+    /// Verifies the access-control boundary identified in the #812 audit:
+    /// only the stored admin address may update the reward rate.
+    #[test]
+    fn test_unauthorized_set_reward_rate_rejected() {
+        // Use explicit auth mocking so we can control which address signs.
+        let env = Env::default();
+        let contract_id = env.register_contract(None, StakingContract);
+        let admin = Address::generate(&env);
+        let attacker = Address::generate(&env);
+
+        let client = StakingContractClient::new(&env, &contract_id);
+
+        // Initialize with admin — mock admin auth only.
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &admin,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "initialize",
+                args: (&admin, 1_i128).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        client.initialize(&admin, &1_i128);
+
+        // Attempt to set the reward rate as the attacker — must fail.
+        env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+            address: &attacker,
+            invoke: &soroban_sdk::testutils::MockAuthInvoke {
+                contract: &contract_id,
+                fn_name: "set_reward_rate",
+                args: (99_i128,).into_val(&env),
+                sub_invokes: &[],
+            },
+        }]);
+        let result = client.try_set_reward_rate(&99_i128);
+        assert!(
+            result.is_err(),
+            "non-admin must not be able to set reward rate"
+        );
+
+        // Rate must remain unchanged.
+        assert_eq!(client.reward_rate(), 1_i128, "rate must not change after failed auth");
+    }
+
+    /// Re-initialization by any caller must be rejected.
+    ///
+    /// Verifies the `AlreadyInitialized` guard documented in the #812 audit.
+    #[test]
+    fn test_reinitialize_rejected_after_init() {
+        let (env, contract_id, admin) = setup();
+        let client = StakingContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &1_i128);
+
+        // Second initialize attempt — must fail regardless of caller.
+        let attacker = Address::generate(&env);
+        let result = client.try_initialize(&attacker, &100_i128);
+        assert!(
+            result.is_err(),
+            "re-initialization must be rejected after first init"
+        );
+
+        // Admin must remain unchanged.
+        assert_eq!(client.get_admin(), admin, "admin must not change after failed re-init");
+    }
 }
