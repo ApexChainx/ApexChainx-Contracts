@@ -99,6 +99,11 @@ silent role grant. (#590)
 4. Expiry events (`adm_xp`/`op_xp`) are emitted **at most once** per proposal;
    a subsequent accept attempt emits nothing.
 
+`test_governance_role_rotation_end_to_end` exercises both role transfers through
+the contract client: the old operator remains authorized until acceptance,
+loses authority afterward, and the replaced admin cannot initiate a later
+proposal.
+
 ---
 
 ## Operational Guards: Pause vs Freeze

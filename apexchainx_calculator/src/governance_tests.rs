@@ -399,4 +399,54 @@ mod governance_tests {
         client.set_operator(&admin, &direct);
         assert_eq!(client.get_operator(), direct);
     }
+
+    /// Exercise a complete role rotation through the contract client.
+    #[test]
+    fn test_governance_role_rotation_end_to_end() {
+        use soroban_sdk::symbol_short;
+
+        let env = Env::default();
+        let (admin, old_operator, client) = setup(&env);
+        let new_operator = Address::generate(&env);
+        let new_admin = Address::generate(&env);
+
+        client.propose_operator(&admin, &new_operator);
+        assert_eq!(client.get_operator(), old_operator);
+        assert_eq!(
+            client.get_pending_operator(),
+            Some(new_operator.clone())
+        );
+        client.calculate_sla(
+            &old_operator,
+            &symbol_short!("OLD_OP"),
+            &symbol_short!("high"),
+            &10,
+        );
+
+        client.accept_operator(&new_operator);
+        assert_eq!(client.get_operator(), new_operator);
+        assert_eq!(client.get_pending_operator(), None);
+        assert!(client
+            .try_calculate_sla(
+                &old_operator,
+                &symbol_short!("OLD_FAIL"),
+                &symbol_short!("high"),
+                &10
+            )
+            .is_err());
+        client.calculate_sla(
+            &new_operator,
+            &symbol_short!("NEW_OP"),
+            &symbol_short!("high"),
+            &10,
+        );
+
+        client.propose_admin(&admin, &new_admin);
+        client.accept_admin(&new_admin);
+        assert_eq!(client.get_admin(), new_admin);
+        assert_eq!(client.get_pending_admin(), None);
+        assert!(client
+            .try_propose_operator(&admin, &Address::generate(&env))
+            .is_err());
+    }
 }
