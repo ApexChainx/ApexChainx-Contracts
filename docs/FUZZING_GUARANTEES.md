@@ -101,18 +101,23 @@ never shadowing canonical names, and history staying bounded and well-formed.
 
 Stateful. Generates admin and operator role-transfer sequences, including
 proposal, acceptance, cancellation, direct operator updates, renunciation, and
-ledger-time advancement. Advancing time past the 90-day expiry window must
-reject each pending proposal without changing the active role or clearing the
-pending slot. Boundary behavior at exactly 90 days and 90 days plus one second
-is also pinned by the governance unit tests.
+ledger-time advancement. The harness tracks the active admin and operator
+after every successful handoff and checks that each still matches contract
+storage after every operation. Advancing time past the 90-day expiry window
+must reject each pending proposal without changing the active role or clearing
+the pending slot. Boundary behavior at exactly 90 days and 90 days plus one
+second is also pinned by the governance unit tests.
 
 ## What the fuzz suite does not guarantee
 
 Stating the gaps is as important as stating the coverage.
 
-- **Authorization and lifecycle are not fuzzed.** `require_admin`,
-  `require_operator`, pause/unpause, config freeze and the two-step governance
-  transfers are covered by `auth_matrix_tests` and `tests.rs`, not here.
+- **External authorization signatures are mocked in the stateful target.**
+  Governance role transitions and role-state consistency are fuzzed by
+  `governance_sequences`; caller-role rejection and other authorization
+  boundaries are covered by `auth_matrix_tests` and `governance_tests.rs`.
+  Pause/unpause and config-freeze access boundaries are covered by the auth
+  matrix as well.
 - **Event payloads are not asserted by the pure targets.** `compute_result` and
   `validate_config` emit nothing. Event shape and topic stability are covered by
   `event_schema.rs`, `topic_stability_tests.rs` and `event_ordering_tests.rs`.

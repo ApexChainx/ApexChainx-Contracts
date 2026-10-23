@@ -11,6 +11,7 @@
 //! * `propose_admin(X)` ok ⇒ `get_pending_admin()` is `Some(X)`.
 //! * `cancel_admin_proposal` / `accept_admin` ok ⇒ the pending admin slot is
 //!   cleared.
+//! * the stored admin matches the last accepted candidate until renunciation.
 //! * Only the *named proposed address* can accept a pending proposal; accepting
 //!   with any other address must fail (`Unauthorized`).
 //! * `renounce_admin` ok ⇒ every pending slot (admin *and* operator) is
@@ -18,6 +19,7 @@
 //! * Operator handoff mirrors admin: `propose_operator(X)` ⇒ pending operator
 //!   is `Some(X)`, `accept_operator`/`cancel_operator_proposal` clear it, and
 //!   a successful `accept_operator` installs the accepted address.
+//! * the stored operator matches the last accepted or directly assigned address.
 //!
 //! Everything runs through the `try_*` client variants so a *rejected* op
 //! (no pending transfer, wrong proposer, admin renounced, expired proposal)
@@ -66,8 +68,8 @@ fuzz_target!(|data: &[u8]| {
     env.mock_all_auths();
     let cid = env.register_contract(None, SLACalculatorContract);
     let client = SLACalculatorContractClient::new(&env, &cid);
-    let admin = Address::generate(&env);
-    let operator = Address::generate(&env);
+    let mut admin = Address::generate(&env);
+    let mut operator = Address::generate(&env);
     client.initialize(&admin, &operator);
 
     // A small address pool so sequences can propose/accept distinct parties.
@@ -127,6 +129,7 @@ fuzz_target!(|data: &[u8]| {
                             would_be,
                             "accept_admin must promote the caller"
                         );
+                        admin = would_be;
                     }
                 }
             }
@@ -190,6 +193,7 @@ fuzz_target!(|data: &[u8]| {
                         would_be,
                         "accept_operator must install the caller"
                     );
+                    operator = would_be;
                 }
             }
             OP_CANCEL_OP => {
@@ -217,6 +221,7 @@ fuzz_target!(|data: &[u8]| {
                         new_op,
                         "set_operator must install the operator"
                     );
+                    operator = new_op;
                 }
             }
             OP_ADVANCE_TIME => {
@@ -246,13 +251,30 @@ fuzz_target!(|data: &[u8]| {
             }
             _ => unreachable!(),
         }
+
+        assert_eq!(
+            client.get_operator(),
+            operator,
+            "the active operator must match the last successful handoff"
+        );
+        if !renounced {
+            assert_eq!(
+                client.get_admin(),
+                admin,
+                "the active admin must match the last successful handoff"
+            );
+        }
         ops += 1;
     }
 
     // Terminal invariant: after any sequence, a renounced contract has no
-    // pending role entries and an accepted role is the current one.
+    // pending role entries and active roles match the last successful changes.
     if renounced {
         assert!(client.get_pending_admin().is_none());
         assert!(client.get_pending_operator().is_none());
+    }
+    assert_eq!(client.get_operator(), operator);
+    if !renounced {
+        assert_eq!(client.get_admin(), admin);
     }
 });
