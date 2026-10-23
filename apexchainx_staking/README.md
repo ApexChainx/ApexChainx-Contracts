@@ -6,22 +6,25 @@ platform.
 
 ## Overview
 
-Stakers lock tokens into the contract and accrue a configurable reward based on
-the number of ledger sequences elapsed since staking. An admin address controls
-the reward rate and contract lifecycle.
+Stakers record token amounts in the contract and accrue an estimated reward
+based on the number of ledger sequences elapsed since the stake was last
+modified. An admin address controls the reward rate and contract lifecycle.
 
 ## Public API
 
 | Method | Auth required | Description |
 |--------|---------------|-------------|
 | `initialize(admin, reward_rate)` | `admin` | One-time setup — sets admin, rate, and zero total. |
-| `stake(staker, amount)` | `staker` | Stake `amount` tokens. Accumulates into existing balance. |
-| `unstake(staker, amount)` | `staker` | Partially or fully withdraw staked tokens. |
-| `get_stake(staker)` | none | Returns `StakeInfo` (amount, staked_at, pending_reward). |
-| `total_staked()` | none | Sum of all staked tokens. |
-| `reward_rate()` | none | Current reward rate. |
-| `get_admin()` | none | Current admin address. |
-| `set_reward_rate(new_rate)` | `admin` | Update the reward rate. |
+| `stake(staker, amount)` | `staker` | Add a positive amount to the balance and reset its `staked_at` ledger. |
+| `unstake(staker, amount)` | `staker` | Remove a positive amount up to the current balance; a full withdrawal removes the record. |
+| `get_stake(staker)` | none | Return amount, last-modified ledger, and estimated pending reward; errors if no record exists. |
+| `total_staked()` | none | Return the aggregate recorded stake, or zero before initialization. |
+| `reward_rate()` | none | Return the current reward rate, or zero before initialization. |
+| `get_admin()` | none | Return the configured admin; panics before initialization. |
+| `set_reward_rate(new_rate)` | `admin` | Set a non-negative reward rate. |
+
+The Rust API documentation on each public contract method describes its
+arguments, authorization, return value, errors, and emitted events.
 
 ## Gas Optimization Strategy (issue #806)
 
