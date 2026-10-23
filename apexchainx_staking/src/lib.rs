@@ -162,6 +162,13 @@ impl StakingContract {
     ///
     /// **Emits**: `("staking", "init")` → `admin: Address`
     ///
+    /// # Arguments
+    /// * `admin` - Address authorized to update the reward rate.
+    /// * `reward_rate` - Initial non-negative reward units per staked unit per ledger.
+    ///
+    /// # Returns
+    /// `Ok(())` after initialization succeeds.
+    ///
     /// # Errors
     /// - [`StakingError::AlreadyInitialized`] if the contract is already set up.
     /// - [`StakingError::InvalidRate`] if `reward_rate` is negative.
@@ -204,6 +211,12 @@ impl StakingContract {
     ///
     /// **Emits**: `("staking", "rate_set")` → `new_rate: i128`
     ///
+    /// # Arguments
+    /// * `new_rate` - Non-negative reward units per staked unit per ledger.
+    ///
+    /// # Returns
+    /// `Ok(())` after the rate is updated.
+    ///
     /// # Errors
     /// - [`StakingError::Unauthorized`] if the caller is not the admin.
     /// - [`StakingError::InvalidRate`] if `new_rate` is negative.
@@ -237,6 +250,13 @@ impl StakingContract {
     /// - The new `StakeRecord` is written back in one persistent write.
     ///
     /// **Emits**: `("staking", "staked")` → `StakeEventData { staker, amount, new_total }`
+    ///
+    /// # Arguments
+    /// * `staker` - Address authorizing and receiving the stake record.
+    /// * `amount` - Positive amount to add to the staker's balance.
+    ///
+    /// # Returns
+    /// `Ok(())` after the staker balance and global total are updated.
     ///
     /// # Errors
     /// - [`StakingError::InvalidAmount`] if `amount` is not positive.
@@ -298,6 +318,13 @@ impl StakingContract {
     ///   written with `amount = 0`, freeing storage rent immediately.
     ///
     /// **Emits**: `("staking", "unstaked")` → `StakeEventData { staker, amount, new_total }`
+    ///
+    /// # Arguments
+    /// * `staker` - Address authorizing the withdrawal.
+    /// * `amount` - Positive amount to remove from the staker's balance.
+    ///
+    /// # Returns
+    /// `Ok(())` after the staker balance and global total are updated.
     ///
     /// # Errors
     /// - [`StakingError::NoStake`] if the staker has no active position.
@@ -369,6 +396,12 @@ impl StakingContract {
     /// Reward estimate = `amount × rate × (current_ledger − staked_at)`.
     /// This is view-only and does not modify state.
     ///
+    /// # Arguments
+    /// * `staker` - Address whose stake and reward estimate are queried.
+    ///
+    /// # Returns
+    /// The staker's amount, last-modified ledger, and estimated pending reward.
+    ///
     /// # Errors
     /// - [`StakingError::NoStake`] if the staker has no active position.
     pub fn get_stake(env: Env, staker: Address) -> Result<StakeInfo, StakingError> {
@@ -398,6 +431,8 @@ impl StakingContract {
     }
 
     /// Return the total amount of tokens staked across all stakers.
+    ///
+    /// Returns zero before initialization or when no stake is recorded.
     pub fn total_staked(env: Env) -> i128 {
         env.storage()
             .instance()
@@ -406,6 +441,8 @@ impl StakingContract {
     }
 
     /// Return the current reward rate.
+    ///
+    /// Returns zero before initialization.
     pub fn reward_rate(env: Env) -> i128 {
         env.storage()
             .instance()
@@ -415,8 +452,12 @@ impl StakingContract {
 
     /// Return the admin address.
     ///
+    /// # Returns
+    /// The address configured by [`StakingContract::initialize`].
+    ///
     /// # Errors
-    /// Panics if the contract has not been initialized yet.
+    /// Panics if the contract has not been initialized yet because no admin is
+    /// stored.
     pub fn get_admin(env: Env) -> Address {
         env.storage().instance().get(&KEY_ADMIN).unwrap()
     }
