@@ -823,3 +823,159 @@ mod cross_contract_safety_tests {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// Pausable state-change fuzz tests (issue #775)
+//
+// Property 1 (reason-length guard): `pause()` must reject any reason whose
+//   UTF-8 byte length exceeds MAX_REASON_LEN (256).  For lengths ≤ 256 the
+//   call must succeed.
+//
+// Property 2 (toggle consistency): After any sequence of pause/unpause
+//   cycles the contract's `is_paused()` value must exactly match the parity
+//   of the last completed operation: odd step count ⟹ paused, even ⟹ not
+//   paused.  A paused contract must always report a non-None `get_pause_info`,
+//   and an unpaused contract must always report None.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod pausable_fuzz_tests {
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use proptest::prelude::*;
+    use soroban_sdk::{testutils::Address as _, Address, Env, String as SorobanString};
+
+    /// Stand up a fresh, initialised contract inside the given `Env`.
+    fn setup(env: &Env) -> (Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        let cid = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(env, &cid);
+        let admin = Address::generate(env);
+        let operator = Address::generate(env);
+        client.initialize(&admin, &operator);
+        (admin, client)
+    }
+
+    // -----------------------------------------------------------------
+    // Property 1: reason-length guard
+    //
+    // We generate reasons of varying length using the ASCII lowercase
+    // alphabet ('a'–'z') so they are always valid UTF-8 and their byte
+    // length equals their character count.  The property under test is:
+    //
+    //   pause(reason) succeeds  ⟺  reason.len() ≤ MAX_REASON_LEN (256)
+    // -----------------------------------------------------------------
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(512))]
+
+        /// `pause` accepts reasons up to MAX_REASON_LEN bytes and rejects
+        /// anything longer.
+        #[test]
+        fn test_fuzz_pausable_reason_length(
+            // We test lengths from 0 to 300 to cover the boundary both ways.
+            reason_len in 0usize..=300,
+        ) {
+            const MAX_REASON_LEN: usize = 256;
+
+            let env = Env::default();
+            let (admin, client) = setup(&env);
+
+            // Build a plain ASCII reason of exactly `reason_len` bytes.
+            // 'a' (0x61) is safe for every Soroban String implementation.
+            let rust_reason = "a".repeat(reason_len);
+            let reason = SorobanString::from_str(&env, &rust_reason);
+
+            let result = client.try_pause(&admin, &reason);
+
+            if reason_len <= MAX_REASON_LEN {
+                prop_assert!(
+                    result.is_ok(),
+                    "pause should succeed for reason_len={} (≤ MAX_REASON_LEN={}), got {:?}",
+                    reason_len,
+                    MAX_REASON_LEN,
+                    result.err()
+                );
+                // Confirm state is consistent after a successful pause.
+                prop_assert!(client.is_paused(), "is_paused() must be true after pause()");
+                prop_assert!(
+                    client.get_pause_info().is_some(),
+                    "get_pause_info() must be Some after pause()"
+                );
+            } else {
+                prop_assert!(
+                    result.is_err(),
+                    "pause should fail for reason_len={} (> MAX_REASON_LEN={})",
+                    reason_len,
+                    MAX_REASON_LEN
+                );
+                // State must remain unchanged on rejection.
+                prop_assert!(!client.is_paused(), "is_paused() must stay false after rejected pause()");
+                prop_assert!(
+                    client.get_pause_info().is_none(),
+                    "get_pause_info() must remain None after rejected pause()"
+                );
+            }
+        }
+    }
+
+    // -----------------------------------------------------------------
+    // Property 2: pause/unpause toggle consistency
+    //
+    // We fuzz the number of full pause→unpause cycles (1–16) and verify
+    // that after every individual step:
+    //   • `is_paused()` matches the expected parity (paused on odd steps,
+    //     unpaused on even steps).
+    //   • `get_pause_info()` is Some iff the contract is paused.
+    //
+    // Each cycle uses a distinct outage-safe reason string so the
+    // contract never sees a duplicate reason that could affect state.
+    // -----------------------------------------------------------------
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        /// Repeated pause/unpause cycles keep `is_paused()` and
+        /// `get_pause_info()` in sync with the actual contract state.
+        #[test]
+        fn test_fuzz_pausable_state_toggle(
+            // Number of full (pause + unpause) cycles to execute: 1–16.
+            cycles in 1usize..=16,
+        ) {
+            let env = Env::default();
+            let (admin, client) = setup(&env);
+
+            // Contract starts unpaused.
+            prop_assert!(!client.is_paused());
+            prop_assert!(client.get_pause_info().is_none());
+
+            for cycle in 0..cycles {
+                // --- Pause ---
+                let reason = alloc::format!("fuzz-cycle-{}", cycle);
+                let soroban_reason = SorobanString::from_str(&env, &reason);
+                client.pause(&admin, &soroban_reason);
+
+                prop_assert!(
+                    client.is_paused(),
+                    "is_paused() must be true after pause in cycle {}",
+                    cycle
+                );
+                prop_assert!(
+                    client.get_pause_info().is_some(),
+                    "get_pause_info() must be Some after pause in cycle {}",
+                    cycle
+                );
+
+                // --- Unpause ---
+                client.unpause(&admin);
+
+                prop_assert!(
+                    !client.is_paused(),
+                    "is_paused() must be false after unpause in cycle {}",
+                    cycle
+                );
+                prop_assert!(
+                    client.get_pause_info().is_none(),
+                    "get_pause_info() must be None after unpause in cycle {}",
+                    cycle
+                );
+            }
+        }
+    }
+}
