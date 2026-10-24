@@ -3189,6 +3189,16 @@ fn test_get_pause_info_none_when_not_paused() {
 }
 
 #[test]
+fn test_pausable_storage_keys_are_stable() {
+    // Storage key names are locked. Changing them would break deployed contract state.
+    // PAUSED_KEY must remain "PAUSED" and PAUSE_INFO_KEY must remain "PAUSEINF".
+    // This test documents the invariant for upgrade safety (#777).
+    // See docs/issue-777-pausable-storage-gap.md for full rationale.
+    assert_eq!(crate::PAUSED_KEY, soroban_sdk::symbol_short!("PAUSED"));
+    assert_eq!(crate::PAUSE_INFO_KEY, soroban_sdk::symbol_short!("PAUSEINF"));
+}
+
+#[test]
 #[should_panic]
 fn test_calculate_sla_view_rejects_unknown_severity() {
     let (env, client, _actors) = setup();
@@ -11926,4 +11936,29 @@ fn test_pausable_read_methods_remain_accessible() {
     assert!(client.get_stats().total_calculations >= 0);
     assert_eq!(client.get_admin(), actors.admin);
     assert_eq!(client.get_operator(), actors.operator);
+}
+
+// ============================================================
+// Issue #773 – Pausable event topic structure assertions
+// ============================================================
+
+#[test]
+fn test_pause_event_topic_count_is_three() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+
+    let events = env.events().all();
+    let (_, topics, _) = events.last().unwrap();
+    assert_eq!(topics.len(), 3, "paused event must have exactly 3 topics");
+}
+
+#[test]
+fn test_unpause_event_topic_count_is_three() {
+    let (env, client, actors) = setup();
+    client.pause(&actors.admin, &soroban_sdk::String::from_str(&env, "maintenance"));
+    client.unpause(&actors.admin);
+
+    let events = env.events().all();
+    let (_, topics, _) = events.last().unwrap();
+    assert_eq!(topics.len(), 3, "unpause event must have exactly 3 topics");
 }

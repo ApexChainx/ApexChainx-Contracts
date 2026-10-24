@@ -1817,12 +1817,12 @@ impl SLACalculatorContract {
     /// Emits a `paused` event.
     /// Optimized for gas (#771): validates input bounds early and caches instance storage reference.
     pub fn pause(env: Env, caller: Address, reason: String) -> Result<(), SLAError> {
+        Self::check_version(&env)?;
+        Self::require_admin(&env, &caller)?;
+
         if reason.len() > MAX_REASON_LEN as u32 {
             return Err(SLAError::InvalidInput);
         }
-
-        Self::check_version(&env)?;
-        Self::require_admin(&env, &caller)?;
 
         let paused_at = env.ledger().timestamp();
         let storage = env.storage().instance();
@@ -3174,6 +3174,10 @@ impl SLACalculatorContract {
     }
 
     pub(crate) fn require_admin(env: &Env, caller: &Address) -> Result<(), SLAError> {
+        Self::require_admin_address(env, caller).map(|_| ())
+    }
+
+    pub(crate) fn require_admin_address(env: &Env, caller: &Address) -> Result<Address, SLAError> {
         caller.require_auth();
         // #406 – distinguish a permanent admin renounce from a fresh contract.
         if env.storage().instance().has(&ADMIN_RENOUNCED_KEY) {
@@ -3187,7 +3191,7 @@ impl SLACalculatorContract {
         if caller != &admin {
             return Err(SLAError::Unauthorized);
         }
-        Ok(())
+        Ok(admin)
     }
 
     /// #28 – Ensures the caller holds the operator role.

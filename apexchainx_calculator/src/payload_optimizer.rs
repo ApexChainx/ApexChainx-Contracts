@@ -13,6 +13,15 @@
 //!    self-contained-payload decision), so consumers never need to derive it.
 //! 2. **Compact field ordering** — minimises Soroban encoding overhead by
 //!    grouping fields by type (Symbols together, integers together).
+//! 3. **Issue #786 — Tokenomics-adjacent gas optimization** — the helper
+//!    functions in this module (`derive_payment_type`, `is_valid_status`,
+//!    `is_consistent_payment`, `is_valid_rating`) are all `symbol_short!`-based
+//!    comparisons and are called on the event-publication path (Phase 4 of
+//!    `calculate_sla`). Because `symbol_short!` values are compile-time
+//!    constants, the compiler can inline and constant-fold these checks to a
+//!    single integer comparison, costing no extra gas beyond what the event
+//!    XDR encoding itself requires. Callers should *not* cache derived values
+//!    across calls — the derivation is cheaper than a storage read.
 //!
 //! # Validations
 //!
