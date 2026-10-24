@@ -6,8 +6,12 @@
 #[cfg(test)]
 mod governance_tests {
     #![allow(clippy::module_inception)]
-    use crate::{SLACalculatorContract, SLACalculatorContractClient};
-    use soroban_sdk::{testutils::Address as _, Address, Env};
+    use crate::{
+        SLACalculatorContract, SLACalculatorContractClient, EVENT_ADMIN_ACC, EVENT_ADMIN_PROP,
+    };
+    use soroban_sdk::{
+        testutils::Address as _, testutils::Events, Address, Env, TryIntoVal,
+    };
 
     /// Creates a fresh contract environment with admin and operator initialized.
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -40,6 +44,36 @@ mod governance_tests {
         assert_eq!(client.get_pending_admin(), None);
         // New admin should now be the stored admin
         assert_eq!(client.get_admin(), new_admin);
+    }
+
+    /// Admin proposal and acceptance each emit their corresponding event.
+    #[test]
+    fn test_admin_handoff_emits_proposal_and_acceptance_events() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+
+        client.propose_admin(&admin, &new_admin);
+        client.accept_admin(&new_admin);
+
+        let events = env.events().all();
+        let mut proposal_count = 0;
+        let mut acceptance_count = 0;
+        for i in 0..events.len() {
+            let (_, topics, _) = events.get(i).unwrap();
+            if !topics.is_empty() {
+                let name = topics.get(0).unwrap().try_into_val(&env).unwrap();
+                if name == EVENT_ADMIN_PROP {
+                    proposal_count += 1;
+                }
+                if name == EVENT_ADMIN_ACC {
+                    acceptance_count += 1;
+                }
+            }
+        }
+
+        assert_eq!(proposal_count, 1);
+        assert_eq!(acceptance_count, 1);
     }
 
     /// Old admin loses authority once the new admin accepts.
@@ -82,6 +116,27 @@ mod governance_tests {
 
         let result = client.try_accept_admin(&stranger);
         assert!(result.is_err(), "accept_admin with no pending proposal must return an error");
+    }
+
+    /// Governance validation failures keep their typed contract error codes.
+    #[test]
+    fn test_governance_failures_return_typed_errors() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let candidate = Address::generate(&env);
+
+        assert_eq!(
+            client.try_propose_admin(&admin, &admin),
+            Err(Ok(SLAError::InvalidInput))
+        );
+        assert_eq!(
+            client.try_accept_admin(&candidate),
+            Err(Ok(SLAError::NoPendingTransfer))
+        );
+        assert_eq!(
+            client.try_cancel_admin_proposal(&admin),
+            Err(Ok(SLAError::NoPendingTransfer))
+        );
     }
 
     /// Re-proposing a new admin supersedes the previous pending candidate.
@@ -345,6 +400,35 @@ mod governance_tests {
         env.mock_auths(&[]);
         let result = client.try_set_operator(&operator, &new_op);
         assert!(result.is_err(), "operator must not call set_operator");
+    }
+
+    /// An authenticated operator must not inherit admin governance authority.
+    #[test]
+    fn test_operator_cannot_call_admin_governance_mutations() {
+        let env = Env::default();
+        let (admin, operator, client) = setup(&env);
+        let pending_admin = Address::generate(&env);
+        let pending_operator = Address::generate(&env);
+        let replacement = Address::generate(&env);
+
+        client.propose_admin(&admin, &pending_admin);
+        client.propose_operator(&admin, &pending_operator);
+
+        assert!(client
+            .try_propose_admin(&operator, &replacement)
+            .is_err());
+        assert!(client
+            .try_propose_operator(&operator, &replacement)
+            .is_err());
+        assert!(client.try_cancel_admin_proposal(&operator).is_err());
+        assert!(client.try_cancel_operator_proposal(&operator).is_err());
+        assert!(client.try_renounce_admin(&operator).is_err());
+        assert!(client.try_set_operator(&operator, &replacement).is_err());
+
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_operator(), operator);
+        assert_eq!(client.get_pending_admin(), Some(pending_admin));
+        assert_eq!(client.get_pending_operator(), Some(pending_operator));
     }
 
     // ── Query functions ───────────────────────────────────────────────────

@@ -128,13 +128,12 @@ fn require_proposal_valid(
 /// distinct from the existing admin AND distinct from the caller. Both
 /// violations are rejected by this single guard (#571) so the invariant is
 /// stated once and cannot drift across call sites.
-fn require_new_admin_distinct(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {
-    let current_admin: Address = env
-        .storage()
-        .instance()
-        .get(&ADMIN_KEY)
-        .ok_or(SLAError::NotInitialized)?;
-    if new_admin == &current_admin || new_admin == caller {
+fn require_new_admin_distinct(
+    caller: &Address,
+    current_admin: &Address,
+    new_admin: &Address,
+) -> Result<(), SLAError> {
+    if new_admin == current_admin || new_admin == caller {
         return Err(SLAError::InvalidInput);
     }
     Ok(())
@@ -145,8 +144,8 @@ fn require_new_admin_distinct(env: &Env, caller: &Address, new_admin: &Address) 
 pub fn propose_admin(env: &Env, caller: &Address, new_admin: &Address) -> Result<(), SLAError> {
     crate::SLACalculatorContract::check_version(env)?;
     crate::config_freeze::require_not_frozen(env)?;
-    crate::SLACalculatorContract::require_admin(env, caller)?;
-    require_new_admin_distinct(env, caller, new_admin)?;
+    let current_admin = crate::SLACalculatorContract::require_admin_address(env, caller)?;
+    require_new_admin_distinct(caller, &current_admin, new_admin)?;
     let superseded: Option<Address> = env.storage().instance().get(&PENDING_ADMIN_KEY);
     env.storage().instance().set(&PENDING_ADMIN_KEY, new_admin);
     env.storage()

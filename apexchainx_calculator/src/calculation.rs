@@ -278,6 +278,11 @@ pub fn get_severity_telemetry(env: &Env) -> Result<Vec<SeverityTelemetry>, SLAEr
     Ok(telemetry)
 }
 
+// Issue #786 — Gas optimization: inlined so the pause-guard branch is folded
+// directly into `calculate_sla` without a separate call frame. This is the
+// first check executed after input validation and before any storage writes,
+// so eliminating call overhead here benefits every non-paused invocation.
+#[inline]
 fn require_not_paused(env: &Env) -> Result<(), SLAError> {
     let paused: bool = env.storage().instance().get(&PAUSED_KEY).unwrap_or(false);
     if paused {
@@ -357,14 +362,25 @@ pub fn compute_result(
     }
 }
 
+// Issue #786 — Gas optimization: these three helpers are called multiple times
+// per `calculate_sla` execution on the hot path (telemetry recording + stats).
+// Marking them `#[inline]` lets the compiler collapse the call overhead and
+// constant-fold the bit-mask arithmetic at each call site, reducing the
+// instruction budget consumed on every SLA calculation (tokenomics-equivalent
+// payment path). Penalty / reward amount computation in `compute_result` is
+// already branch-free arithmetic; the gains here come from eliminating the
+// indirect-call overhead on the counter pack/unpack operations that surround it.
+#[inline]
 fn load_counts(env: &Env, key: &Symbol) -> u128 {
     env.storage().instance().get(key).unwrap_or(0u128)
 }
 
+#[inline]
 fn count_lane(packed: u128, index: u32) -> u32 {
     ((packed >> (index * 32)) & 0xFFFF_FFFF) as u32
 }
 
+#[inline]
 fn set_count_lane(packed: u128, index: u32, value: u32) -> u128 {
     let mask = !(0xFFFF_FFFFu128 << (index * 32));
     (packed & mask) | ((value as u128) << (index * 32))

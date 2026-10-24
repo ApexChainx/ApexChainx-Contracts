@@ -43,6 +43,12 @@ A proposal moves through at most four states:
   rejected with `NoPendingTransfer` and emits nothing, so the expiry transition
   is emitted **at most once** and is idempotent for indexers. (#589)
 
+### Gas behavior
+
+`propose_admin` reuses the admin address returned by its authorization check
+when validating that the candidate is distinct. This avoids a second read of
+the admin storage key without changing the authorization or validation rules.
+
 ## 3. Renounce (`renounce_admin`) — invalidation rules
 
 `renounce_admin` permanently removes the admin role. It is **irreversible**.
@@ -99,10 +105,21 @@ silent role grant. (#590)
 4. Expiry events (`adm_xp`/`op_xp`) are emitted **at most once** per proposal;
    a subsequent accept attempt emits nothing.
 
-`test_governance_role_rotation_end_to_end` exercises both role transfers through
-the contract client: the old operator remains authorized until acceptance,
-loses authority afterward, and the replaced admin cannot initiate a later
-proposal.
+## 6. Governance errors
+
+Governance entrypoints return the contract's typed `SLAError` values; they do
+not use string-based `require` failures. Consumers should branch on the error
+code rather than parse a message:
+
+| Error | Meaning |
+|---|---|
+| `Unauthorized` | Caller does not hold the required role or is not the pending candidate |
+| `NoPendingTransfer` | An accept or cancel was requested without a pending proposal |
+| `ProposalExpired` | The pending proposal is outside its acceptance window |
+| `InvalidInput` | A proposed admin is the current admin or the caller |
+
+These are stable contract error codes. Unit tests pin representative governance
+failure paths to their typed variants in `governance_tests.rs`.
 
 ---
 

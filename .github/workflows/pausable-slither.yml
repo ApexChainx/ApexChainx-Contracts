@@ -1,0 +1,205 @@
+# =============================================================================
+# ApexChainx Contracts — Pausable Static Analysis
+# =============================================================================
+#
+# Issue #784: Add CI step to run slither on Pausable
+#
+# This Soroban crate is written in Rust, not Solidity, so Slither (a Solidity
+# analyser) cannot run directly against it. This workflow provides the
+# equivalent security-analysis gate for the Pausable module using:
+#
+#   1. cargo clippy   — lint-level security and correctness rules on the
+#                       pause / unpause code paths.
+#   2. cargo-geiger   — detect unsafe code that could harbour vulnerabilities
+#                       in the Pausable module.
+#   3. Pausable unit tests — run the pause-lifecycle test module as a focused
+#                       gate separate from the full CI suite.
+#
+# Failures here are P3 (Reliability) gate failures and are required to pass
+# before merge on any PR that touches Pausable-related files.
+# =============================================================================
+
+name: Pausable Static Analysis
+
+on:
+  pull_request:
+    paths:
+      - 'apexchainx_calculator/src/lib.rs'
+      - 'apexchainx_calculator/src/tests.rs'
+      - 'apexchainx_calculator/src/cross_contract_safety.rs'
+      - 'apexchainx_calculator/src/audit_state.rs'
+      - '.github/workflows/pausable-slither.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apexchainx_calculator/src/lib.rs'
+
+concurrency:
+  group: pausable-slither-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Clippy security lints on Pausable module
+  #
+  # Runs clippy with arithmetic-pedantic lints to surface potential
+  # vulnerabilities in the pause/unpause code paths.
+  # ---------------------------------------------------------------------------
+  clippy-pausable-security:
+    name: Clippy Security Lints (Pausable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          components: clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: clippy-pausable-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            clippy-pausable-${{ runner.os }}-cargo-
+
+      # Run clippy with arithmetic and pedantic lints on the Pausable code paths.
+      # These lints are intentionally stricter than the main CI clippy pass so
+      # Pausable code is held to a higher security bar. The lints target patterns
+      # that could hide integer overflow, shadowed bindings, or unchecked
+      # arithmetic that could bypass pause-state invariants.
+      - name: Run clippy with security lints on Pausable
+        working-directory: apexchainx_calculator
+        run: |
+          cargo clippy --lib -- \
+            -D warnings \
+            -D clippy::integer_arithmetic \
+            -D clippy::as_conversions \
+            -D clippy::shadow_unrelated \
+            -D clippy::unwrap_used \
+            -D clippy::expect_used \
+            -D clippy::panic \
+            2>&1 | tee clippy-pausable-lints.txt || {
+              echo "::error::Pausable security lint failures detected. Review clippy-pausable-lints.txt for details."
+              cat clippy-pausable-lints.txt
+              exit 1
+            }
+
+      - name: Upload clippy pausable lint report
+        uses: actions/upload-artifact@v4
+        with:
+          name: clippy-pausable-lints
+          path: apexchainx_calculator/clippy-pausable-lints.txt
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Job 2: cargo-geiger — unsafe code audit for Pausable
+  #
+  # Pausable must not rely on unsafe code. Any unsafe block in the
+  # crate's source is surfaced here so reviewers can explicitly review it.
+  # ---------------------------------------------------------------------------
+  geiger-pausable-audit:
+    name: Unsafe Code Audit (cargo-geiger, Pausable)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: geiger-pausable-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            geiger-pausable-${{ runner.os }}-cargo-
+
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger --locked
+
+      - name: Run cargo-geiger on apexchainx_calculator
+        working-directory: apexchainx_calculator
+        run: |
+          cargo geiger --output-format GitHubActions 2>&1 | tee geiger-pausable-report.txt || true
+          echo "=== Geiger Pausable report ==="
+          cat geiger-pausable-report.txt
+
+      - name: Assert Pausable module is unsafe-free
+        working-directory: apexchainx_calculator
+        run: |
+          UNSAFE_COUNT=$(cargo geiger --output-format Ratio 2>/dev/null \
+            | grep "apexchainx_calculator " | grep -oP '(?<=: )\d+(?=/)' | head -n1 || echo "0")
+          if [ "${UNSAFE_COUNT:-0}" -gt 0 ]; then
+            echo "::error file=apexchainx_calculator/src/lib.rs::Unsafe code detected in apexchainx_calculator. Pausable module must not use unsafe blocks."
+            exit 1
+          fi
+          echo "No unsafe code in apexchainx_calculator crate source — OK"
+
+      - name: Upload geiger pausable report
+        uses: actions/upload-artifact@v4
+        with:
+          name: geiger-pausable-report
+          path: apexchainx_calculator/geiger-pausable-report.txt
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Pausable-specific Rust unit tests
+  #
+  # Runs only the pause-lifecycle tests as a focused gate.
+  # Faster than running the full suite; gives reviewers a clear signal that
+  # Pausable's own test coverage passes.
+  # ---------------------------------------------------------------------------
+  pausable-tests:
+    name: Pausable Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: pausable-tests-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            pausable-tests-${{ runner.os }}-cargo-
+
+      - name: Run Pausable lifecycle tests
+        working-directory: apexchainx_calculator
+        run: |
+          cargo test --lib pausable_unit_tests:: 2>&1 | tee pausable-test-output.txt || {
+            echo "::error::Pausable unit tests failed. See pausable-test-output.txt"
+            cat pausable-test-output.txt
+            exit 1
+          }
+
+      - name: Upload pausable test output
+        uses: actions/upload-artifact@v4
+        with:
+          name: pausable-test-output
+          path: apexchainx_calculator/pausable-test-output.txt
+          retention-days: 30

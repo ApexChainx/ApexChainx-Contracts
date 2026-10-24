@@ -29,3 +29,7 @@ In Solidity, custom reentrancy guards often use integer nonces or call counters 
 - Admin can unpause, clearing `PAUSE_INFO_KEY` and emitting `unpause` event.
 - Idempotent pause/unpause behavior and reason string length bounds validation (`MAX_REASON_LEN`).
 - Calculation calls (`calculate_sla`) are blocked while paused (`ContractPaused`) and resume after unpause.
+
+## Pausable access-control audit (#779)
+
+The public `pause` entrypoint checks initialization and admin authorization before validating the caller-provided reason. This prevents malformed input from masking an access-control failure. `unpause` uses the same initialization and admin checks; `is_paused` and `get_pause_info` remain public read-only queries. The regression test `test_pause_authorization_precedes_invalid_reason_validation` verifies that an authenticated non-admin receives `Unauthorized` even when the reason is too long, and that the failed request leaves the contract unpaused.
