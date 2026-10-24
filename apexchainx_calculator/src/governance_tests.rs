@@ -118,6 +118,27 @@ mod governance_tests {
         assert!(result.is_err(), "accept_admin with no pending proposal must return an error");
     }
 
+    /// Governance validation failures keep their typed contract error codes.
+    #[test]
+    fn test_governance_failures_return_typed_errors() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let candidate = Address::generate(&env);
+
+        assert_eq!(
+            client.try_propose_admin(&admin, &admin),
+            Err(Ok(SLAError::InvalidInput))
+        );
+        assert_eq!(
+            client.try_accept_admin(&candidate),
+            Err(Ok(SLAError::NoPendingTransfer))
+        );
+        assert_eq!(
+            client.try_cancel_admin_proposal(&admin),
+            Err(Ok(SLAError::NoPendingTransfer))
+        );
+    }
+
     /// Re-proposing a new admin supersedes the previous pending candidate.
     #[test]
     fn test_repropose_admin_supersedes_previous() {
