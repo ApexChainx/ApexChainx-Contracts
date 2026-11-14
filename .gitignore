@@ -19,7 +19,6 @@ apexchainx_calculator/test_snapshots/tests/*.json.tmp
 *.wasm
 
 # IDE
-.vscode/
 .idea/
 *.swp
 *.swo
@@ -39,8 +38,6 @@ Thumbs.db
 node_modules/
 
 # Environment secrets
-.env
-.env.*
 !.env.example
 
 
@@ -51,3 +48,4 @@ node_modules/
 validation-results/
 
 /offchain/readCostMeasurements.json
+config.bat
