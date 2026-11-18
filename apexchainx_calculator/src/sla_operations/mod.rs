@@ -12,3 +12,6 @@ pub mod mttr_classification;
 pub mod reporting;
 
 pub mod fixtures;
+
+#[cfg(test)]
+mod tests;
