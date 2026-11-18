@@ -101,6 +101,7 @@ mod severity_curve_tests;
 /// the single source of truth imported by tests, the fuzz targets, and the
 /// TypeScript parity fixtures instead of being re-derived in each.
 pub mod spec;
+pub mod sla_operations;
 pub mod storage_estimation;
 #[cfg(test)]
 mod storage_footprint_tests;
