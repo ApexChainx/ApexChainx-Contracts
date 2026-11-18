@@ -343,7 +343,7 @@ mod tests {
 #[cfg(test)]
 mod proxy_upgrade_unit_tests {
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, String};
+    use soroban_sdk::{testutils::Address as _, Address, Env};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
@@ -375,7 +375,7 @@ mod proxy_upgrade_unit_tests {
 
 #[cfg(test)]
 mod proxy_upgrade_storage_gap_safety_tests {
-    use crate::{SLACalculatorContract, SLACalculatorContractClient, STORAGE_VERSION, STORAGE_VERSION_KEY};
+    use crate::{SLACalculatorContract, SLACalculatorContractClient, STORAGE_VERSION};
     use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -438,7 +438,7 @@ mod upgrade_flow_integration_tests {
     // wholesale, and it is admin-gated, so the cases that matter are the
     // ones around who may run it and what it does to the state when it
     // refuses.
-    use crate::{SLACalculatorContract, SLACalculatorContractClient, STORAGE_VERSION};
+    use crate::{SLACalculatorContract, SLACalculatorContractClient, SLAError, STORAGE_VERSION};
     use soroban_sdk::{testutils::Address as _, Address, Env};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -466,7 +466,7 @@ mod upgrade_flow_integration_tests {
 
         let result = client.try_migrate(&admin);
         assert!(
-            matches!(result, Ok(Err(_))),
+            matches!(result, Err(Ok(SLAError::VersionMismatch))),
             "migrate() must refuse a stored version newer than the binary"
         );
     }
@@ -485,7 +485,7 @@ mod upgrade_flow_integration_tests {
                 .set(&crate::STORAGE_VERSION_KEY, &future_version);
         });
 
-        assert!(client.try_migrate(&admin).is_ok());
+        assert!(client.try_migrate(&admin).is_err());
         assert_eq!(client.get_migration_state().stored_version, future_version);
     }
 

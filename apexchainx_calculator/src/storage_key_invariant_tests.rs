@@ -71,7 +71,7 @@ fn test_storage_key_set_pinned_to_version_snapshot_or_newer() {
 #[cfg(test)]
 mod access_control_invariant_tests {
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, String};
+    use soroban_sdk::{testutils::Address as _, Address, Env, String};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
@@ -82,7 +82,6 @@ mod access_control_invariant_tests {
         client.initialize(&admin, &operator);
         (admin, operator, client)
     }
-
 
     #[test]
     fn pause_cycles_never_change_roles_or_stats() {

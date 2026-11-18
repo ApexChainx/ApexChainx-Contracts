@@ -336,7 +336,7 @@ mod topic_stability_tests {
 #[cfg(test)]
 mod proxy_upgrade_flow_tests {
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, String};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
         env.mock_all_auths();
@@ -347,7 +347,6 @@ mod proxy_upgrade_flow_tests {
         client.initialize(&admin, &operator);
         (admin, operator, client)
     }
-
 
     #[test]
     fn integration_migrate_then_normal_operation() {

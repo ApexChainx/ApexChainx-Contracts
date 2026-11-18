@@ -151,13 +151,21 @@
                       },
                       {
                         "key": {
+                          "symbol": "CFGCNT"
+                        },
+                        "val": {
+                          "u32": 4
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "CFGREG"
                         },
                         "val": {
                           "map": [
                             {
                               "key": {
-                                "u64": 1417728228875630226
+                                "u64": 7143350681536728163
                               },
                               "val": {
                                 "map": [
@@ -635,6 +643,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "LCFGUPDA"
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "OPERATOR"
                         },
                         "val": {
@@ -701,7 +717,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 3
+                          "u32": 5
                         }
                       },
                       {
@@ -1031,7 +1047,7 @@
                     "symbol": "schema_version"
                   },
                   "val": {
-                    "u32": 1
+                    "u32": 2
                   }
                 },
                 {
@@ -1063,7 +1079,7 @@
                     "symbol": "version"
                   },
                   "val": {
-                    "symbol": "v1"
+                    "symbol": "v2"
                   }
                 }
               ]
@@ -1302,7 +1318,7 @@
                     "symbol": "schema_version"
                   },
                   "val": {
-                    "u32": 1
+                    "u32": 2
                   }
                 },
                 {
@@ -1334,7 +1350,7 @@
                     "symbol": "version"
                   },
                   "val": {
-                    "symbol": "v1"
+                    "symbol": "v2"
                   }
                 }
               ]

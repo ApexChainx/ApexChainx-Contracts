@@ -4,12 +4,11 @@
 
 name: CI
 
-# CI temporarily disabled – triggers commented out below.
-# on:
-#   push:
-#     branches: [main]
-#   pull_request:
-#     branches: [main]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -52,6 +51,7 @@ jobs:
       - name: WASM no-std compliance check
         working-directory: apexchainx_calculator
         run: |
+          set -o pipefail
           cargo check --target wasm32-unknown-unknown --lib 2>&1 | tee no_std_check.log \
             || (echo "=== no_std compliance check failed: std imports are not allowed in WASM ===" \
                 && cat no_std_check.log && exit 1)
@@ -71,6 +71,7 @@ jobs:
       - name: Cargo check
         working-directory: apexchainx_calculator
         run: |
+          set -o pipefail
           cargo check 2>&1 | tee check.log || (echo "=== Cargo check failed ===" && cat check.log && exit 1)
 
       - name: Format check

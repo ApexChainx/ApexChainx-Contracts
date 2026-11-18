@@ -150,6 +150,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "CFGCNT"
+                        },
+                        "val": {
+                          "u32": 4
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "CFGREG"
                         },
                         "val": {
@@ -594,6 +602,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "LCFGUPDA"
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "OPERATOR"
                         },
                         "val": {
@@ -660,7 +676,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 3
+                          "u32": 5
                         }
                       },
                       {
@@ -1052,7 +1068,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 5358522825648493822
+                    "u64": 5052173352509106153
                   }
                 },
                 {

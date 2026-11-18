@@ -178,6 +178,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "CFGCNT"
+                        },
+                        "val": {
+                          "u32": 4
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "CFGREG"
                         },
                         "val": {
@@ -622,6 +630,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "LCFGUPDA"
+                        },
+                        "val": {
+                          "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "OPERATOR"
                         },
                         "val": {
@@ -688,7 +704,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 3
+                          "u32": 5
                         }
                       },
                       {
@@ -742,7 +758,7 @@
                                 "symbol": "config_version_hash"
                               },
                               "val": {
-                                "u64": 3202668148427286373
+                                "u64": 1151185872824334085
                               }
                             },
                             {
@@ -1223,7 +1239,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 3202668148427286373
+                    "u64": 1151185872824334085
                   }
                 },
                 {
@@ -1373,7 +1389,7 @@
                   "symbol": "poor"
                 },
                 {
-                  "u64": 3202668148427286373
+                  "u64": 1151185872824334085
                 },
                 {
                   "u64": 0
@@ -1397,7 +1413,7 @@
                 "symbol": "set_int"
               },
               {
-                "symbol": "v1"
+                "symbol": "v2"
               },
               {
                 "symbol": "critical"
@@ -1430,10 +1446,13 @@
                   "symbol": "poor"
                 },
                 {
-                  "u64": 3202668148427286373
+                  "u64": 1151185872824334085
                 },
                 {
                   "u64": 0
+                },
+                {
+                  "u64": 1515244673
                 }
               ]
             }
@@ -1475,7 +1494,7 @@
                     "symbol": "config_version_hash"
                   },
                   "val": {
-                    "u64": 3202668148427286373
+                    "u64": 1151185872824334085
                   }
                 },
                 {

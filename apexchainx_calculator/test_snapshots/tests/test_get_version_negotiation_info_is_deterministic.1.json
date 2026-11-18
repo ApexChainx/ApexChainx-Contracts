@@ -114,6 +114,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "CFGCNT"
+                        },
+                        "val": {
+                          "u32": 4
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "CONFIG"
                         },
                         "val": {
@@ -287,15 +295,23 @@
                       },
                       {
                         "key": {
-                          "symbol": "HIST"
+                          "symbol": "HISTH"
                         },
                         "val": {
-                          "vec": []
+                          "u32": 0
                         }
                       },
                       {
                         "key": {
                           "symbol": "HISTLEN"
+                        },
+                        "val": {
+                          "u32": 0
+                        }
+                      },
+                      {
+                        "key": {
+                          "symbol": "HISTT"
                         },
                         "val": {
                           "u32": 0
@@ -369,7 +385,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 2
+                          "u32": 5
                         }
                       },
                       {
@@ -599,6 +615,14 @@
                 },
                 {
                   "key": {
+                    "symbol": "event_version"
+                  },
+                  "val": {
+                    "symbol": "v2"
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "is_paused"
                   },
                   "val": {
@@ -631,10 +655,18 @@
                 },
                 {
                   "key": {
-                    "symbol": "storage_version"
+                    "symbol": "result_schema_version"
                   },
                   "val": {
                     "u32": 2
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "storage_version"
+                  },
+                  "val": {
+                    "u32": 5
                   }
                 }
               ]
@@ -695,6 +727,14 @@
                 },
                 {
                   "key": {
+                    "symbol": "event_version"
+                  },
+                  "val": {
+                    "symbol": "v2"
+                  }
+                },
+                {
+                  "key": {
                     "symbol": "is_paused"
                   },
                   "val": {
@@ -727,10 +767,18 @@
                 },
                 {
                   "key": {
-                    "symbol": "storage_version"
+                    "symbol": "result_schema_version"
                   },
                   "val": {
                     "u32": 2
+                  }
+                },
+                {
+                  "key": {
+                    "symbol": "storage_version"
+                  },
+                  "val": {
+                    "u32": 5
                   }
                 }
               ]

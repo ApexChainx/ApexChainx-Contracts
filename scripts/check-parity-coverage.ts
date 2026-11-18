@@ -23,7 +23,11 @@ export function reconcileMethods(lib: string, generator: string, fixture: Record
   const source = withoutComments(lib);
   const implementationSource = withoutComments(implementations);
   const manifest = [...source.matchAll(/methods\.push_back\(\s*method\(\s*"([^"]+)"/g)].map(m => m[1]);
-  const entrypoints = [...implementationSource.matchAll(/#\[contractimpl\]\s*impl\s+\w+\s*\{/g)]
+  const contract = source.match(/#\[contract\]\s*(?:#\[[^\]]*\]\s*)*pub\s+struct\s+(\w+)/);
+  const implPattern = contract
+    ? new RegExp(`#\\[contractimpl\\]\\s*impl\\s+${contract[1]}\\s*\\{`, "g")
+    : /#\[contractimpl\]\s*impl\s+\w+\s*\{/g;
+  const entrypoints = [...implementationSource.matchAll(implPattern)]
     .flatMap(m => [...bodyAt(implementationSource, m.index!).matchAll(/pub\s+fn\s+(\w+)\s*\(/g)].map(m => m[1]));
   assert.ok(manifest.length && entrypoints.length, "public surface must not be empty");
   assert.equal(new Set(manifest).size, manifest.length, "duplicate manifest method");

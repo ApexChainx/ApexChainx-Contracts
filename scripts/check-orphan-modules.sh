@@ -52,18 +52,7 @@ LIB_RS="$CRATE_DIR/src/lib.rs"
 # files will no longer be orphans, and this script will print a warning (and
 # still pass) until the entries are removed.
 # ---------------------------------------------------------------------------
-ALLOWLIST=(
-    auth_matrix_tests.rs
-    event_ordering_tests.rs
-    event_state_tests.rs
-    outage_id_tests.rs
-    payload_optimizer.rs
-    payload_versioning_tests.rs
-    policy.rs
-    pruning_perf.rs
-    threshold_config.rs
-    topic_stability_tests.rs
-)
+ALLOWLIST=()
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -96,7 +85,7 @@ done < <(find "$CRATE_DIR/src" -maxdepth 1 -name '*.rs' ! -name 'lib.rs' ! -name
 
 # --- Separate tracked orphans from new ones ----------------------------------
 UNTRACKED=()
-for name in "${ORPHANS[@]}"; do
+for name in ${ORPHANS[@]+"${ORPHANS[@]}"}; do
     if printf '%s\n' "${ALLOWLIST[@]}" | grep -qx "$name"; then
         # Still an orphan → it is tracked; nothing to do. If it is now declared
         # it would not appear in ORPHANS at all, so nothing else here.
@@ -107,7 +96,7 @@ for name in "${ORPHANS[@]}"; do
 done
 
 # Warn about allowlist entries that are no longer orphans (now declared).
-for name in "${ALLOWLIST[@]}"; do
+for name in ${ALLOWLIST[@]+"${ALLOWLIST[@]}"}; do
     if ! printf '%s\n' "${ORPHANS[@]}" | grep -qx "$name"; then
         STALE_ALLOWLIST+=("$name")
     fi
@@ -122,7 +111,7 @@ if [ "${#UNTRACKED[@]}" -gt 0 ]; then
     echo "These .rs files exist in the crate but are never declared as a module,"
     echo "so cargo never compiles them and their tests never run:"
     echo ""
-    for name in "${UNTRACKED[@]}"; do
+    for name in ${UNTRACKED[@]+"${UNTRACKED[@]}"}; do
         echo "  - $name"
     done
     echo ""
@@ -143,7 +132,7 @@ fi
 if [ "${#STALE_ALLOWLIST[@]}" -gt 0 ]; then
     echo -e "${YELLOW}Warning: allowlist entries in scripts/check-orphan-modules.sh are no longer orphans${NC}"
     echo "  (they are now declared as modules) — remove them from ALLOWLIST:"
-    for name in "${STALE_ALLOWLIST[@]}"; do
+    for name in ${STALE_ALLOWLIST[@]+"${STALE_ALLOWLIST[@]}"}; do
         echo "  - $name"
     done
     echo ""

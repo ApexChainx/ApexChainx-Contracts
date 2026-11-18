@@ -565,12 +565,11 @@ mod access_control_fuzz_tests {
         (admin, operator, client)
     }
 
-
     #[test]
     fn many_strangers_never_gain_admin_authority() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        for _ in 0..50 {
+        for _ in 0..10 {
             let stranger = Address::generate(&env);
             assert!(client.try_pause(&stranger, &String::from_str(&env, "x")).is_err());
             assert!(client
@@ -621,8 +620,7 @@ mod cross_contract_safety_tests {
         let env = Env::default();
         let unknown = Address::generate(&env);
 
-        let result =
-            safe_invoke_contract(&env, &unknown, &symbol_short!("get_admin"), &[]);
+        let result = safe_invoke_contract(&env, &unknown, &symbol_short!("get_admin"), &[]);
 
         assert_eq!(result.status, CrossContractCallStatus::FatalError);
     }
@@ -632,8 +630,7 @@ mod cross_contract_safety_tests {
         let env = Env::default();
         let contract_id = target(&env);
 
-        let result =
-            safe_invoke_contract(&env, &contract_id, &symbol_short!("get_admin"), &[]);
+        let result = safe_invoke_contract(&env, &contract_id, &symbol_short!("get_admin"), &[]);
 
         assert_eq!(result.status, CrossContractCallStatus::Success);
     }

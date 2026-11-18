@@ -19,6 +19,12 @@ test("new methods, stale coverage and missing fixtures cannot pass", () => {
   assert.throws(() => reconcileMethods(lib, inventory, { reads: [] }));
   assert.throws(() => reconcileMethods(lib, inventory, { reads: [1] }, lib + '#[contractimpl] impl Contract { pub fn added_in_module() {} }'));
 });
+test("separate contracts do not leak entrypoints into the primary manifest", () => {
+  const primary = '#[contract] pub struct Contract; #[contractimpl] impl Contract { pub fn read() {} fn manifest() { methods.push_back(method("read", false)); } }';
+  const separate = '#[contract] pub struct OtherContract; #[contractimpl] impl OtherContract { pub fn external() {} }';
+  const coverage = 'const PARITY_METHOD_COVERAGE: &[(&str, &str, &str)] = &[("read", "fixture", "reads")]; fn generate_ts_parity_fixtures() { client.read(); }';
+  assert.deepEqual(reconcileMethods(primary, coverage, { reads: [1] }, primary + separate), { methods: 1, covered: 1, skipped: 0 });
+});
 test("new contracttype fields and type changes alter the inventory", () => {
   const before = contractTypes({ "lib.rs": '#[contracttype] #[derive(Clone)] pub struct Wire { pub count: u32 }' });
   for (const fields of ['pub count: u64', 'pub count: u32, pub added: bool']) {

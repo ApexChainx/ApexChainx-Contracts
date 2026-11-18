@@ -678,7 +678,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 4
+                          "u32": 5
                         }
                       },
                       {
@@ -1022,7 +1022,7 @@
                           "symbol": "schema_version"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 2
                         }
                       },
                       {
@@ -1054,7 +1054,7 @@
                           "symbol": "version"
                         },
                         "val": {
-                          "symbol": "v1"
+                          "symbol": "v2"
                         }
                       }
                     ]
@@ -1429,7 +1429,7 @@
                           "symbol": "schema_version"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 2
                         }
                       },
                       {
@@ -1461,7 +1461,7 @@
                           "symbol": "version"
                         },
                         "val": {
-                          "symbol": "v1"
+                          "symbol": "v2"
                         }
                       }
                     ]
@@ -1947,7 +1947,7 @@
                           "symbol": "schema_version"
                         },
                         "val": {
-                          "u32": 1
+                          "u32": 2
                         }
                       },
                       {
@@ -1979,7 +1979,7 @@
                           "symbol": "version"
                         },
                         "val": {
-                          "symbol": "v1"
+                          "symbol": "v2"
                         }
                       }
                     ]

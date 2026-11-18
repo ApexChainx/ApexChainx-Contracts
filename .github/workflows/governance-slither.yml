@@ -235,7 +235,7 @@ jobs:
 
       - name: Run auth matrix tests (governance role enforcement)
         working-directory: apexchainx_calculator
-        run: cargo test --lib auth_matrix_tests::
+        run: "cargo test --lib auth_matrix_tests::"
 
       - name: Upload governance test output
         uses: actions/upload-artifact@v4

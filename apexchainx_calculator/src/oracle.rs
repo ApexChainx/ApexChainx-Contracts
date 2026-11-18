@@ -11,8 +11,7 @@
 //! - #843: Add integration tests covering Oracle flows (lifecycle, reporting, consumption)
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, Symbol,
-    Vec,
+    contract, contracterror, contractimpl, contracttype, symbol_short, Address, Env, Map, Symbol, Vec,
 };
 
 /// Oracle-specific contract errors.
@@ -113,21 +112,18 @@ const ORACLE_ADMIN_KEY: Symbol = symbol_short!("O_ADMIN");
 const ORACLE_PAUSED_KEY: Symbol = symbol_short!("O_PAUSED");
 const ORACLE_CONFIG_KEY: Symbol = symbol_short!("O_CONFIG");
 const REPORTERS_KEY: Symbol = symbol_short!("O_REPS");
-const LATEST_METRIC_KEY: Symbol = symbol_short!("O_LATEST");
 const ROUND_COUNTER_KEY: Symbol = symbol_short!("O_ROUND");
-const REPORTS_HISTORY_KEY: Symbol = symbol_short!("O_HIST");
 
 #[contract]
 pub struct OracleContract;
 
-#[contractimpl]
 impl OracleContract {
     // -----------------------------------------------------------------------
     // Access Control Modifiers & Guards (#844)
     // -----------------------------------------------------------------------
 
     /// Ensures the contract has been initialized.
-    pub fn require_initialized(env: &Env) -> Result<(), OracleError> {
+    fn require_initialized(env: &Env) -> Result<(), OracleError> {
         if !env.storage().instance().has(&ORACLE_ADMIN_KEY) {
             return Err(OracleError::NotInitialized);
         }
@@ -135,10 +131,14 @@ impl OracleContract {
     }
 
     /// Ensures caller is the contract admin.
-    pub fn require_admin(env: &Env, caller: &Address) -> Result<(), OracleError> {
+    fn require_admin(env: &Env, caller: &Address) -> Result<(), OracleError> {
         Self::require_initialized(env)?;
         caller.require_auth();
-        let admin: Address = env.storage().instance().get(&ORACLE_ADMIN_KEY).ok_or(OracleError::NotInitialized)?;
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&ORACLE_ADMIN_KEY)
+            .ok_or(OracleError::NotInitialized)?;
         if *caller != admin {
             return Err(OracleError::Unauthorized);
         }
@@ -146,7 +146,7 @@ impl OracleContract {
     }
 
     /// Ensures caller is an authorized reporter.
-    pub fn require_reporter(env: &Env, caller: &Address) -> Result<(), OracleError> {
+    fn require_reporter(env: &Env, caller: &Address) -> Result<(), OracleError> {
         Self::require_initialized(env)?;
         caller.require_auth();
         let reporters: Map<Address, bool> = env
@@ -161,28 +161,23 @@ impl OracleContract {
     }
 
     /// Ensures contract is not paused.
-    pub fn require_not_paused(env: &Env) -> Result<(), OracleError> {
-        let is_paused: bool = env
-            .storage()
-            .instance()
-            .get(&ORACLE_PAUSED_KEY)
-            .unwrap_or(false);
+    fn require_not_paused(env: &Env) -> Result<(), OracleError> {
+        let is_paused: bool = env.storage().instance().get(&ORACLE_PAUSED_KEY).unwrap_or(false);
         if is_paused {
             return Err(OracleError::ContractPaused);
         }
         Ok(())
     }
+}
 
+#[contractimpl]
+impl OracleContract {
     // -----------------------------------------------------------------------
     // Lifecycle and Role Management (#844)
     // -----------------------------------------------------------------------
 
     /// Initialize the Oracle contract with an admin and baseline configuration.
-    pub fn initialize(
-        env: Env,
-        admin: Address,
-        config: OracleConfig,
-    ) -> Result<(), OracleError> {
+    pub fn initialize(env: Env, admin: Address, config: OracleConfig) -> Result<(), OracleError> {
         if env.storage().instance().has(&ORACLE_ADMIN_KEY) {
             return Err(OracleError::AlreadyInitialized);
         }
@@ -219,11 +214,7 @@ impl OracleContract {
     }
 
     /// Add an authorized reporter (Admin only).
-    pub fn add_reporter(
-        env: Env,
-        caller: Address,
-        reporter: Address,
-    ) -> Result<(), OracleError> {
+    pub fn add_reporter(env: Env, caller: Address, reporter: Address) -> Result<(), OracleError> {
         Self::require_admin(&env, &caller)?;
         let mut reporters: Map<Address, bool> = env
             .storage()
@@ -236,11 +227,7 @@ impl OracleContract {
     }
 
     /// Remove an authorized reporter (Admin only).
-    pub fn remove_reporter(
-        env: Env,
-        caller: Address,
-        reporter: Address,
-    ) -> Result<(), OracleError> {
+    pub fn remove_reporter(env: Env, caller: Address, reporter: Address) -> Result<(), OracleError> {
         Self::require_admin(&env, &caller)?;
         let mut reporters: Map<Address, bool> = env
             .storage()
@@ -253,11 +240,7 @@ impl OracleContract {
     }
 
     /// Update Oracle configuration (Admin only).
-    pub fn set_config(
-        env: Env,
-        caller: Address,
-        config: OracleConfig,
-    ) -> Result<(), OracleError> {
+    pub fn set_config(env: Env, caller: Address, config: OracleConfig) -> Result<(), OracleError> {
         Self::require_admin(&env, &caller)?;
         if config.min_allowed_value > config.max_allowed_value || config.min_quorum == 0 {
             return Err(OracleError::InvalidConfiguration);
@@ -294,12 +277,7 @@ impl OracleContract {
     }
 
     /// Safe weighted average calculation protecting against intermediate overflows.
-    pub fn safe_weighted_average(
-        v1: u128,
-        w1: u128,
-        v2: u128,
-        w2: u128,
-    ) -> Result<u128, OracleError> {
+    pub fn safe_weighted_average(v1: u128, w1: u128, v2: u128, w2: u128) -> Result<u128, OracleError> {
         let total_weight = Self::safe_add(w1, w2)?;
         if total_weight == 0 {
             return Err(OracleError::DivisionByZero);
@@ -344,7 +322,11 @@ impl OracleContract {
         Self::require_not_paused(&env)?;
         Self::require_reporter(&env, &reporter)?;
 
-        let config: OracleConfig = env.storage().instance().get(&ORACLE_CONFIG_KEY).ok_or(OracleError::NotInitialized)?;
+        let config: OracleConfig = env
+            .storage()
+            .instance()
+            .get(&ORACLE_CONFIG_KEY)
+            .ok_or(OracleError::NotInitialized)?;
 
         // Bounds check (#846)
         if value < config.min_allowed_value || value > config.max_allowed_value {
@@ -359,11 +341,7 @@ impl OracleContract {
             }
         }
 
-        let round: u64 = env
-            .storage()
-            .instance()
-            .get(&ROUND_COUNTER_KEY)
-            .unwrap_or(0);
+        let round: u64 = env.storage().instance().get(&ROUND_COUNTER_KEY).unwrap_or(0);
         let next_round = round.checked_add(1).ok_or(OracleError::MathOverflow)?;
         env.storage().instance().set(&ROUND_COUNTER_KEY, &next_round);
 
@@ -381,14 +359,10 @@ impl OracleContract {
     }
 
     /// Aggregate a vector of reports using safe checked math and median selection.
-    pub fn aggregate_reports(
-        env: Env,
-        reports: Vec<MetricReport>,
-    ) -> Result<AggregatedMetric, OracleError> {
+    pub fn aggregate_reports(_env: Env, reports: Vec<MetricReport>) -> Result<AggregatedMetric, OracleError> {
         let count = reports.len();
         if count == 0 {
             return Err(OracleError::NoDataAvailable);
-            let r = reports.get(i).ok_or(OracleError::NoDataAvailable)?;
         }
 
         let mut sum: u128 = 0;
@@ -432,10 +406,7 @@ impl OracleContract {
     }
 
     /// Read the latest reported metric for a given feed/symbol.
-    pub fn get_latest_metric(
-        env: Env,
-        metric_name: Symbol,
-    ) -> Result<MetricReport, OracleError> {
+    pub fn get_latest_metric(env: Env, metric_name: Symbol) -> Result<MetricReport, OracleError> {
         Self::require_initialized(&env)?;
         env.storage()
             .instance()
@@ -455,10 +426,7 @@ impl OracleContract {
 
     /// Check if the Oracle is paused.
     pub fn is_paused(env: Env) -> bool {
-        env.storage()
-            .instance()
-            .get(&ORACLE_PAUSED_KEY)
-            .unwrap_or(false)
+        env.storage().instance().get(&ORACLE_PAUSED_KEY).unwrap_or(false)
     }
 }
 
@@ -546,19 +514,21 @@ mod tests {
         let (admin, config) = setup_oracle(&env);
         let hacker = Address::generate(&env);
 
-        OracleContract::initialize(env.clone(), admin.clone(), config.clone()).unwrap();
+        let contract_id = env.register_contract(None, OracleContract);
+        let client = OracleContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &config);
 
         // Non-admin cannot pause
-        let pause_res = OracleContract::pause(env.clone(), hacker.clone());
-        assert_eq!(pause_res, Err(OracleError::Unauthorized));
+        let pause_res = client.try_pause(&hacker);
+        assert_eq!(pause_res, Err(Ok(OracleError::Unauthorized)));
 
         // Admin can pause
-        assert!(OracleContract::pause(env.clone(), admin.clone()).is_ok());
-        assert!(OracleContract::is_paused(env.clone()));
+        assert!(client.try_pause(&admin).is_ok());
+        assert!(client.is_paused());
 
         // Admin can unpause
-        assert!(OracleContract::unpause(env.clone(), admin.clone()).is_ok());
-        assert!(!OracleContract::is_paused(env.clone()));
+        assert!(client.try_unpause(&admin).is_ok());
+        assert!(!client.is_paused());
     }
 
     #[test]
@@ -569,42 +539,26 @@ mod tests {
         let reporter = Address::generate(&env);
         let non_reporter = Address::generate(&env);
 
-        OracleContract::initialize(env.clone(), admin.clone(), config).unwrap();
-        OracleContract::add_reporter(env.clone(), admin.clone(), reporter.clone()).unwrap();
+        let contract_id = env.register_contract(None, OracleContract);
+        let client = OracleContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &config);
+        client.add_reporter(&admin, &reporter);
 
-        assert!(OracleContract::is_reporter(env.clone(), reporter.clone()));
-        assert!(!OracleContract::is_reporter(env.clone(), non_reporter.clone()));
+        assert!(client.is_reporter(&reporter));
+        assert!(!client.is_reporter(&non_reporter));
 
         // Non-reporter cannot submit data
-        let res = OracleContract::submit_report(
-            env.clone(),
-            non_reporter.clone(),
-            symbol_short!("MTTR"),
-            100,
-            1000,
-        );
-        assert_eq!(res, Err(OracleError::ReporterNotAuthorized));
+        let res = client.try_submit_report(&non_reporter, &symbol_short!("MTTR"), &100, &1000);
+        assert_eq!(res, Err(Ok(OracleError::ReporterNotAuthorized)));
 
         // Authorized reporter can submit data
-        let success = OracleContract::submit_report(
-            env.clone(),
-            reporter.clone(),
-            symbol_short!("MTTR"),
-            100,
-            1000,
-        );
+        let success = client.try_submit_report(&reporter, &symbol_short!("MTTR"), &100, &1000);
         assert!(success.is_ok());
 
         // Revoking reporter prevents further submissions
-        OracleContract::remove_reporter(env.clone(), admin.clone(), reporter.clone()).unwrap();
-        let revoked_res = OracleContract::submit_report(
-            env.clone(),
-            reporter.clone(),
-            symbol_short!("MTTR"),
-            120,
-            1005,
-        );
-        assert_eq!(revoked_res, Err(OracleError::ReporterNotAuthorized));
+        client.remove_reporter(&admin, &reporter);
+        let revoked_res = client.try_submit_report(&reporter, &symbol_short!("MTTR"), &120, &1005);
+        assert_eq!(revoked_res, Err(Ok(OracleError::ReporterNotAuthorized)));
     }
 
     // -------------------------------------------------------------------
@@ -617,37 +571,20 @@ mod tests {
         let (admin, config) = setup_oracle(&env);
         let reporter = Address::generate(&env);
 
-        OracleContract::initialize(env.clone(), admin.clone(), config).unwrap();
-        OracleContract::add_reporter(env.clone(), admin.clone(), reporter.clone()).unwrap();
+        let contract_id = env.register_contract(None, OracleContract);
+        let client = OracleContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &config);
+        client.add_reporter(&admin, &reporter);
 
         // Initial submission at T=1000
-        OracleContract::submit_report(
-            env.clone(),
-            reporter.clone(),
-            symbol_short!("METRIC1"),
-            500,
-            1000,
-        )
-        .unwrap();
+        client.submit_report(&reporter, &symbol_short!("METRIC1"), &500, &1000);
 
         // Regression attempt at T=999 must fail (Invariant: non-decreasing timestamps)
-        let regressed = OracleContract::submit_report(
-            env.clone(),
-            reporter.clone(),
-            symbol_short!("METRIC1"),
-            550,
-            999,
-        );
-        assert_eq!(regressed, Err(OracleError::TimestampRegression));
+        let regressed = client.try_submit_report(&reporter, &symbol_short!("METRIC1"), &550, &999);
+        assert_eq!(regressed, Err(Ok(OracleError::TimestampRegression)));
 
         // Subsequent valid timestamp at T=1001 must succeed
-        let valid = OracleContract::submit_report(
-            env.clone(),
-            reporter.clone(),
-            symbol_short!("METRIC1"),
-            550,
-            1001,
-        );
+        let valid = client.try_submit_report(&reporter, &symbol_short!("METRIC1"), &550, &1001);
         assert!(valid.is_ok());
     }
 
@@ -658,28 +595,18 @@ mod tests {
         let (admin, config) = setup_oracle(&env); // min=10, max=1_000_000
         let reporter = Address::generate(&env);
 
-        OracleContract::initialize(env.clone(), admin.clone(), config).unwrap();
-        OracleContract::add_reporter(env.clone(), admin.clone(), reporter.clone()).unwrap();
+        let contract_id = env.register_contract(None, OracleContract);
+        let client = OracleContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &config);
+        client.add_reporter(&admin, &reporter);
 
         // Under lower bound
-        let under = OracleContract::submit_report(
-            env.clone(),
-            reporter.clone(),
-            symbol_short!("PING"),
-            9,
-            100,
-        );
-        assert_eq!(under, Err(OracleError::ValueOutOfBounds));
+        let under = client.try_submit_report(&reporter, &symbol_short!("PING"), &9, &100);
+        assert_eq!(under, Err(Ok(OracleError::ValueOutOfBounds)));
 
         // Over upper bound
-        let over = OracleContract::submit_report(
-            env.clone(),
-            reporter.clone(),
-            symbol_short!("PING"),
-            1_000_001,
-            100,
-        );
-        assert_eq!(over, Err(OracleError::ValueOutOfBounds));
+        let over = client.try_submit_report(&reporter, &symbol_short!("PING"), &1_000_001, &100);
+        assert_eq!(over, Err(Ok(OracleError::ValueOutOfBounds)));
     }
 
     #[test]
@@ -734,36 +661,24 @@ mod tests {
         let reporter2 = Address::generate(&env);
 
         // Step 1: Deploy & Initialize
-        OracleContract::initialize(env.clone(), admin.clone(), config).unwrap();
+        let contract_id = env.register_contract(None, OracleContract);
+        let client = OracleContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &config);
 
         // Step 2: Register Reporters
-        OracleContract::add_reporter(env.clone(), admin.clone(), reporter1.clone()).unwrap();
-        OracleContract::add_reporter(env.clone(), admin.clone(), reporter2.clone()).unwrap();
+        client.add_reporter(&admin, &reporter1);
+        client.add_reporter(&admin, &reporter2);
 
         // Step 3: Reporting & Ingestion Flow
         let feed_name = symbol_short!("SLA_FEED");
-        let rep1 = OracleContract::submit_report(
-            env.clone(),
-            reporter1.clone(),
-            feed_name.clone(),
-            250,
-            1000,
-        )
-        .unwrap();
+        let rep1 = client.submit_report(&reporter1, &feed_name, &250, &1000);
         assert_eq!(rep1.value, 250);
 
-        let rep2 = OracleContract::submit_report(
-            env.clone(),
-            reporter2.clone(),
-            feed_name.clone(),
-            350,
-            1050,
-        )
-        .unwrap();
+        let rep2 = client.submit_report(&reporter2, &feed_name, &350, &1050);
         assert_eq!(rep2.value, 350);
 
         // Step 4: Verification of latest state
-        let latest = OracleContract::get_latest_metric(env.clone(), feed_name).unwrap();
+        let latest = client.get_latest_metric(&feed_name);
         assert_eq!(latest.value, 350);
         assert_eq!(latest.timestamp, 1050);
 
@@ -774,47 +689,33 @@ mod tests {
         assert_eq!(agg.mean_value, 300);
 
         // Step 6: Emergency Pause Flow
-        OracleContract::pause(env.clone(), admin.clone()).unwrap();
-        let paused_err = OracleContract::submit_report(
-            env.clone(),
-            reporter1.clone(),
-            feed_name.clone(),
-            400,
-            1100,
-        );
-        assert_eq!(paused_err, Err(OracleError::ContractPaused));
+        client.pause(&admin);
+        let paused_err = client.try_submit_report(&reporter1, &feed_name, &400, &1100);
+        assert_eq!(paused_err, Err(Ok(OracleError::ContractPaused)));
 
         // Step 7: Unpause and resume normal operation
-        OracleContract::unpause(env.clone(), admin.clone()).unwrap();
-        let resumed = OracleContract::submit_report(
-            env.clone(),
-            reporter1.clone(),
-            feed_name,
-            400,
-            1100,
-        );
+        client.unpause(&admin);
+        let resumed = client.try_submit_report(&reporter1, &feed_name, &400, &1100);
         assert!(resumed.is_ok());
     }
 
     #[test]
-fn test_submit_report_missing_config_returns_error() {
-    let env = Env::default();
-    env.mock_all_auths();
-    let (admin, config) = setup_oracle(&env);
-    let reporter = Address::generate(&env);
+    fn test_submit_report_missing_config_returns_error() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let (admin, config) = setup_oracle(&env);
+        let reporter = Address::generate(&env);
 
-    OracleContract::initialize(env.clone(), admin.clone(), config).unwrap();
-    OracleContract::add_reporter(env.clone(), admin.clone(), reporter.clone()).unwrap();
+        let contract_id = env.register_contract(None, OracleContract);
+        let client = OracleContractClient::new(&env, &contract_id);
+        client.initialize(&admin, &config);
+        client.add_reporter(&admin, &reporter);
 
-    env.storage().instance().remove(&ORACLE_CONFIG_KEY);
+        env.as_contract(&contract_id, || {
+            env.storage().instance().remove(&ORACLE_CONFIG_KEY);
+        });
 
-    let res = OracleContract::submit_report(
-        env.clone(),
-        reporter,
-        symbol_short!("MTTR"),
-        100,
-        1000,
-    );
-    assert_eq!(res, Err(OracleError::NotInitialized));
-}
+        let res = client.try_submit_report(&reporter, &symbol_short!("MTTR"), &100, &1000);
+        assert_eq!(res, Err(Ok(OracleError::NotInitialized)));
+    }
 }

@@ -118,6 +118,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "CFGCNT"
+                        },
+                        "val": {
+                          "u32": 4
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "CONFIG"
                         },
                         "val": {
@@ -381,7 +389,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 3
+                          "u32": 5
                         }
                       },
                       {
@@ -654,7 +662,7 @@
                     "symbol": "result_schema_version"
                   },
                   "val": {
-                    "u32": 1
+                    "u32": 2
                   }
                 },
                 {
@@ -662,7 +670,7 @@
                     "symbol": "storage_version"
                   },
                   "val": {
-                    "u32": 3
+                    "u32": 5
                   }
                 }
               ]
@@ -742,7 +750,7 @@
                     "symbol": "result_schema_version"
                   },
                   "val": {
-                    "u32": 1
+                    "u32": 2
                   }
                 },
                 {
@@ -750,7 +758,7 @@
                     "symbol": "storage_version"
                   },
                   "val": {
-                    "u32": 3
+                    "u32": 5
                   }
                 }
               ]
@@ -806,7 +814,7 @@
                     "symbol": "expected_version"
                   },
                   "val": {
-                    "u32": 3
+                    "u32": 5
                   }
                 },
                 {
@@ -822,7 +830,7 @@
                     "symbol": "stored_version"
                   },
                   "val": {
-                    "u32": 3
+                    "u32": 5
                   }
                 }
               ]

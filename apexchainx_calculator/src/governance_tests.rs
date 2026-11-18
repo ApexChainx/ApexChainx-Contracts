@@ -7,11 +7,9 @@
 mod governance_tests {
     #![allow(clippy::module_inception)]
     use crate::{
-        SLACalculatorContract, SLACalculatorContractClient, EVENT_ADMIN_ACC, EVENT_ADMIN_PROP,
+        SLACalculatorContract, SLACalculatorContractClient, SLAError, EVENT_ADMIN_ACC, EVENT_ADMIN_PROP,
     };
-    use soroban_sdk::{
-        testutils::Address as _, testutils::Events, Address, Env, TryIntoVal,
-    };
+    use soroban_sdk::{testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal};
 
     /// Creates a fresh contract environment with admin and operator initialized.
     fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
@@ -62,7 +60,7 @@ mod governance_tests {
         for i in 0..events.len() {
             let (_, topics, _) = events.get(i).unwrap();
             if !topics.is_empty() {
-                let name = topics.get(0).unwrap().try_into_val(&env).unwrap();
+                let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
                 if name == EVENT_ADMIN_PROP {
                     proposal_count += 1;
                 }
@@ -104,7 +102,10 @@ mod governance_tests {
 
         env.mock_auths(&[]);
         let result = client.try_accept_admin(&stranger);
-        assert!(result.is_err(), "stranger must not be able to accept admin proposal");
+        assert!(
+            result.is_err(),
+            "stranger must not be able to accept admin proposal"
+        );
     }
 
     /// Accepting when there is no proposal must fail.
@@ -115,7 +116,10 @@ mod governance_tests {
         let stranger = Address::generate(&env);
 
         let result = client.try_accept_admin(&stranger);
-        assert!(result.is_err(), "accept_admin with no pending proposal must return an error");
+        assert!(
+            result.is_err(),
+            "accept_admin with no pending proposal must return an error"
+        );
     }
 
     /// Governance validation failures keep their typed contract error codes.
@@ -300,7 +304,10 @@ mod governance_tests {
         let stranger = Address::generate(&env);
 
         let result = client.try_accept_operator(&stranger);
-        assert!(result.is_err(), "accept_operator with no pending proposal must fail");
+        assert!(
+            result.is_err(),
+            "accept_operator with no pending proposal must fail"
+        );
     }
 
     /// Re-proposing supersedes the previous operator candidate.
@@ -344,7 +351,10 @@ mod governance_tests {
         let (admin, _, client) = setup(&env);
 
         let result = client.try_cancel_operator_proposal(&admin);
-        assert!(result.is_err(), "cancel with no pending operator proposal must fail");
+        assert!(
+            result.is_err(),
+            "cancel with no pending operator proposal must fail"
+        );
     }
 
     // ── Single-step set_operator (legacy break-glass) ─────────────────────
@@ -414,12 +424,8 @@ mod governance_tests {
         client.propose_admin(&admin, &pending_admin);
         client.propose_operator(&admin, &pending_operator);
 
-        assert!(client
-            .try_propose_admin(&operator, &replacement)
-            .is_err());
-        assert!(client
-            .try_propose_operator(&operator, &replacement)
-            .is_err());
+        assert!(client.try_propose_admin(&operator, &replacement).is_err());
+        assert!(client.try_propose_operator(&operator, &replacement).is_err());
         assert!(client.try_cancel_admin_proposal(&operator).is_err());
         assert!(client.try_cancel_operator_proposal(&operator).is_err());
         assert!(client.try_renounce_admin(&operator).is_err());
@@ -496,10 +502,7 @@ mod governance_tests {
 
         client.propose_operator(&admin, &new_operator);
         assert_eq!(client.get_operator(), old_operator);
-        assert_eq!(
-            client.get_pending_operator(),
-            Some(new_operator.clone())
-        );
+        assert_eq!(client.get_pending_operator(), Some(new_operator.clone()));
         client.calculate_sla(
             &old_operator,
             &symbol_short!("OLD_OP"),

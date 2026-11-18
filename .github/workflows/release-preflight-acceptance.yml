@@ -29,19 +29,23 @@ jobs:
       - run: mkdir -p validation-results
       - name: Gate acceptance and all TypeScript regressions
         run: |
+          set -o pipefail
           npm test 2>&1 | tee validation-results/typescript-all.log
           npm run typecheck 2>&1 | tee validation-results/typecheck.log
       - name: Full Rust regressions and generated fixture freshness
         run: |
+          set -o pipefail
           cargo test --locked --lib 2>&1 | tee validation-results/rust-full.log
           git diff --exit-code -- ts/fixtures ts/generated
           test -z "$(git ls-files --others --exclude-standard -- ts/fixtures ts/generated)"
       - name: Budgets and persistence freshness
         run: |
+          set -o pipefail
           npm run test:offchain 2>&1 | tee validation-results/offchain.log
           npm run check:pers-store 2>&1 | tee validation-results/persistence.log
       - name: Format, lint and production no_std
         run: |
+          set -o pipefail
           cargo fmt --all --check 2>&1 | tee validation-results/format.log
           cargo clippy --locked --all-targets -- -D warnings 2>&1 | tee validation-results/clippy.log
           bash scripts/check-no-std.sh 2>&1 | tee validation-results/no-std.log

@@ -41,7 +41,7 @@ mod auth_matrix_tests {
     fn test_pause_authorization_precedes_invalid_reason_validation() {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
-        let reason = alloc::format!("{}", "x".repeat(crate::MAX_REASON_LEN + 1));
+        let reason = "x".repeat(crate::MAX_REASON_LEN + 1);
         let reason = soroban_sdk::String::from_str(&env, &reason);
 
         assert_eq!(
@@ -259,7 +259,6 @@ mod access_control_unit_tests {
         (admin, operator, client)
     }
 
-
     #[test]
     fn stranger_cannot_pause() {
         let env = Env::default();
@@ -355,4 +354,3 @@ mod reentrancy_guard_access_control_tests {
             .is_err());
     }
 }
-

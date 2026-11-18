@@ -602,7 +602,6 @@ mod access_control_integration_tests {
         (admin, operator, client)
     }
 
-
     #[test]
     fn admin_handover_moves_authority_to_the_new_admin() {
         let env = Env::default();

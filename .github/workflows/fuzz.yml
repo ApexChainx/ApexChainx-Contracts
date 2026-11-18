@@ -87,6 +87,7 @@ jobs:
       - name: Build fuzz targets
         working-directory: apexchainx_calculator/fuzz
         run: |
+          set -o pipefail
           mkdir -p ../../fuzz-evidence
           cargo +nightly fuzz build ${{ matrix.target }} 2>&1 | tee ../../fuzz-evidence/build.log
 
@@ -100,6 +101,7 @@ jobs:
         env:
           SEED: ${{ steps.seed.outputs.seed }}
         run: |
+          set -o pipefail
           mkdir -p ../../fuzz-evidence
           mkdir -p artifacts/${{ matrix.target }}
           cargo +nightly fuzz run ${{ matrix.target }} \

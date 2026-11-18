@@ -132,6 +132,14 @@
                       },
                       {
                         "key": {
+                          "symbol": "CFGCNT"
+                        },
+                        "val": {
+                          "u32": 4
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "CONFIG"
                         },
                         "val": {
@@ -395,7 +403,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 3
+                          "u32": 5
                         }
                       },
                       {
@@ -642,7 +650,7 @@
           "v0": {
             "topics": [
               {
-                "symbol": "migrate_done"
+                "symbol": "mig_done"
               },
               {
                 "symbol": "v1"
@@ -657,7 +665,7 @@
                   "u32": 0
                 },
                 {
-                  "u32": 3
+                  "u32": 5
                 }
               ]
             }

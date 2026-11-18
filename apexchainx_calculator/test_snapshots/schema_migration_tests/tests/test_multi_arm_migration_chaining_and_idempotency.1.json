@@ -425,7 +425,7 @@
                           "symbol": "VER"
                         },
                         "val": {
-                          "u32": 4
+                          "u32": 5
                         }
                       },
                       {
@@ -716,7 +716,7 @@
                     "symbol": "expected_version"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 5
                   }
                 },
                 {
@@ -792,7 +792,7 @@
                   "u32": 0
                 },
                 {
-                  "u32": 4
+                  "u32": 5
                 }
               ]
             }
@@ -868,7 +868,7 @@
                     "symbol": "expected_version"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 5
                   }
                 },
                 {
@@ -884,7 +884,7 @@
                     "symbol": "stored_version"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 5
                   }
                 }
               ]
@@ -987,7 +987,7 @@
                     "symbol": "expected_version"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 5
                   }
                 },
                 {
@@ -1003,7 +1003,7 @@
                     "symbol": "stored_version"
                   },
                   "val": {
-                    "u32": 4
+                    "u32": 5
                   }
                 }
               ]

@@ -172,11 +172,7 @@ impl StakingContract {
     /// # Errors
     /// - [`StakingError::AlreadyInitialized`] if the contract is already set up.
     /// - [`StakingError::InvalidRate`] if `reward_rate` is negative.
-    pub fn initialize(
-        env: Env,
-        admin: Address,
-        reward_rate: i128,
-    ) -> Result<(), StakingError> {
+    pub fn initialize(env: Env, admin: Address, reward_rate: i128) -> Result<(), StakingError> {
         // Gas optimization: check instance storage once; fail-fast before any auth.
         if env.storage().instance().has(&KEY_ADMIN) {
             return Err(StakingError::AlreadyInitialized);
@@ -195,10 +191,7 @@ impl StakingContract {
         storage.set(&KEY_TOTAL, &0_i128);
 
         // Event emission (issue #807): notify indexers of initialization.
-        env.events().publish(
-            (TOPIC_STAKING, TOPIC_INIT),
-            admin,
-        );
+        env.events().publish((TOPIC_STAKING, TOPIC_INIT), admin);
 
         Ok(())
     }
@@ -230,10 +223,8 @@ impl StakingContract {
         env.storage().instance().set(&KEY_RATE, &new_rate);
 
         // Event emission (issue #807): notify indexers of rate change.
-        env.events().publish(
-            (TOPIC_STAKING, TOPIC_RATE_SET),
-            new_rate,
-        );
+        env.events()
+            .publish((TOPIC_STAKING, TOPIC_RATE_SET), new_rate);
 
         Ok(())
     }
@@ -289,11 +280,7 @@ impl StakingContract {
         );
 
         // Update global total (instance cache — cheap).
-        let total: i128 = env
-            .storage()
-            .instance()
-            .get(&KEY_TOTAL)
-            .unwrap_or(0_i128);
+        let total: i128 = env.storage().instance().get(&KEY_TOTAL).unwrap_or(0_i128);
         let new_total = total.saturating_add(amount);
         env.storage().instance().set(&KEY_TOTAL, &new_total);
 
@@ -366,11 +353,7 @@ impl StakingContract {
         }
 
         // Update global total.
-        let total: i128 = env
-            .storage()
-            .instance()
-            .get(&KEY_TOTAL)
-            .unwrap_or(0_i128);
+        let total: i128 = env.storage().instance().get(&KEY_TOTAL).unwrap_or(0_i128);
         let new_total = total.saturating_sub(amount);
         env.storage().instance().set(&KEY_TOTAL, &new_total);
 
@@ -413,11 +396,7 @@ impl StakingContract {
 
         // Gas optimization: read rate from instance cache (single fetch shared
         // across any number of logical "reads" in the same invocation).
-        let rate: i128 = env
-            .storage()
-            .instance()
-            .get(&KEY_RATE)
-            .unwrap_or(0_i128);
+        let rate: i128 = env.storage().instance().get(&KEY_RATE).unwrap_or(0_i128);
 
         let current_ledger = env.ledger().sequence();
         let elapsed = (current_ledger.saturating_sub(rec.staked_at)) as i128;
@@ -434,20 +413,14 @@ impl StakingContract {
     ///
     /// Returns zero before initialization or when no stake is recorded.
     pub fn total_staked(env: Env) -> i128 {
-        env.storage()
-            .instance()
-            .get(&KEY_TOTAL)
-            .unwrap_or(0_i128)
+        env.storage().instance().get(&KEY_TOTAL).unwrap_or(0_i128)
     }
 
     /// Return the current reward rate.
     ///
     /// Returns zero before initialization.
     pub fn reward_rate(env: Env) -> i128 {
-        env.storage()
-            .instance()
-            .get(&KEY_RATE)
-            .unwrap_or(0_i128)
+        env.storage().instance().get(&KEY_RATE).unwrap_or(0_i128)
     }
 
     /// Return the admin address.
@@ -471,7 +444,7 @@ impl StakingContract {
 mod tests {
     use super::*;
     use soroban_sdk::testutils::{Address as _, Events, Ledger};
-    use soroban_sdk::{symbol_short, Env, TryIntoVal};
+    use soroban_sdk::{symbol_short, Env, IntoVal, Symbol, TryIntoVal};
 
     fn setup() -> (Env, Address, Address) {
         let env = Env::default();
@@ -616,8 +589,16 @@ mod tests {
             if topics.len() < 2 {
                 return false;
             }
-            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
-            let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            let t0: Symbol = topics
+                .get(0)
+                .unwrap()
+                .try_into_val(&env)
+                .unwrap_or(symbol_short!("_"));
+            let t1: Symbol = topics
+                .get(1)
+                .unwrap()
+                .try_into_val(&env)
+                .unwrap_or(symbol_short!("_"));
             t0 == TOPIC_STAKING && t1 == TOPIC_INIT
         });
         assert!(found, "expected 'staking/init' event");
@@ -636,8 +617,16 @@ mod tests {
             if topics.len() < 2 {
                 return false;
             }
-            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
-            let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            let t0: Symbol = topics
+                .get(0)
+                .unwrap()
+                .try_into_val(&env)
+                .unwrap_or(symbol_short!("_"));
+            let t1: Symbol = topics
+                .get(1)
+                .unwrap()
+                .try_into_val(&env)
+                .unwrap_or(symbol_short!("_"));
             t0 == TOPIC_STAKING && t1 == TOPIC_STAKED
         });
         assert!(found, "expected 'staking/staked' event");
@@ -657,8 +646,16 @@ mod tests {
             if topics.len() < 2 {
                 return false;
             }
-            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
-            let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            let t0: Symbol = topics
+                .get(0)
+                .unwrap()
+                .try_into_val(&env)
+                .unwrap_or(symbol_short!("_"));
+            let t1: Symbol = topics
+                .get(1)
+                .unwrap()
+                .try_into_val(&env)
+                .unwrap_or(symbol_short!("_"));
             t0 == TOPIC_STAKING && t1 == TOPIC_UNSTAKED
         });
         assert!(found, "expected 'staking/unstaked' event");
@@ -676,8 +673,16 @@ mod tests {
             if topics.len() < 2 {
                 return false;
             }
-            let t0: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
-            let t1: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap_or(symbol_short!("_"));
+            let t0: Symbol = topics
+                .get(0)
+                .unwrap()
+                .try_into_val(&env)
+                .unwrap_or(symbol_short!("_"));
+            let t1: Symbol = topics
+                .get(1)
+                .unwrap()
+                .try_into_val(&env)
+                .unwrap_or(symbol_short!("_"));
             t0 == TOPIC_STAKING && t1 == TOPIC_RATE_SET
         });
         assert!(found, "expected 'staking/rate_set' event");
@@ -745,7 +750,11 @@ mod tests {
         );
 
         // Rate must remain unchanged.
-        assert_eq!(client.reward_rate(), 1_i128, "rate must not change after failed auth");
+        assert_eq!(
+            client.reward_rate(),
+            1_i128,
+            "rate must not change after failed auth"
+        );
     }
 
     /// Re-initialization by any caller must be rejected.
@@ -766,6 +775,10 @@ mod tests {
         );
 
         // Admin must remain unchanged.
-        assert_eq!(client.get_admin(), admin, "admin must not change after failed re-init");
+        assert_eq!(
+            client.get_admin(),
+            admin,
+            "admin must not change after failed re-init"
+        );
     }
 }
