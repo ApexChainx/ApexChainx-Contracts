@@ -1,1 +1,1 @@
-pub mod severity_names;
+pub mod threshold_bounds;
