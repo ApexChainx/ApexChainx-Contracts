@@ -7,3 +7,8 @@ pub mod outage_analytics;
 pub mod settlement_summary;
 pub mod sla_summary;
 pub mod telemetry_snapshot;
+
+pub mod compliance_report;
+pub mod history_export;
+pub mod severity_distribution;
+pub mod time_series;
