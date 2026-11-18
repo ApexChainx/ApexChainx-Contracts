@@ -59,3 +59,8 @@ pub fn has_fixture_module(name: &str) -> bool {
 }
 
 pub mod sla_inputs;
+
+pub mod history_records;
+pub mod settlement_scenarios;
+pub mod telemetry_samples;
+pub mod threshold_configs;
