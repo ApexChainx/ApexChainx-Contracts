@@ -9,3 +9,8 @@ mod history_export_report_tests;
 mod outage_analytics_report_tests;
 mod settlement_summary_report_tests;
 mod telemetry_snapshot_report_tests;
+
+mod compliance_report_tests;
+mod csv_rows_report_tests;
+mod severity_distribution_report_tests;
+mod time_series_report_tests;
