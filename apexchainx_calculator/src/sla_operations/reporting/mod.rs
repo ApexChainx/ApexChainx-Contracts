@@ -17,3 +17,8 @@ pub mod csv_rows;
 pub mod json_models;
 pub mod metadata;
 pub mod status_labels;
+
+pub mod deltas;
+pub mod health_indicators;
+pub use deltas::{compute_delta, compute_deltas, MetricDelta, Trend};
+pub use health_indicators::{HealthIndicators, HealthLevel, SlaMetrics};

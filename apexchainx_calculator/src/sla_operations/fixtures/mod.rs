@@ -57,3 +57,5 @@ pub fn find_fixture_module(name: &str) -> Option<&'static FixtureModule> {
 pub fn has_fixture_module(name: &str) -> bool {
     find_fixture_module(name).is_some()
 }
+
+pub mod sla_inputs;
