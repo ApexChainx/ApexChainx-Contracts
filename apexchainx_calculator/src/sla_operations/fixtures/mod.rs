@@ -64,3 +64,8 @@ pub mod history_records;
 pub mod settlement_scenarios;
 pub mod telemetry_samples;
 pub mod threshold_configs;
+
+pub mod boundary_cases;
+pub mod invalid_inputs;
+pub mod severity_distributions;
+pub mod time_series;
