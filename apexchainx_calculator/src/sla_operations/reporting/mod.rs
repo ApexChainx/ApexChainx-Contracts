@@ -12,3 +12,8 @@ pub mod compliance_report;
 pub mod history_export;
 pub mod severity_distribution;
 pub mod time_series;
+
+pub mod csv_rows;
+pub mod json_models;
+pub mod metadata;
+pub mod status_labels;
