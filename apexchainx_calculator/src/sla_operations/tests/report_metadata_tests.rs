@@ -26,3 +26,22 @@ fn inverted_range_is_rejected() {
         Err(MetadataError::InvalidRange)
     );
 }
+
+#[test]
+fn all_fields_come_from_the_call_inputs() {
+    let metadata = sample_metadata();
+    assert_eq!(metadata.range_start, 100);
+    assert_eq!(metadata.range_end, 700);
+    assert_eq!(metadata.record_count, 12);
+    assert_eq!(metadata.generated_at, 900);
+    assert_eq!(metadata.schema_version, REPORT_SCHEMA_VERSION);
+}
+
+#[test]
+fn schema_version_is_stable_for_every_build() {
+    let first = build_metadata(0, 1, 0, 0).expect("valid range");
+    let second = build_metadata(u64::MAX, u64::MAX, u32::MAX, u64::MAX).expect("single instant");
+    assert_eq!(first.schema_version, REPORT_SCHEMA_VERSION);
+    assert_eq!(second.schema_version, REPORT_SCHEMA_VERSION);
+    assert_eq!(REPORT_SCHEMA_VERSION, 1);
+}
