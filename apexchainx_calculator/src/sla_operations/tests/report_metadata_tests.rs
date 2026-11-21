@@ -94,3 +94,29 @@ fn pairs_are_stable_across_repeated_calls() {
     let metadata = sample_metadata();
     assert_eq!(metadata.to_pairs(), metadata.to_pairs());
 }
+
+#[test]
+fn duration_is_the_difference_between_range_bounds() {
+    assert_eq!(sample_metadata().duration_seconds(), 600);
+    assert_eq!(
+        build_metadata(0, u64::MAX, 1, 0)
+            .expect("valid range")
+            .duration_seconds(),
+        u64::MAX
+    );
+}
+
+#[test]
+fn single_instant_ranges_have_zero_duration() {
+    for instant in [0_u64, 1_u64, 1_700_000_000_u64, u64::MAX] {
+        let metadata = build_metadata(instant, instant, 1, instant).expect("single instant");
+        assert_eq!(metadata.duration_seconds(), 0);
+    }
+}
+
+#[test]
+fn emptiness_depends_only_on_record_count() {
+    assert!(build_metadata(0, 0, 0, 0).expect("valid range").is_empty());
+    assert!(!build_metadata(0, 0, 1, 0).expect("valid range").is_empty());
+    assert!(!sample_metadata().is_empty());
+}
