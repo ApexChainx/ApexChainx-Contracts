@@ -12,5 +12,6 @@ mod telemetry_snapshot_report_tests;
 
 mod compliance_report_tests;
 mod csv_rows_report_tests;
+mod report_metadata_tests;
 mod severity_distribution_report_tests;
 mod time_series_report_tests;
