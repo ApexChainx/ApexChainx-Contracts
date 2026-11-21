@@ -81,10 +81,10 @@ fn pairs_contain_the_exact_input_values_as_decimal_strings() {
         values,
         alloc::vec![
             REPORT_SCHEMA_VERSION.to_string(),
-            "100",
-            "700",
-            "12",
-            "900"
+            "100".to_string(),
+            "700".to_string(),
+            "12".to_string(),
+            "900".to_string()
         ]
     );
 }
