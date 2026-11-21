@@ -120,3 +120,40 @@ fn emptiness_depends_only_on_record_count() {
     assert!(!build_metadata(0, 0, 1, 0).expect("valid range").is_empty());
     assert!(!sample_metadata().is_empty());
 }
+
+#[test]
+fn metadata_error_is_copyable_and_comparable() {
+    let error = MetadataError::InvalidRange;
+    let copied = error;
+    assert_eq!(error, copied);
+    assert_eq!(copied, MetadataError::InvalidRange);
+    assert_eq!(alloc::format!("{copied:?}"), "InvalidRange");
+}
+
+#[test]
+fn generated_at_only_changes_its_own_pair() {
+    let earlier = build_metadata(10, 20, 3, 100).expect("valid range");
+    let later = build_metadata(10, 20, 3, 200).expect("valid range");
+
+    let earlier_pairs = earlier.to_pairs();
+    let later_pairs = later.to_pairs();
+    assert_eq!(earlier_pairs.len(), later_pairs.len());
+
+    for (index, (left, right)) in earlier_pairs.iter().zip(later_pairs.iter()).enumerate() {
+        assert_eq!(left.0, right.0);
+        if index == 4 {
+            assert_ne!(left.1, right.1);
+        } else {
+            assert_eq!(left.1, right.1);
+        }
+    }
+}
+
+#[test]
+fn maximum_record_count_is_rendered_without_overflow() {
+    let metadata = build_metadata(0, 5, u32::MAX, u64::MAX).expect("valid range");
+    let pairs = metadata.to_pairs();
+    assert_eq!(pairs[3].1, u32::MAX.to_string());
+    assert_eq!(pairs[4].1, u64::MAX.to_string());
+    assert!(!metadata.is_empty());
+}
