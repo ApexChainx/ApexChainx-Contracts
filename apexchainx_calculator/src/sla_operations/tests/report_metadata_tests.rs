@@ -4,6 +4,11 @@
 //! do not touch contract storage, events, or entrypoints, and they use no clock:
 //! every timestamp is supplied by the test itself.
 
+use alloc::{
+    string::{String, ToString},
+    vec::Vec,
+};
+
 use crate::sla_operations::reporting::metadata::{
     build_metadata, MetadataError, ReportMetadata, REPORT_SCHEMA_VERSION,
 };
@@ -44,4 +49,48 @@ fn schema_version_is_stable_for_every_build() {
     assert_eq!(first.schema_version, REPORT_SCHEMA_VERSION);
     assert_eq!(second.schema_version, REPORT_SCHEMA_VERSION);
     assert_eq!(REPORT_SCHEMA_VERSION, 1);
+}
+
+#[test]
+fn pairs_have_a_fixed_key_order() {
+    let keys: Vec<String> = sample_metadata()
+        .to_pairs()
+        .into_iter()
+        .map(|(key, _)| key)
+        .collect();
+    assert_eq!(
+        keys,
+        alloc::vec![
+            "schema_version",
+            "range_start",
+            "range_end",
+            "record_count",
+            "generated_at"
+        ]
+    );
+}
+
+#[test]
+fn pairs_contain_the_exact_input_values_as_decimal_strings() {
+    let values: Vec<String> = sample_metadata()
+        .to_pairs()
+        .into_iter()
+        .map(|(_, value)| value)
+        .collect();
+    assert_eq!(
+        values,
+        alloc::vec![
+            REPORT_SCHEMA_VERSION.to_string(),
+            "100",
+            "700",
+            "12",
+            "900"
+        ]
+    );
+}
+
+#[test]
+fn pairs_are_stable_across_repeated_calls() {
+    let metadata = sample_metadata();
+    assert_eq!(metadata.to_pairs(), metadata.to_pairs());
 }
