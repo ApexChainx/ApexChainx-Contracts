@@ -16,4 +16,5 @@ mod compliance_report_tests;
 mod csv_rows_report_tests;
 mod history_records_fixtures_tests;
 mod severity_distribution_report_tests;
+mod sla_inputs_fixtures_tests;
 mod time_series_report_tests;
