@@ -1,0 +1,2 @@
+[pers-store] sc004=4/4 sc005=0 failures sc006=16 sc007=36 sc008=16 sc009=6 (total payout 340)
+[pers-store] persistence-fixtures.json is fresh.

@@ -22,23 +22,21 @@
 
 #[cfg(test)]
 mod pruning_perf_tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
 
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
 
-    fn setup_with_history(env: &Env, count: u32) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup_with_history(env: &Env, count: u32) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        env.budget().reset_unlimited();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
         let operator = Address::generate(env);
         client.initialize(&admin, &operator);
         for i in 1..=count {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("OUT"),
-                &symbol_short!("high"),
-                &i,
-            );
+            let id = Symbol::new(env, &alloc::format!("OUT{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("high"), &i);
         }
         (admin, operator, client)
     }
@@ -59,12 +57,7 @@ mod pruning_perf_tests {
         // admin holds the admin role but not the operator role
         let env = Env::default();
         let (admin, _operator, client) = setup_with_history(&env, 0);
-        client.calculate_sla(
-            &admin,
-            &symbol_short!("PR_ADMIN"),
-            &symbol_short!("high"),
-            &1,
-        );
+        client.calculate_sla(&admin, &symbol_short!("PR_ADMIN"), &symbol_short!("high"), &1);
     }
 
     #[test]
@@ -88,6 +81,7 @@ mod pruning_perf_tests {
         let env = Env::default();
         let (admin, _operator, client) = setup_with_history(&env, 20);
         client.prune_history(&admin, &0);
+        assert_eq!(client.get_history().len(), 0);
     }
 
     #[test]
@@ -95,12 +89,7 @@ mod pruning_perf_tests {
         let env = Env::default();
         let (admin, operator, client) = setup_with_history(&env, 30);
         client.prune_history(&admin, &12);
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("OUT"),
-            &symbol_short!("high"),
-            &5,
-        );
+        client.calculate_sla(&operator, &symbol_short!("OUT"), &symbol_short!("high"), &5);
         client.prune_history(&admin, &10);
     }
 
@@ -109,12 +98,7 @@ mod pruning_perf_tests {
         let env = Env::default();
         let (_admin, operator, client) = setup_with_history(&env, 1);
         for _ in 0..20 {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("OUT"),
-                &symbol_short!("high"),
-                &10,
-            );
+            client.calculate_sla(&operator, &symbol_short!("OUT"), &symbol_short!("high"), &10);
         }
     }
 }

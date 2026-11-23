@@ -1,0 +1,44 @@
+[
+  {
+    "name": "sla_calc",
+    "version": "v1",
+    "fields": 9,
+    "xdrBytes": 152
+  },
+  {
+    "name": "set_int",
+    "version": "v2",
+    "fields": 10,
+    "xdrBytes": 164
+  },
+  {
+    "name": "cfg_upd",
+    "version": "v1",
+    "fields": 3,
+    "xdrBytes": 60
+  },
+  {
+    "name": "paused",
+    "version": "v1",
+    "fields": 1,
+    "xdrBytes": 20
+  },
+  {
+    "name": "unpause",
+    "version": "v1",
+    "fields": 1,
+    "xdrBytes": 20
+  },
+  {
+    "name": "adm_prop",
+    "version": "v1",
+    "fields": 1,
+    "xdrBytes": 56
+  },
+  {
+    "name": "op_prop",
+    "version": "v1",
+    "fields": 1,
+    "xdrBytes": 56
+  }
+]

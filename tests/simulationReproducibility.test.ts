@@ -3,6 +3,9 @@
  * Validates that core evaluation logic is stable and version-independent.
  */
 
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 interface SimInput { mttr: number; threshold: number; penaltyBps: number }
 interface SimOutput { verdict: "met" | "violated" | "invalid"; penalty: number }
 
@@ -23,17 +26,17 @@ const SNAPSHOT: Array<[SimInput, SimOutput]> = [
 describe("SC-W5-062 Simulation Reproducibility", () => {
   it("matches pinned snapshot outputs", () => {
     for (const [input, expected] of SNAPSHOT) {
-      expect(simulate(input)).toEqual(expected);
+      assert.deepStrictEqual(simulate(input), expected);
     }
   });
 
   it("same input always produces same output", () => {
     const input = { mttr: 75, threshold: 60, penaltyBps: 300 };
-    expect(simulate(input)).toEqual(simulate(input));
+    assert.deepStrictEqual(simulate(input), simulate(input));
   });
 
   it("snapshot is exhaustive for all verdict states", () => {
     const verdicts = new Set(SNAPSHOT.map(([, o]) => o.verdict));
-    expect(verdicts).toEqual(new Set(["met", "violated", "invalid"]));
+    assert.deepStrictEqual(verdicts, new Set(["met", "violated", "invalid"]));
   });
 });

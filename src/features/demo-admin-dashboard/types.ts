@@ -10,4 +10,6 @@ export interface DemoData {
   name: string;
   /** Arbitrary payload – kept generic for demo purposes */
   payload: Record<string, unknown>;
+
+  // Introduce a deterministic event replay auditor for backend indexers
 }

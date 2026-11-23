@@ -1,0 +1,2 @@
+# Empty fixture project — no sorostream.config.ts or .js present.
+# Used to verify that SoroStreamClient falls back to defaults.

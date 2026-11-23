@@ -3,6 +3,9 @@
  * Pins the exact shape of contract responses so backend decoders stay aligned.
  */
 
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 interface SlaResponse {
   outage_id: string;
   verdict: "met" | "violated" | "invalid";
@@ -25,21 +28,21 @@ const FIXTURES: SlaResponse[] = [
 describe("SC-W5-057 Contract Response Shape Parity", () => {
   it("met response has zero penalty and correct fields", () => {
     const res = buildResponse("o-001", 30, 60, 500);
-    expect(res).toEqual(FIXTURES[0]);
+    assert.deepStrictEqual(res, FIXTURES[0]);
   });
 
   it("violated response carries penalty_bps", () => {
     const res = buildResponse("o-002", 90, 60, 500);
-    expect(res).toEqual(FIXTURES[1]);
+    assert.deepStrictEqual(res, FIXTURES[1]);
   });
 
   it("invalid response has zero penalty regardless of bps", () => {
     const res = buildResponse("o-003", -1, 60, 500);
-    expect(res).toEqual(FIXTURES[2]);
+    assert.deepStrictEqual(res, FIXTURES[2]);
   });
 
   it("response always contains all required fields", () => {
     const res = buildResponse("o-004", 60, 60, 300);
-    expect(Object.keys(res).sort()).toEqual(["mttr_minutes", "outage_id", "penalty_bps", "verdict"]);
+    assert.deepStrictEqual(Object.keys(res).sort(), ["mttr_minutes", "outage_id", "penalty_bps", "verdict"]);
   });
 });

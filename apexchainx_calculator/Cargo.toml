@@ -8,7 +8,9 @@ repository = "https://github.com/ApexChainx/ApexChainx-Contracts"
 publish = false
 
 [lib]
-crate-type = ["cdylib"]
+# `cdylib` is the deployable WASM artifact; `rlib` lets external crates (e.g.
+# the cargo-fuzz harness in `fuzz/`) link against the contract as a library.
+crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
@@ -17,4 +19,6 @@ default = []
 soroban-sdk = { version = "21.1.0", features = ["alloc"] }
 
 [dev-dependencies]
+proptest = "1.5.0"
 soroban-sdk = { version = "21.1.0", features = ["testutils", "alloc"] }
+

@@ -1,0 +1,279 @@
+name: Nightly Fuzz Testing
+
+on:
+  push:
+    branches: [fix/release-safety-preflight]
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Fuzz duration in seconds'
+        required: false
+        default: '600'
+      seed:
+        description: 'Deterministic seed (empty uses current time)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  CARGO_TERM_COLOR: always
+  # Branch verification is a two-minute smoke run; scheduled campaigns stay ten minutes.
+  FUZZ_DURATION: ${{ github.event.inputs.duration || (github.event_name == 'push' && '120') || '600' }}
+  FUZZ_SEED: ${{ github.event.inputs.seed || '' }}
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - compute_result
+          - validate_config
+          - config_mutation_sequences
+          - governance_sequences
+          - history_state_machine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt, clippy
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-fuzz-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-fuzz-${{ matrix.target }}-
+
+      - name: Record seed
+        id: seed
+        run: |
+          [[ "$FUZZ_DURATION" =~ ^[0-9]+$ ]] && (( FUZZ_DURATION >= 1 && FUZZ_DURATION <= 1200 )) || exit 1
+          [[ -z "$FUZZ_SEED" || "$FUZZ_SEED" =~ ^[0-9]+$ ]] || exit 1
+          if [ -n "$FUZZ_SEED" ]; then
+            echo "seed=$FUZZ_SEED" >> $GITHUB_OUTPUT
+            echo "Using provided seed: $FUZZ_SEED"
+          else
+            SEED=$(date +%s)
+            echo "seed=$SEED" >> $GITHUB_OUTPUT
+            echo "Generated seed: $SEED"
+          fi
+
+      # Built as its own step so a target that no longer compiles fails the job
+      # loudly. It previously shared a step with the run below, whose
+      # `2>/dev/null || true` hid compile errors and crashes alike.
+      - name: Build fuzz targets
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          set -o pipefail
+          mkdir -p ../../fuzz-evidence
+          cargo +nightly fuzz build ${{ matrix.target }} 2>&1 | tee ../../fuzz-evidence/build.log
+
+      # The exit code is deliberately NOT swallowed. The targets now assert the
+      # contract's documented semantics (docs/FUZZING_GUARANTEES.md), so a
+      # non-zero exit means libFuzzer found an input where the implementation
+      # and the spec disagree — that must fail the run, not be discarded.
+      # libFuzzer exits 0 when -max_total_time elapses without a finding.
+      - name: Run fuzz target
+        working-directory: apexchainx_calculator/fuzz
+        env:
+          SEED: ${{ steps.seed.outputs.seed }}
+        run: |
+          set -o pipefail
+          mkdir -p ../../fuzz-evidence
+          mkdir -p artifacts/${{ matrix.target }}
+          cargo +nightly fuzz run ${{ matrix.target }} \
+            -- \
+            -max_total_time="$FUZZ_DURATION" \
+            -seed="$SEED" \
+            -artifact_prefix="$PWD/artifacts/${{ matrix.target }}/" 2>&1 | tee ../../fuzz-evidence/fuzz.log
+
+      - name: Generate summary
+        if: always()
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          echo "## Fuzz Test Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** \`${{ matrix.target }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Duration:** ${FUZZ_DURATION}s" >> $GITHUB_STEP_SUMMARY
+          echo "**Seed:** \`${{ steps.seed.outputs.seed }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Corpus" >> $GITHUB_STEP_SUMMARY
+          if [ -d "corpus/${{ matrix.target }}" ]; then
+            FILE_COUNT=$(find corpus/${{ matrix.target }} -type f | wc -l)
+            echo "- Files in corpus: \`${FILE_COUNT}\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Artifacts" >> $GITHUB_STEP_SUMMARY
+          if [ -d "artifacts/${{ matrix.target }}" ]; then
+            ARTIFACT_COUNT=$(find artifacts/${{ matrix.target }} -type f | wc -l)
+            echo "- Crash/slow artifacts: \`${ARTIFACT_COUNT}\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "- No artifacts (no crashes found)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload fuzz artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}-${{ steps.seed.outputs.seed }}
+          path: |
+            apexchainx_calculator/fuzz/artifacts/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Upload corpus
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-corpus-${{ matrix.target }}-${{ steps.seed.outputs.seed }}
+          path: |
+            apexchainx_calculator/fuzz/corpus/${{ matrix.target }}/
+          retention-days: 30
+          if-no-files-found: ignore
+
+      # #630 – Triage: dedup crash artifacts by content hash and drop
+      # duplicates, then prune the corpus. Markers under
+      # apexchainx_calculator/fuzz/.fuzz-reports/<target>/ (committed with the
+      # corpus) make the dedup durable across runs: a crash already reported
+      # from a previous night is not re-filed.
+      - name: Triage crash artifacts (dedup by hash)
+        if: always()
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          set -uo pipefail
+          ARTIFACT_DIR="artifacts/${{ matrix.target }}"
+          REPORT_DIR=".fuzz-reports/${{ matrix.target }}"
+          if [ ! -d "$ARTIFACT_DIR" ] || [ -z "$(ls -A "$ARTIFACT_DIR" 2>/dev/null)" ]; then
+            echo "No crash artifacts for ${{ matrix.target }} — nothing to triage."
+            exit 0
+          fi
+          mkdir -p "$REPORT_DIR"
+          for file in "$ARTIFACT_DIR"/*; do
+            [ -f "$file" ] || continue
+            HASH=$(sha256sum "$file" | cut -d' ' -f1)
+            SHORT=${HASH:0:12}
+            if [ -e "$REPORT_DIR/$SHORT" ]; then
+              echo "Duplicate crash (already reported), pruning: $file (sha256:$SHORT)"
+              rm -f "$file"
+            else
+              : > "$REPORT_DIR/$SHORT"
+              echo "New crash awaiting issue: $file (sha256:$SHORT)"
+            fi
+          done
+
+      # #630 – File one issue per new unique crash with a repro command.
+      - name: File issues for new unique crashes
+        if: always() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          set -uo pipefail
+          ARTIFACT_DIR="artifacts/${{ matrix.target }}"
+          if [ ! -d "$ARTIFACT_DIR" ] || [ -z "$(ls -A "$ARTIFACT_DIR" 2>/dev/null)" ]; then
+            echo "No new crashes — no issues to file."
+            exit 0
+          fi
+          for file in "$ARTIFACT_DIR"/*; do
+            [ -f "$file" ] || continue
+            HASH=$(sha256sum "$file" | cut -d' ' -f1)
+            REPRO="cargo +nightly fuzz run ${{ matrix.target }} -- -runs=1 \"$file\""
+            BODY=$(mktemp)
+            cat > "$BODY" <<EOF
+            Nightly fuzz run found a crash in the \`${{ matrix.target }}\` target (seed \`${{ steps.seed.outputs.seed }}\`, sha256:${HASH:0:12}).
+
+            ## Repro
+            \`\`\`
+            $REPRO
+            \`\`\`
+
+            The crashing input is preserved in the workflow artifact \`fuzz-artifacts-${{ matrix.target }}-${{ steps.seed.outputs.seed }}\`.
+
+            ## Triage checklist (see docs/FUZZING_TRIAGE.md)
+            - [ ] Reproduce locally from the artifact
+            - [ ] Root-cause (implementation vs spec — see docs/FUZZING_GUARANTEES.md)
+            - [ ] Land the fix with a corpus seed added
+            - [ ] Delete the report marker for this hash so the crash stops being re-filed
+          EOF
+            sed -i 's/^[[:space:]]*//' "$BODY"
+            gh issue create \
+              --title "Fuzz crash: ${{ matrix.target }} sha256:${HASH:0:12}" \
+              --body-file "$BODY"
+            rm -f "$BODY"
+          done
+
+      # #630 – Prune the corpus: dedup by content hash and cap the persisted
+      # seed count so the corpus stays reviewable and bounded.
+      - name: Prune corpus
+        if: always()
+        working-directory: apexchainx_calculator/fuzz
+        run: |
+          set -uo pipefail
+          CORPUS_DIR="corpus/${{ matrix.target }}"
+          [ -d "$CORPUS_DIR" ] || exit 0
+          declare -A seen
+          for file in "$CORPUS_DIR"/*; do
+            [ -f "$file" ] || continue
+            HASH=$(sha256sum "$file" | cut -d' ' -f1)
+            if [ -n "${seen[$HASH]+x}" ]; then
+              rm -f "$file"
+            else
+              seen[$HASH]=1
+            fi
+          done
+          COUNT=$(find "$CORPUS_DIR" -maxdepth 1 -type f | wc -l)
+          if [ "$COUNT" -gt 2000 ]; then
+            echo "Corpus exceeds 2000 seeds ($COUNT) — pruning oldest entries."
+            find "$CORPUS_DIR" -maxdepth 1 -type f | sort | head -n "$((COUNT - 2000))" | xargs -r rm -f
+          fi
+          echo "Corpus for ${{ matrix.target }} after prune: $(find "$CORPUS_DIR" -maxdepth 1 -type f | wc -l) files"
+
+      - name: Persist corpus back to repo
+        if: success() && github.event_name == 'schedule'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add apexchainx_calculator/fuzz/corpus/ apexchainx_calculator/fuzz/.fuzz-reports/ || true
+          git diff --cached --quiet || git commit -m "chore(fuzz): update corpus from nightly run [skip ci]"
+          git push || true
+
+      - name: Record nightly evidence
+        if: always()
+        env:
+          TARGET: ${{ matrix.target }}
+          JOB_STATUS: ${{ job.status }}
+          SEED: ${{ steps.seed.outputs.seed }}
+        run: |
+          mkdir -p fuzz-evidence
+          printf 'target=%s\ncommit=%s\nstatus=%s\nseed=%s\nrun=%s\n' "$TARGET" "$GITHUB_SHA" "$JOB_STATUS" "$SEED" "$GITHUB_RUN_ID" > "fuzz-evidence/$TARGET.txt"
+
+      - name: Upload nightly evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-evidence-${{ matrix.target }}
+          path: fuzz-evidence/
+          retention-days: 90

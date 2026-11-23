@@ -1,0 +1,29 @@
+# codecov.yml
+# Issue #78: Coverage gate configuration for ApexChainx-Contracts.
+# Codecov will post a status check on every PR and fail it if coverage
+# drops by more than 1 percentage point on either the whole project or
+# the lines touched by the PR patch.
+
+coverage:
+  precision: 2
+  round: down
+  range: "70...100"
+
+  status:
+    # Gate on the overall project line coverage.
+    project:
+      default:
+        target: auto          # compare against the base commit
+        threshold: 1%         # allow up to 1% drop before failing
+        base: auto
+
+    # Gate on the lines changed in the PR itself.
+    patch:
+      default:
+        target: 80%           # new/changed lines must be ≥80% covered
+        threshold: 1%
+
+comment:
+  layout: "reach,diff,flags,tree"
+  behavior: default
+  require_changes: true       # only comment when coverage changes

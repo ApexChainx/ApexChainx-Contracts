@@ -14,20 +14,28 @@
 //!    emitted in the order of the lifecycle phase they represent.
 //! 5. Operator handoff events (`op_prop`, `op_acc`, `op_can`) follow the same
 //!    lifecycle ordering as admin events.
+//! 6. When a running-stats counter saturates mid-calculation, the `stats_sat`
+//!    event precedes the `sla_calc` / `set_int` decision events for the same
+//!    calculation. A consumer processing `stats_sat` to mark "the totals now
+//!    under-report" can therefore trust that the decision event that follows it
+//!    in the same transaction reflects the counter already capped at its bound
+//!    (SC-W5-047).
 
 #[cfg(test)]
 mod event_ordering_tests {
-    use soroban_sdk::{
-        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol,
-        TryIntoVal,
-    };
+    #![allow(clippy::module_inception, clippy::len_zero)]
     use crate::{
-        EVENT_CONFIG_UPD, EVENT_OP_ACC, EVENT_OP_CAN, EVENT_OP_PROP, EVENT_PAUSED, EVENT_PRUNED,
-        EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_UNPAUSED,
-        SLACalculatorContract, SLACalculatorContractClient,
+        SLACalculatorContract, SLACalculatorContractClient, SLAStats, EVENT_CONFIG_UPD, EVENT_PAUSED,
+        EVENT_PRUNED, EVENT_RET_LIM, EVENT_SETTLE_INTENT, EVENT_SLA_CALC, EVENT_STATS_SAT, EVENT_UNPAUSED,
+        STATS_KEY,
+    };
+    use alloc::vec::Vec;
+    use soroban_sdk::{
+        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
     };
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -99,24 +107,9 @@ mod event_ordering_tests {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("ORD_A"),
-            &symbol_short!("critical"),
-            &5,
-        );
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("ORD_B"),
-            &symbol_short!("high"),
-            &35,
-        );
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("ORD_C"),
-            &symbol_short!("low"),
-            &60,
-        );
+        client.calculate_sla(&operator, &symbol_short!("ORD_A"), &symbol_short!("critical"), &5);
+        client.calculate_sla(&operator, &symbol_short!("ORD_B"), &symbol_short!("high"), &35);
+        client.calculate_sla(&operator, &symbol_short!("ORD_C"), &symbol_short!("low"), &60);
 
         let names = event_names(&env);
 
@@ -162,7 +155,7 @@ mod event_ordering_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         let names = event_names(&env);
@@ -197,12 +190,8 @@ mod event_ordering_tests {
 
         let count = 5;
         for i in 0..count {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("CNT"),
-                &symbol_short!("critical"),
-                &(5u32 + i),
-            );
+            let id = Symbol::new(&env, &alloc::format!("CNT{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("critical"), &(5u32 + i));
         }
 
         let names = event_names(&env);
@@ -214,11 +203,7 @@ mod event_ordering_tests {
             "Expected {} sla_calc events",
             count
         );
-        assert_eq!(
-            set_int_count, count as usize,
-            "Expected {} set_int events",
-            count
-        );
+        assert_eq!(set_int_count, count as usize, "Expected {} set_int events", count);
     }
 
     // ── 5. Event count consistency after multi-op sequences ─────────────
@@ -230,12 +215,7 @@ mod event_ordering_tests {
 
         // Mix of operations
         client.set_config(&admin, &symbol_short!("low"), &240, &15, &900);
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("MIX_A"),
-            &symbol_short!("low"),
-            &100,
-        );
+        client.calculate_sla(&operator, &symbol_short!("MIX_A"), &symbol_short!("low"), &100);
         client.set_config(&admin, &symbol_short!("critical"), &25, &150, &850);
         client.calculate_sla(
             &operator,
@@ -250,26 +230,16 @@ mod event_ordering_tests {
         // (plus init events which we ignore by scanning only named events)
         let named: Vec<&Symbol> = names
             .iter()
-            .filter(|n| {
-                **n == EVENT_CONFIG_UPD
-                    || **n == EVENT_SLA_CALC
-                    || **n == EVENT_SETTLE_INTENT
-            })
+            .filter(|n| **n == EVENT_CONFIG_UPD || **n == EVENT_SLA_CALC || **n == EVENT_SETTLE_INTENT)
             .collect();
 
         assert_eq!(named.len(), 6, "Expected 6 named events in mixed sequence");
         assert_eq!(*named[0], EVENT_CONFIG_UPD, "First event must be cfg_upd");
         assert_eq!(*named[1], EVENT_SLA_CALC, "Second event must be sla_calc");
         assert_eq!(*named[2], EVENT_SETTLE_INTENT, "Third event must be set_int");
-        assert_eq!(
-            *named[3], EVENT_CONFIG_UPD,
-            "Fourth event must be cfg_upd"
-        );
+        assert_eq!(*named[3], EVENT_CONFIG_UPD, "Fourth event must be cfg_upd");
         assert_eq!(*named[4], EVENT_SLA_CALC, "Fifth event must be sla_calc");
-        assert_eq!(
-            *named[5], EVENT_SETTLE_INTENT,
-            "Sixth event must be set_int"
-        );
+        assert_eq!(*named[5], EVENT_SETTLE_INTENT, "Sixth event must be set_int");
     }
 
     // ── Auth-gated negative tests ───────────────────────────────────────
@@ -280,12 +250,7 @@ mod event_ordering_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.calculate_sla(
-            &stranger,
-            &symbol_short!("U_ORD"),
-            &symbol_short!("critical"),
-            &5,
-        );
+        client.calculate_sla(&stranger, &symbol_short!("U_ORD"), &symbol_short!("critical"), &5);
     }
 
     #[test]
@@ -303,6 +268,115 @@ mod event_ordering_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.pause(&stranger);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
+    }
+
+    // ── 6. stats_sat precedes the decision events for the same calc ─────
+
+    #[test]
+    fn test_stats_sat_precedes_sla_calc_and_set_int_for_same_calculation() {
+        // SC-W5-047 – when a counter saturates mid-calculation the emitted order
+        // is `stats_sat` (from increment_stats) followed by `sla_calc` / `set_int`
+        // (published after all state mutations commit). Reaching saturation is
+        // astronomically unlikely in production (u64::MAX), so this test drives it
+        // deterministically by stamping the counter to its ceiling in storage.
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &cid);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        // Patch total_calculations to its ceiling so the next increment overflows.
+        env.as_contract(&client.address, || {
+            let mut stats: SLAStats = env.storage().instance().get(&STATS_KEY).unwrap_or(SLAStats {
+                total_calculations: 0,
+                total_violations: 0,
+                total_rewards: 0,
+                total_penalties: 0,
+            });
+            stats.total_calculations = u64::MAX;
+            env.storage().instance().set(&STATS_KEY, &stats);
+        });
+
+        // One calculate_sla call in a single transaction. The met path increments
+        // total_calculations (which now saturates) and also emits sla_calc + set_int.
+        client.calculate_sla(
+            &operator,
+            &symbol_short!("SAT_ORD"),
+            &symbol_short!("critical"),
+            &5,
+        );
+
+        let names = event_names(&env);
+        let pos = |target: Symbol| {
+            names
+                .iter()
+                .position(|n| *n == target)
+                .unwrap_or_else(|| panic!("expected one {:?} event, found none", target))
+        };
+
+        let sat_pos = pos(EVENT_STATS_SAT);
+        let sla_pos = pos(EVENT_SLA_CALC);
+        let set_pos = pos(EVENT_SETTLE_INTENT);
+
+        // Ordering contract: saturation is reported before the decision events.
+        assert!(
+            sat_pos < sla_pos,
+            "stats_sat must precede sla_calc (got {} >= {})",
+            sat_pos,
+            sla_pos
+        );
+        assert!(
+            sat_pos < set_pos,
+            "stats_sat must precede set_int (got {} >= {})",
+            sat_pos,
+            set_pos
+        );
+
+        // The saturation signal is emitted from inside increment_stats, so the
+        // decision events that follow reflect the counter already capped.
+        let stats = client.get_stats();
+        assert_eq!(stats.total_calculations, u64::MAX, "counter must cap, not wrap");
+    }
+
+    // ── 7. ret_lim precedes pruned on the eager-trim path (#561) ────────
+
+    #[test]
+    fn test_ret_lim_event_precedes_pruned_on_eager_trim() {
+        // SC-W5-042 / #561 – `set_retention_limit` lower than the current
+        // history length trims immediately: the `ret_lim` event is published
+        // first (the limit is already stored and emitted), then the `pruned`
+        // event reports (removed, kept). A consumer watching only `ret_lim`
+        // must not race a stale `pruned`.
+        let env = Env::default();
+        let (admin, operator, client) = setup(&env);
+
+        // Fill history past the lowered limit so lowering prunes immediately.
+        for i in 0..4u32 {
+            let oid = Symbol::new(&env, &alloc::format!("RL{}", i));
+            client.calculate_sla(&operator, &oid, &symbol_short!("critical"), &5);
+        }
+        assert_eq!(client.get_history().len(), 4);
+
+        client.set_retention_limit(&admin, &2);
+
+        let names = event_names(&env);
+        let ret_lim_pos = names
+            .iter()
+            .position(|n| *n == EVENT_RET_LIM)
+            .unwrap_or_else(|| panic!("expected a ret_lim event"));
+        let pruned_pos = names
+            .iter()
+            .position(|n| *n == EVENT_PRUNED)
+            .unwrap_or_else(|| panic!("expected a pruned event"));
+        assert!(
+            ret_lim_pos < pruned_pos,
+            "ret_lim must be emitted before pruned on the eager-trim path"
+        );
+
+        // Immediate trim really happened in the same call.
+        assert_eq!(client.get_history().len(), 2);
     }
 }

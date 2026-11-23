@@ -10,6 +10,11 @@
 - [Pruning-by-Age Chronology](#pruning-by-age-chronology)
 - [Storage Footprint Telemetry](#storage-footprint-telemetry)
 - [Critical Path Cost Baseline](#critical-path-cost-baseline)
+- [Calculation Input Bound (#593)](#calculation-input-bound-593)
+- [Mutating Function CPU Budgets](#mutating-function-cpu-budgets)
+- [Per-Call Write-Cost Budget at Pinned History (#466)](#per-call-write-cost-budget-at-pinned-history-466)
+- [Bootstrap Read Cost: get_full_audit_state (#463)](#bootstrap-read-cost-get_full_audit_state-463)
+- [Budget-Change Review Process](#budget-change-review-process)
 - [Regression Detection](#regression-detection)
 
 ---
@@ -103,10 +108,31 @@ fn test_no_storage_key_collisions() {
 
 | Dimension | Baseline | Regression Threshold |
 |-----------|----------|---------------------|
-| CPU instructions | TBD (measured) | +10% from baseline |
-| Memory | TBD (measured) | +15% from baseline |
+| CPU instructions (empty/small history) | ~120k (single-call, see [Mutating Function CPU Budgets](#mutating-function-cpu-budgets)) | +10% from baseline |
+| CPU instructions (at MAX history) | ~18M per call (see [Per-Call Write-Cost Budget](#per-call-write-cost-budget-at-pinned-history-466)) | 50M hard ceiling |
+| Memory | scales with retained history | +15% from baseline |
 | Storage reads | 2-4 (config + state) | +1 additional read |
-| Storage writes | 1 (result record) | +1 additional write |
+| Storage writes | 1 instance entry (result record + cached length) | +1 additional write |
+
+> **Two cost regimes.** `calculate_sla`'s CPU cost is *not* a single number: it
+> is dominated by rewriting the entire `HISTORY_KEY` vector on every call, so it
+> scales O(retained history size). A single call against a near-empty history
+> measures ~120k (the `#91` per-entrypoint budget); the same call against a
+> ~1000-entry history measures ~18M. Both are enforced — the first by the
+> per-entrypoint budget test, the second by the #466 write-cost gate below.
+> Writing the cached `HISTLEN` length (#463) does **not** add a storage write:
+> it is another key in the same instance entry, which is serialised once per
+> call regardless.
+
+### Calculation input bound (#593)
+
+`mttr_minutes` is capped at `spec::MAX_MTTR_MINUTES` (525,600 minutes = 365
+days) at every calculation entry point (`calculate_sla_view`,
+`replay_calculate_sla`, `calculate_sla`). Any larger value is rejected with
+`InvalidInput` before overtime arithmetic or history scanning runs, so the
+execution cost of a single calculation — and the magnitude of any
+penalty/reward it can produce — has a declared ceiling that does not depend on
+the currently configured penalty/reward caps.
 
 ### Testing Requirements
 
@@ -116,9 +142,66 @@ fn test_no_storage_key_collisions() {
 
 ---
 
-## Regression Detection
+## Mutating Function CPU Budgets
 
-### Automated Checks
+Every state-mutating entrypoint has a CPU instruction budget test (see
+`apexchainx_calculator/src/tests.rs`, `#91`). Each test measures a single call
+in isolation using `env.budget().reset_unlimited()` before invocation and
+`env.budget().cpu_instruction_cost()` snapshots immediately before/after the
+call, then asserts the delta stays under the ceiling below.
+
+| Function | CPU Instruction Ceiling | Notes |
+|----------|------------------------|-------|
+| `calculate_sla` | 200,000 | Existing baseline |
+| `set_config` | 150,000 | Existing baseline |
+| `pause` | 160,000 | Single flag + metadata write |
+| `unpause` | 160,000 | Single flag + metadata clear |
+| `freeze_config` | 160,000 | Single flag write |
+| `unfreeze_config` | 160,000 | Single flag write |
+| `propose_admin` | 160,000 | Two-step governance write |
+| `accept_admin` | 160,000 | Two-step governance write |
+| `cancel_admin_proposal` | 160,000 | Clears pending state |
+| `propose_operator` | 160,000 | Two-step governance write |
+| `accept_operator` | 160,000 | Two-step governance write |
+| `cancel_operator_proposal` | 160,000 | Clears pending state |
+| `renounce_admin` | 160,000 | Irreversible single write |
+| `set_operator` | 160,000 | Single-step role write |
+| `set_retention_limit` | 160,000 | Single config write |
+| `prune_history` | 900,000 | Scales with history size pruned |
+| `prune_history_by_age` | 900,000 | Scales with history size pruned |
+| `migrate` | 100,000 | No-op path when already current |
+
+### Ceiling Rationale
+
+> **Calibration note (2026-07):** The ceilings below were reset from their
+> original aspirational estimates to values derived from actual measurement.
+> The first estimates (100k for simple flips, 250k for pruning) were never
+> validated against a compiling build, and the real costs are dominated by the
+> per-call (de)serialisation of the whole instance-storage entry — which holds
+> the `config` severity→`SLAConfig` map — not by the individual write. Every
+> mutating entrypoint therefore pays a ~120k baseline. Measurements are taken
+> under `cargo llvm-cov` instrumentation (the coverage CI job), which is the
+> higher of the instrumented vs. plain figures, plus ~15–20% headroom.
+
+- **Simple state flips** (pause/unpause/freeze/unfreeze/renounce/set_operator/set_retention_limit)
+  measure 119k–134k, dominated by the instance-storage round-trip; 160,000
+  gives headroom without masking a real regression.
+- **Two-step governance functions** (propose/accept/cancel for admin and
+  operator) measure 122k–125k and share the same 160,000 ceiling.
+- **History-pruning functions** iterate over stored records and additionally
+  rewrite history; they measure ~730k–775k at the test's fixture volume
+  (~20 entries), so the ceiling is 900,000. If typical production history
+  sizes grow significantly, this ceiling should be revisited.
+
+### Updating Ceilings
+
+If a CI run reports an assertion failure with the actual instruction count,
+update the corresponding row above and the matching `assert!` threshold in
+`tests.rs` together, so this table never drifts from the enforced values.
+
+---
+
+## Regression Detection
 
 | Check | Trigger | Action |
 |-------|---------|--------|

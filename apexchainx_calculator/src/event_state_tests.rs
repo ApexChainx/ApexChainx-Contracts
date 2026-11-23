@@ -1,25 +1,23 @@
 #[cfg(test)]
 mod event_state_tests {
-    use soroban_sdk::{
-        symbol_short, testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env,
-        Symbol, TryIntoVal,
-    };
+    #![allow(clippy::module_inception, clippy::len_zero)]
     use crate::{
-        EVENT_CONFIG_UPD, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
-        EVENT_VERSION, SLACalculatorContract, SLACalculatorContractClient, SLAConfig,
+        SLACalculatorContract, SLACalculatorContractClient, SLAConfig, EVENT_CONFIG_UPD, EVENT_PRUNED,
+        EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT, EVENT_SLA_CALC,
+    };
+    use soroban_sdk::{
+        symbol_short, testutils::Address as _, testutils::Events, testutils::Ledger, Address, Env, Symbol,
+        TryIntoVal,
     };
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
         let operator = Address::generate(env);
         client.initialize(&admin, &operator);
         (admin, operator, client)
-    }
-
-    fn symbol(env: &Env, value: &str) -> Symbol {
-        Symbol::new(env, value)
     }
 
     // ── sla_calc event ↔ stored history parity ──────────────────────────
@@ -49,19 +47,30 @@ mod event_state_tests {
                 let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
                 if name == EVENT_SLA_CALC {
                     let (_, _, data) = events.get(i).unwrap();
-                    let payload: (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) =
+                    let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
                         data.try_into_val(&env).unwrap();
-                    let (outage_id, status, payment_type, rating, mttr, threshold, amount) =
-                        payload;
+                    let (
+                        outage_id,
+                        status,
+                        mttr,
+                        threshold,
+                        amount,
+                        payment_type,
+                        rating,
+                        cfg_hash,
+                        recorded,
+                    ) = payload;
 
                     // Event payload must exactly match the stored SLAResult
                     assert_eq!(outage_id, stored.outage_id);
                     assert_eq!(status, stored.status);
-                    assert_eq!(payment_type, stored.payment_type);
-                    assert_eq!(rating, stored.rating);
                     assert_eq!(mttr, stored.mttr_minutes);
                     assert_eq!(threshold, stored.threshold_minutes);
                     assert_eq!(amount, stored.amount);
+                    assert_eq!(payment_type, stored.payment_type);
+                    assert_eq!(rating, stored.rating);
+                    assert_eq!(cfg_hash, stored.config_version_hash);
+                    assert_eq!(recorded, stored.recorded_at);
                     return;
                 }
             }
@@ -92,17 +101,41 @@ mod event_state_tests {
                 let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
                 if name == EVENT_SETTLE_INTENT {
                     let (_, _, data) = events.get(i).unwrap();
-                    let payload: (Symbol, Symbol, Symbol, i128, u64, u64) =
+                    // set_int carries the canonical 9-field decision plus a
+                    // trailing correlation_id (#566).
+                    let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64) =
                         data.try_into_val(&env).unwrap();
-                    let (outage_id, status, payment_type, amount, config_hash, recorded_at) =
-                        payload;
+                    let (
+                        outage_id,
+                        status,
+                        mttr,
+                        threshold,
+                        amount,
+                        payment_type,
+                        rating,
+                        cfg_hash,
+                        recorded,
+                        correlation_id,
+                    ) = payload;
 
                     assert_eq!(outage_id, stored.outage_id);
                     assert_eq!(status, stored.status);
-                    assert_eq!(payment_type, stored.payment_type);
+                    assert_eq!(mttr, stored.mttr_minutes);
+                    assert_eq!(threshold, stored.threshold_minutes);
                     assert_eq!(amount, stored.amount);
-                    assert_eq!(config_hash, stored.config_version_hash);
-                    assert_eq!(recorded_at, stored.recorded_at);
+                    assert_eq!(payment_type, stored.payment_type);
+                    assert_eq!(rating, stored.rating);
+                    assert_eq!(cfg_hash, stored.config_version_hash);
+                    assert_eq!(recorded, stored.recorded_at);
+                    let expected = crate::event_correlation::generate_correlation_id(
+                        &env,
+                        &symbol_short!("INTENT01"),
+                        env.ledger().sequence(),
+                    );
+                    assert_eq!(
+                        correlation_id, expected,
+                        "#566: set_int must carry generate_correlation_id's output"
+                    );
                     return;
                 }
             }
@@ -116,19 +149,9 @@ mod event_state_tests {
         let (_, operator, client) = setup(&env);
 
         // First calculation
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("EVT_A"),
-            &symbol_short!("critical"),
-            &5,
-        );
+        client.calculate_sla(&operator, &symbol_short!("EVT_A"), &symbol_short!("critical"), &5);
         // Second calculation
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("EVT_B"),
-            &symbol_short!("low"),
-            &130,
-        );
+        client.calculate_sla(&operator, &symbol_short!("EVT_B"), &symbol_short!("low"), &130);
 
         let history = client.get_history();
         assert_eq!(history.len(), 2);
@@ -148,25 +171,30 @@ mod event_state_tests {
             if name != EVENT_SLA_CALC {
                 continue;
             }
-            let payload: (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) =
+            let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
                 data.try_into_val(&env).unwrap();
-            let (outage_id, status, payment_type, rating, mttr, threshold, amount) = payload;
+            let (outage_id, status, mttr, threshold, amount, payment_type, rating, cfg_hash, recorded) =
+                payload;
 
             if outage_id == symbol_short!("EVT_A") {
                 assert_eq!(status, stored_a.status);
-                assert_eq!(payment_type, stored_a.payment_type);
-                assert_eq!(rating, stored_a.rating);
                 assert_eq!(mttr, stored_a.mttr_minutes);
                 assert_eq!(threshold, stored_a.threshold_minutes);
                 assert_eq!(amount, stored_a.amount);
+                assert_eq!(payment_type, stored_a.payment_type);
+                assert_eq!(rating, stored_a.rating);
+                assert_eq!(cfg_hash, stored_a.config_version_hash);
+                assert_eq!(recorded, stored_a.recorded_at);
                 found_a = true;
             } else if outage_id == symbol_short!("EVT_B") {
                 assert_eq!(status, stored_b.status);
-                assert_eq!(payment_type, stored_b.payment_type);
-                assert_eq!(rating, stored_b.rating);
                 assert_eq!(mttr, stored_b.mttr_minutes);
                 assert_eq!(threshold, stored_b.threshold_minutes);
                 assert_eq!(amount, stored_b.amount);
+                assert_eq!(payment_type, stored_b.payment_type);
+                assert_eq!(rating, stored_b.rating);
+                assert_eq!(cfg_hash, stored_b.config_version_hash);
+                assert_eq!(recorded, stored_b.recorded_at);
                 found_b = true;
             }
         }
@@ -261,7 +289,7 @@ mod event_state_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
 
         assert!(client.is_paused());
         assert!(client.get_pause_info().is_some());
@@ -279,7 +307,7 @@ mod event_state_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         assert!(!client.is_paused());
@@ -299,6 +327,7 @@ mod event_state_tests {
     #[test]
     fn test_prune_event_reflects_pruned_history() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -306,13 +335,9 @@ mod event_state_tests {
         client.initialize(&admin, &operator);
 
         // Add 5 entries
-        for _ in 0..5u32 {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("PR_EVT"),
-                &symbol_short!("low"),
-                &10,
-            );
+        for i in 0..5u32 {
+            let id = Symbol::new(&env, &alloc::format!("PR_EVT{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("low"), &10);
         }
 
         assert_eq!(client.get_history().len(), 5);
@@ -334,6 +359,7 @@ mod event_state_tests {
     #[test]
     fn test_prune_by_age_event_reflects_pruned_history() {
         let env = Env::default();
+        env.mock_all_auths();
         env.ledger().set_timestamp(1000);
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
@@ -342,27 +368,12 @@ mod event_state_tests {
         client.initialize(&admin, &operator);
 
         // Add 2 entries at t=1000
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("AGE_A"),
-            &symbol_short!("critical"),
-            &5,
-        );
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("AGE_B"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&operator, &symbol_short!("AGE_A"), &symbol_short!("critical"), &5);
+        client.calculate_sla(&operator, &symbol_short!("AGE_B"), &symbol_short!("high"), &10);
 
         // Advance time to t=3000, add 1 entry
         env.ledger().set_timestamp(3000);
-        client.calculate_sla(
-            &operator,
-            &symbol_short!("AGE_C"),
-            &symbol_short!("low"),
-            &10,
-        );
+        client.calculate_sla(&operator, &symbol_short!("AGE_C"), &symbol_short!("low"), &10);
 
         assert_eq!(client.get_history().len(), 3);
 
@@ -420,23 +431,13 @@ mod event_state_tests {
         expected_rewards += r2.amount;
 
         // Violation: mttr=40, high → penalty
-        let r3 = client.calculate_sla(
-            &operator,
-            &symbol_short!("STAT_E3"),
-            &symbol_short!("high"),
-            &40,
-        );
+        let r3 = client.calculate_sla(&operator, &symbol_short!("STAT_E3"), &symbol_short!("high"), &40);
         expected_calculations += 1;
         expected_violations += 1;
         expected_penalties += -r3.amount;
 
         // Met: mttr=10, high → reward
-        let r4 = client.calculate_sla(
-            &operator,
-            &symbol_short!("STAT_E4"),
-            &symbol_short!("high"),
-            &10,
-        );
+        let r4 = client.calculate_sla(&operator, &symbol_short!("STAT_E4"), &symbol_short!("high"), &10);
         expected_calculations += 1;
         expected_rewards += r4.amount;
 
@@ -471,12 +472,7 @@ mod event_state_tests {
         let before = env.events().all().len();
 
         // Admin cannot calculate — should fail
-        let _ = client.try_calculate_sla(
-            &admin,
-            &symbol_short!("UNAUTH"),
-            &symbol_short!("critical"),
-            &5,
-        );
+        let _ = client.try_calculate_sla(&admin, &symbol_short!("UNAUTH"), &symbol_short!("critical"), &5);
 
         // No events should be emitted for failed operations
         assert_eq!(
@@ -494,13 +490,7 @@ mod event_state_tests {
         let before = env.events().all().len();
 
         // Invalid config (threshold=0) should fail
-        let _ = client.try_set_config(
-            &admin,
-            &symbol_short!("critical"),
-            &0,
-            &100,
-            &750,
-        );
+        let _ = client.try_set_config(&admin, &symbol_short!("critical"), &0, &100, &750);
 
         // No events should be emitted for failed config updates
         assert_eq!(
@@ -519,11 +509,7 @@ mod event_state_tests {
 
         let before = env.events().all().len();
 
-        let _ = client.calculate_sla_view(
-            &symbol_short!("VIEW_EVT"),
-            &symbol_short!("critical"),
-            &10,
-        );
+        let _ = client.calculate_sla_view(&symbol_short!("VIEW_EVT"), &symbol_short!("critical"), &10);
 
         assert_eq!(
             env.events().all().len(),
@@ -554,8 +540,9 @@ mod event_state_tests {
             if topics.len() >= 2 {
                 let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
                 assert_eq!(
-                    version, EVENT_VERSION,
-                    "All events must use version v1"
+                    version,
+                    crate::event_schema::event_version(topics.get(0).unwrap().try_into_val(&env).unwrap()),
+                    "topic[1] must match the per-name schema"
                 );
             }
         }
@@ -578,12 +565,7 @@ mod event_state_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.calculate_sla(
-            &stranger,
-            &symbol_short!("E_U"),
-            &symbol_short!("critical"),
-            &5,
-        );
+        client.calculate_sla(&stranger, &symbol_short!("E_U"), &symbol_short!("critical"), &5);
     }
 
     #[test]
@@ -592,7 +574,7 @@ mod event_state_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.pause(&stranger);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
     }
 
     #[test]
@@ -602,5 +584,48 @@ mod event_state_tests {
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
         client.prune_history(&stranger, &1);
+    }
+}
+
+#[cfg(test)]
+mod access_control_integration_tests {
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, String};
+
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let operator = Address::generate(env);
+        client.initialize(&admin, &operator);
+        (admin, operator, client)
+    }
+
+    #[test]
+    fn admin_handover_moves_authority_to_the_new_admin() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let new_admin = Address::generate(&env);
+        client.propose_admin(&admin, &new_admin);
+        client.accept_admin(&new_admin);
+
+        assert!(client.try_pause(&admin, &String::from_str(&env, "old")).is_err());
+        client.pause(&new_admin, &String::from_str(&env, "new"));
+        client.unpause(&new_admin);
+    }
+
+    #[test]
+    fn operator_rotation_keeps_admin_authority() {
+        let env = Env::default();
+        let (admin, operator, client) = setup(&env);
+        let new_operator = Address::generate(&env);
+        client.set_operator(&admin, &new_operator);
+
+        assert!(client
+            .try_calculate_sla(&operator, &symbol_short!("OUT1"), &symbol_short!("high"), &10)
+            .is_err());
+        client.calculate_sla(&new_operator, &symbol_short!("OUT2"), &symbol_short!("high"), &10);
+        client.pause(&admin, &String::from_str(&env, "still admin"));
     }
 }

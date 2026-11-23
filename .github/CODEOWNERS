@@ -1,0 +1,77 @@
+# CODEOWNERS — module responsibility mapping
+#
+# Issue #673: cross-cutting changes (storage / events / TS parity / fuzz) must
+# pull in a domain owner's review. This file is the *enforcement* half of
+# docs/MODULE_OWNERSHIP.md (the human-readable ownership map and review-routing
+# guide). Keep the two in sync: when MODULE_OWNERSHIP.md moves a module between
+# domains, update the pattern here in the same PR.
+#
+# The four risk hubs called out by #673:
+#   1. Core calc      -> apexchainx_calculator/src/{lib,calculation,config,spec}.rs
+#   2. Governance     -> apexchainx_calculator/src/{governance,config_freeze,metadata}.rs
+#   3. Event/schema   -> apexchainx_calculator/src/{event,event_schema,event_correlation}.rs
+#   4. TS parity/off-chain -> ts/, offchain/, scripts/, artifact fixtures
+#
+# NOTE: replace/extend the owner handles below with the real GitHub users or
+# teams for each hub; a single default owner is used until the groups are
+# staffed. Patterns follow the CODEOWNERS "last matching pattern wins" rule.
+
+# Default owner for anything not matched below.
+*                                   @Degentle12
+
+# --- 1. Core calculation & entrypoints (highest blast radius) -------------
+/apexchainx_calculator/src/lib.rs               @Degentle12
+/apexchainx_calculator/src/calculation.rs       @Degentle12
+/apexchainx_calculator/src/config.rs            @Degentle12
+/apexchainx_calculator/src/config_bundle.rs     @Degentle12
+/apexchainx_calculator/src/spec.rs              @Degentle12
+/apexchainx_calculator/src/policy.rs            @Degentle12
+/apexchainx_calculator/src/payload_optimizer.rs @Degentle12
+
+# --- 2. Governance & role management --------------------------------------
+/apexchainx_calculator/src/governance.rs       @Degentle12
+/apexchainx_calculator/src/config_freeze.rs    @Degentle12
+/apexchainx_calculator/src/metadata.rs         @Degentle12
+/apexchainx_calculator/src/auth_matrix_tests.rs @Degentle12
+
+# --- 3. Event system & schema ---------------------------------------------
+/apexchainx_calculator/src/event.rs               @Degentle12
+/apexchainx_calculator/src/event_schema.rs        @Degentle12
+/apexchainx_calculator/src/event_correlation.rs   @Degentle12
+/apexchainx_calculator/src/event_ordering_tests.rs @Degentle12
+/apexchainx_calculator/src/event_state_tests.rs   @Degentle12
+/apexchainx_calculator/src/topic_stability_tests.rs @Degentle12
+/apexchainx_calculator/src/payload_versioning_tests.rs @Degentle12
+
+# --- Storage schema, migration & reserved keys ----------------------------
+/apexchainx_calculator/src/storage_version.rs         @Degentle12
+/apexchainx_calculator/src/storage_estimation.rs      @Degentle12
+/apexchainx_calculator/src/history.rs                 @Degentle12
+/apexchainx_calculator/src/config_metadata.rs         @Degentle12
+/apexchainx_calculator/src/storage_key_invariant_tests.rs @Degentle12
+/apexchainx_calculator/src/schema_migration_tests.rs  @Degentle12
+/apexchainx_calculator/src/api_stability.rs           @Degentle12
+
+# --- 4. TypeScript parity & off-chain tooling -----------------------------
+/ts/                                @Degentle12
+/offchain/                          @Degentle12
+/scripts/                           @Degentle12
+/tooling/                           @Degentle12
+/tools/                             @Degentle12
+/apexchainx_calculator/src/ts_parity_fixtures.rs @Degentle12
+/apexchainx_calculator/src/parity_tests.rs       @Degentle12
+
+# --- Fuzzing harnesses ----------------------------------------------------
+/apexchainx_calculator/fuzz/        @Degentle12
+/apexchainx_calculator/src/fuzz_spec.rs  @Degentle12
+/apexchainx_calculator/src/fuzz_tests.rs @Degentle12
+
+# --- CI / workflows / release ---------------------------------------------
+/.github/workflows/                 @Degentle12
+/justfile                           @Degentle12
+/deny.toml                          @Degentle12
+/codecov.yml                        @Degentle12
+
+# --- Documentation --------------------------------------------------------
+*.md                                @Degentle12
+/docs/                              @Degentle12

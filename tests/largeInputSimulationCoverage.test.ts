@@ -3,6 +3,9 @@
  * Validates that evaluation remains stable under large and extreme input values.
  */
 
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 type Verdict = "met" | "violated" | "invalid";
 
 function evaluate(mttr: number, threshold: number): Verdict {
@@ -15,33 +18,33 @@ const LARGE_VALUES = [1_000, 10_000, 100_000, Number.MAX_SAFE_INTEGER];
 describe("SC-W5-063 Large Input Simulation Coverage", () => {
   it("large mttr equal to large threshold is met", () => {
     for (const v of LARGE_VALUES) {
-      expect(evaluate(v, v)).toBe("met");
+      assert.strictEqual(evaluate(v, v), "met");
     }
   });
 
   it("large mttr one above large threshold is violated", () => {
     for (const v of LARGE_VALUES.slice(0, 3)) {
-      expect(evaluate(v + 1, v)).toBe("violated");
+      assert.strictEqual(evaluate(v + 1, v), "violated");
     }
   });
 
   it("zero mttr is always met for any valid threshold", () => {
     for (const v of LARGE_VALUES) {
-      expect(evaluate(0, v)).toBe("met");
+      assert.strictEqual(evaluate(0, v), "met");
     }
   });
 
   it("large threshold with small mttr is always met", () => {
     for (const v of LARGE_VALUES) {
-      expect(evaluate(1, v)).toBe("met");
+      assert.strictEqual(evaluate(1, v), "met");
     }
   });
 
   it("negative large values are invalid", () => {
-    expect(evaluate(-Number.MAX_SAFE_INTEGER, 100)).toBe("invalid");
+    assert.strictEqual(evaluate(-Number.MAX_SAFE_INTEGER, 100), "invalid");
   });
 
   it("evaluation never throws on extreme values", () => {
-    expect(() => evaluate(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER)).not.toThrow();
+    assert.doesNotThrow(() => evaluate(Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER));
   });
 });

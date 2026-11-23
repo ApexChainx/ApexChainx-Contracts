@@ -3,6 +3,9 @@
  * Validates that the contract rejects or safely handles invalid outage id formats.
  */
 
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 function validateOutageId(id: string): boolean {
   // Contract expects format: ^[a-z0-9-]{3,64}$
   return /^[a-z0-9-]{3,64}$/.test(id);
@@ -22,23 +25,23 @@ const INVALID_IDS = [
 describe("SC-W5-067 Fuzzing Malformed Outage IDs", () => {
   it("valid ids pass validation", () => {
     for (const id of VALID_IDS) {
-      expect(validateOutageId(id)).toBe(true);
+      assert.strictEqual(validateOutageId(id), true);
     }
   });
 
   it("invalid ids are rejected", () => {
     for (const id of INVALID_IDS) {
-      expect(validateOutageId(id)).toBe(false);
+      assert.strictEqual(validateOutageId(id), false);
     }
   });
 
   it("boundary: 3 chars is valid, 2 chars is invalid", () => {
-    expect(validateOutageId("abc")).toBe(true);
-    expect(validateOutageId("ab")).toBe(false);
+    assert.strictEqual(validateOutageId("abc"), true);
+    assert.strictEqual(validateOutageId("ab"), false);
   });
 
   it("boundary: 64 chars is valid, 65 chars is invalid", () => {
-    expect(validateOutageId("a".repeat(64))).toBe(true);
-    expect(validateOutageId("a".repeat(65))).toBe(false);
+    assert.strictEqual(validateOutageId("a".repeat(64)), true);
+    assert.strictEqual(validateOutageId("a".repeat(65)), false);
   });
 });

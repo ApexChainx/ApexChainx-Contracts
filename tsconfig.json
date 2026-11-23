@@ -1,0 +1,15 @@
+{
+  "//": "Type-check configuration for the off-chain TypeScript in ts/. Run with `npm run typecheck` or `just ts-typecheck`. Only ts/ is included: scripts/ and tools/ predate this config and are checked by their own runners.",
+  "compilerOptions": {
+    "target": "es2022",
+    "lib": ["es2022"],
+    "module": "preserve",
+    "types": ["node"],
+    "strict": true,
+    "noUncheckedIndexedAccess": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["ts/**/*.ts"]
+}

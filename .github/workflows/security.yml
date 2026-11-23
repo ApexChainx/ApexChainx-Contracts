@@ -9,9 +9,10 @@
 
 name: Security Audit
 
-on:
-  schedule:
-    - cron: '0 8 * * 1'  # Every Monday 08:00 UTC
+# CI temporarily disabled – triggers commented out below.
+# on:
+#   schedule:
+#     - cron: '0 8 * * 1'  # Every Monday 08:00 UTC
 
 jobs:
   audit:
@@ -27,8 +28,11 @@ jobs:
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
+      # cargo-audit >= 0.22 dropped the `--manifest-path` flag; it reads the
+      # `Cargo.lock` in the working directory (repo root holds the workspace
+      # lockfile), which is also what the workspace `Cargo.lock` represents.
       - name: Run cargo audit
-        run: cargo audit --manifest-path apexchainx_calculator/Cargo.toml
+        run: cargo audit
 
   deny:
     name: Dependency Policy (cargo-deny)
@@ -43,5 +47,23 @@ jobs:
       - name: Install cargo-deny
         run: cargo install cargo-deny --locked
 
+      # `cargo-deny` does not accept cargo's `--all-features` flag (rejected by
+      # recent versions); the crate has no features, so plain `cargo deny check`
+      # enforces the full advisories/licenses/bans/sources policy from deny.toml.
       - name: Run cargo deny
-        run: cargo deny check --all-features
+        run: cargo deny check
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings

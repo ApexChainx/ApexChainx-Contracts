@@ -1,12 +1,105 @@
 # cargo-deny configuration for ApexChainx-Contracts
-# Policy: allow only MIT, Apache-2.0, ISC; reject semver-duplicate mismatches; reject yanked crates
+# ==================================================
+#
+# Enforcement policy reference:
+#   deny   = CI breaks if violated
+#   warn   = CI prints a warning but does not fail
+#   allow  = explicitly permitted (overrides deny)
+#
+# When adding a new dependency, ensure it passes:
+#   cargo deny check
+#
+# To update the dependency baseline after reviewing new advisories:
+#   cargo deny init
+#   cargo deny check   (review and fix any issues)
 
-[checks.licenses]
-allow = ["MIT", "Apache-2.0", "ISC"]
-unknown = "deny"
+# ------------------------------------------------------------------
+# Advisories — vulnerability database checks
+# ------------------------------------------------------------------
+# Rationale: The contract is deployed on Stellar testnet/mainnet and
+# handles financial settlement. Any unpatched vulnerability in a
+# dependency could lead to loss of funds or incorrect SLA outcomes.
+#
+# cargo-deny >= 0.20 removed the `vulnerability`/`notice`/
+# `severity-threshold` fields: vulnerability advisories now always emit
+# errors (no config needed), and `unmaintained`/`unsound` became
+# scope-based values: all | workspace | transitive | none.
+#
+# Reference: .github/workflows/security.yml runs `cargo deny check`
+# on a weekly schedule.
+[advisories]
+# Only fail when an unmaintained advisory applies to a direct dependency.
+# This is slightly stricter than the old non-blocking `unmaintained =
+# "warn"` (a direct dep that becomes unmaintained now blocks the gate),
+# while still not failing on transitive crates (e.g. adler, paste).
+unmaintained = "workspace"
+# Fail on yanked crates (previous policy: yanked = "deny").
+yanked = "deny"
+# Fail when an unsound advisory applies to a direct dependency.
+unsound = "workspace"
+ignore = []
 
-[checks.duplicates]
-semver = "deny"
+# ------------------------------------------------------------------
+# License compliance
+# ------------------------------------------------------------------
+# Policy: Only the licenses listed in `allow` are permitted. These are
+# the licenses used by the Soroban SDK ecosystem and are compatible
+# with the project's MIT license.
+#
+# cargo-deny >= 0.20 removed the `deny`, `copyleft`, `allow-osi-fsf-free`
+# and `default` keys: every license that is not in `allow` is now denied
+# by default, which makes the old explicit deny list (GPL-family, AGPL,
+# LGPL, MPL, BSL, CC0) redundant.
+[licenses]
+allow = [
+    "MIT",
+    "Apache-2.0",
+    # wasmparser / wasmparser-nostd (Soroban wasmi toolchain)
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    # curve25519-dalek, ed25519-dalek, subtle (crypto stack)
+    "BSD-3-Clause",
+    "Unicode-3.0",
+]
+confidence-threshold = 0.8
 
-[checks.yanked]
-deny = true
+# ------------------------------------------------------------------
+# Dependency version bans
+# ------------------------------------------------------------------
+# multiple-versions = "warn" — alerts when the same crate is pulled
+#   in at two different semver-incompatible versions. This is only a
+#   warning because the Soroban SDK occasionally requires multiple
+#   minor versions during transition periods.
+#
+# wildcards = "deny" — rejecting wildcard version constraints ensures
+#   every dependency pins at least a minor version, preventing
+#   unexpected SemVer breaking changes from being pulled in silently.
+#
+# highlight = "all" — in diagnostics, show every occurrence of the
+#   duplicate instead of just the first, making cleanup easier.
+#
+# The skip list explicitly tolerates known-duplicate crates that are
+# required by different layers of the Soroban toolchain. Each entry
+# should include a comment explaining why the duplicate is tolerated.
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+highlight = "all"
+skip = []
+# When adding a skip entry, include the crate name and a brief
+# justification:
+# skip = [
+#   { name = "example-crate", version = "0.2" },
+# ]
+
+# ------------------------------------------------------------------
+# Source allow-lists
+# ------------------------------------------------------------------
+# Only crates.io and the explicitly allowed git sources are permitted.
+# This prevents dependency confusion attacks where a malicious crate
+# with the same name could be published to an alternative registry.
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

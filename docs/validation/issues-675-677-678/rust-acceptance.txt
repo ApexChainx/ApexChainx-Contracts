@@ -1,0 +1,98 @@
+cargo :    Compiling apexchainx_calculator v0.1.0
+(C:\Users\PC\Documents\fun\ApexChainx-Contracts\validation-results\pr-verified\apexchainx_calculator)
+At line:4 char:1
++ cargo test --locked --lib -- event_correlation:: event_schema:: ts_pa ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (   Compiling ap...inx_calculator):String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 45.34s
+     Running unittests src\lib.rs
+(C:/Users/PC/Documents/fun/ApexChainx-Contracts/target\debug\deps\apexchainx_calculator-c05885d2382ee880.exe)
+
+running 83 tests
+test audit_state::tests::test_audit_state_available_after_init ... ok
+test audit_state::tests::test_audit_state_matches_individual_getters ... ok
+test audit_state::tests::test_audit_state_reflects_stats_and_history_len ... ok
+test audit_state::tests::test_audit_state_pause_info_invariant_across_pause_cycle ... ok
+test contract_info::tests::test_contract_info_available_after_init ... ok
+test contract_info::tests::test_contract_info_detects_migration_needed ... ok
+test contract_info::tests::test_contract_info_event_version_tracks_event_schema ... ok
+test contract_info::tests::test_contract_info_exposes_recalc_budget ... ok
+test audit_state::tests::test_audit_state_reports_freeze_posture ... ok
+test contract_info::tests::test_contract_info_has_features ... ok
+test contract_info::tests::test_contract_info_has_canonical_severities ... ok
+test contract_info::tests::test_contract_info_is_deterministic ... ok
+test contract_info::tests::test_contract_info_reflects_freeze_state ... ok
+test contract_info::tests::test_contract_info_reflects_pause_state ... ok
+test contract_info::tests::test_contract_version_is_derived_from_cargo_package ... ok
+test event_correlation::tests::distinct_ledgers_never_collide ... ok
+test event_correlation::tests::ledger_is_structural_and_repeated_submissions_are_identical ... ok
+test event_schema::tests::per_name_versions_are_independent_and_cobumped ... ok
+test event_schema::tests::test_event_abi_generation_tracks_version_symbol ... ok
+test event_schema::tests::test_event_names_are_distinct ... ok
+test event_schema::tests::test_event_version_is_short_enough ... ok
+test event_schema::tests::test_event_version_is_stable ... ok
+test contract_info::tests::test_event_abi_cobump_invariant ... ok
+test event_schema::tests::test_every_publish_site_is_in_the_catalog ... ok
+test event_schema::tests::unknown_names_do_not_inherit_a_version - should panic ... ok
+test event_schema::tests::test_every_declared_event_has_an_emit_site ... ok
+test payload_versioning_tests::payload_versioning_tests::test_cfg_upd_payload_has_three_fields ... ok
+test payload_versioning_tests::payload_versioning_tests::test_all_events_use_current_version ... ok
+test payload_versioning_tests::payload_versioning_tests::test_pause_payload_is_single_bool ... ok
+test payload_versioning_tests::payload_versioning_tests::test_settle_intent_payload_carries_correlation_id ... ok
+test payload_versioning_tests::payload_versioning_tests::test_prune_payload_is_two_u32s ... ok
+test payload_versioning_tests::payload_versioning_tests::test_sla_calc_payload_has_nine_fields ... ok
+test payload_versioning_tests::payload_versioning_tests::test_stranger_cannot_pause - should panic ... ok
+test payload_versioning_tests::payload_versioning_tests::test_stranger_cannot_calculate_sla - should panic ... ok
+test payload_versioning_tests::payload_versioning_tests::test_stranger_cannot_set_config - should panic ... ok
+test payload_versioning_tests::payload_versioning_tests::test_unpause_payload_is_single_bool ... ok
+test payload_versioning_tests::payload_versioning_tests::test_violation_payload_has_negative_amount ... ok
+test severity_curve_tests::severity_curve_tests::test_cross_severity_threshold_ordering ... ok
+test severity_curve_tests::severity_curve_tests::test_documented_edges_direct ... ok
+test severity_curve_tests::severity_curve_tests::test_cross_severity_penalty_ordering ... ok
+test severity_curve_tests::severity_curve_tests::test_general_bounds_penalty_via_client ... ok
+test severity_curve_tests::severity_curve_tests::test_general_bounds_reward_via_client ... ok
+test severity_curve_tests::severity_curve_tests::test_low_cap_and_exemption ... ok
+test severity_curve_tests::severity_curve_tests::test_general_bounds_threshold_via_client ... ok
+test severity_curve_tests::severity_curve_tests::test_penalty_floors ... ok
+test severity_curve_tests::severity_curve_tests::test_reward_ratio_boundary ... ok
+test tests::test_decision_events_share_canonical_payload_order ... ok
+test tests::test_get_full_audit_state_single_pass_efficiency ... ok
+test severity_curve_tests::severity_curve_tests::test_threshold_caps ... ok
+test topic_stability_tests::topic_stability_tests::test_all_events_have_consistent_version_topic ... ok
+test topic_stability_tests::topic_stability_tests::test_all_events_have_exactly_three_topics ... ok
+test topic_stability_tests::topic_stability_tests::test_cfg_upd_topic_structure_is_stable ... ok
+test topic_stability_tests::topic_stability_tests::test_pause_topic_structure_is_stable ... ok
+test topic_stability_tests::topic_stability_tests::test_settle_intent_topic_context_is_severity ... ok
+test topic_stability_tests::topic_stability_tests::test_sla_calc_topic_context_is_severity ... ok
+test topic_stability_tests::topic_stability_tests::test_sla_calc_topic_is_consistent_across_severities ... ok
+test topic_stability_tests::topic_stability_tests::test_sla_calc_topic_structure_is_stable ... ok
+test topic_stability_tests::topic_stability_tests::test_stranger_cannot_calculate_sla - should panic ... ok
+test topic_stability_tests::topic_stability_tests::test_stranger_cannot_pause - should panic ... ok
+test topic_stability_tests::topic_stability_tests::test_stranger_cannot_renounce - should panic ... ok
+test topic_stability_tests::topic_stability_tests::test_stranger_cannot_set_config - should panic ... ok
+test topic_stability_tests::topic_stability_tests::test_unpause_topic_structure_is_stable ... ok
+test ts_parity_fixtures::event_abi_v2_migration_preserves_v3_history_and_is_idempotent ... ok
+test ts_parity_fixtures::generate_ts_parity_fixtures ... ok
+test ts_parity_fixtures::parity_manifest_has_no_unaccounted_methods ... ok
+test version_negotiation::tests::test_contract_name_symbols_are_distinct ... ok
+test version_negotiation::tests::test_event_version_mismatch_is_incompatible ... ok
+test version_negotiation::tests::test_matching_protocol_versions_are_compatible ... ok
+test version_negotiation::tests::test_minor_version_skew_is_negotiated ... ok
+test version_negotiation::tests::test_multiple_mismatches_collected ... ok
+test version_negotiation::tests::test_needs_migration_still_negotiates ... ok
+test version_negotiation::tests::test_negotiation_info_detects_migration_needed ... ok
+test version_negotiation::tests::test_negotiation_info_storage_version ... ok
+test version_negotiation::tests::test_negotiation_outcome_variants_are_distinct ... ok
+test version_negotiation::tests::test_paused_contract_still_negotiates ... ok
+test version_negotiation::tests::test_peer_out_of_range_is_incompatible ... ok
+test version_negotiation::tests::test_protocol_version_is_one ... ok
+test version_negotiation::tests::test_result_schema_mismatch_is_incompatible ... ok
+test version_negotiation::tests::test_self_negotiation_is_compatible ... ok
+test version_negotiation::tests::test_storage_schema_mismatch_is_incompatible ... ok
+test version_negotiation::tests::test_version_discovery_interfaces_are_defined ... ok
+test version_negotiation::tests::test_version_discovery_interfaces_match_actual_methods ... ok
+test tests::test_max_page_size_is_single_exported_constant_and_clamps ... ok
+
+test result: ok. 83 passed; 0 failed; 0 ignored; 0 measured; 715 filtered out; finished in 34.15s

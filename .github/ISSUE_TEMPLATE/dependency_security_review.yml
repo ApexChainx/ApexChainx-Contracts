@@ -1,0 +1,88 @@
+name: Dependency Security Review
+description: Request a security and compatibility review for dependency updates
+title: "[DEPENDENCY] "
+labels: ["security", "dependencies"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Dependency Security Review
+
+        Use this template when proposing dependency updates that require
+        additional security and compatibility review.
+
+        Please complete each section before submitting.
+
+  - type: input
+    id: dependency
+    attributes:
+      label: Dependency Name
+      description: Name of the dependency being updated
+      placeholder: e.g. serde
+    validations:
+      required: true
+
+  - type: input
+    id: current
+    attributes:
+      label: Current Version
+      placeholder: e.g. 1.0.210
+    validations:
+      required: true
+
+  - type: input
+    id: target
+    attributes:
+      label: Target Version
+      placeholder: e.g. 1.0.214
+    validations:
+      required: true
+
+  - type: textarea
+    id: reason
+    attributes:
+      label: Reason for Update
+      description: Why should this dependency be updated?
+      placeholder: Security fix, bug fix, new feature, maintenance...
+    validations:
+      required: true
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security Review
+      description: Describe any security considerations.
+      placeholder: |
+        - CVEs reviewed
+        - Known vulnerabilities
+        - Supply-chain concerns
+        - License changes
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: compatibility
+    attributes:
+      label: Compatibility Checklist
+      options:
+        - label: Release notes have been reviewed
+        - label: Breaking changes have been evaluated
+        - label: Existing functionality has been tested
+        - label: No incompatible license changes detected
+        - label: No new security risks identified
+
+  - type: textarea
+    id: testing
+    attributes:
+      label: Validation Performed
+      description: Describe testing completed after updating the dependency.
+      placeholder: Unit tests, integration tests, manual testing...
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional Notes
+      description: Any additional context or references.

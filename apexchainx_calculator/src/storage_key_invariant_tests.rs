@@ -1,0 +1,98 @@
+//! #602 – Storage-key addition co-bump invariant.
+//!
+//! The reserved instance-storage key set is part of the storage schema: a key
+//! added to the on-chain layout (as `HISTORY_LEN_KEY` was at v2) changes the
+//! layout that backends cache and migrate on, so it must never ship on an
+//! unchanged `STORAGE_VERSION`. This module pins the key set observed at each
+//! `STORAGE_VERSION` and fails CI when the current set diverges from the
+//! snapshot of that version without also carrying a version bump.
+
+use crate::STORAGE_VERSION;
+
+/// The reserved instance-storage key set pinned to the storage schema as of
+/// `SNAPSHOT_STORAGE_VERSION`. This is the historical record of what each
+/// migration step added: `HISTORY_LEN_KEY` at v2, `CONFIG_COUNT_KEY` at v3.
+// Retained as an audit record for the v2 schema; the live invariant compares
+// against the v3 snapshot below.
+#[allow(dead_code)]
+const KEYS_AT_V2: [&str; 22] = [
+    "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
+    "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "VER", "RETLIM", "TPRUNED",
+    "TTOTENT", "LCFGUPD",
+];
+
+/// The reserved instance-storage key set as of `STORAGE_VERSION` 3, which adds
+/// the sharded history meta keys `HISTE`/`HISTI`/`HISTH`/`HISTT` (#580/#581/#582)
+/// and `CONFIG_COUNT_KEY` (cached config count for issue #606).
+const KEYS_AT_V3: [&str; 27] = [
+    "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
+    "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT", "VER", "RETLIM",
+    "TPRUNED", "TTOTENT", "LCFGUPD", "HISTE", "HISTI", "HISTH", "HISTT",
+];
+
+/// The reserved instance-storage key set as of `STORAGE_VERSION` 4, which adds
+/// `LCFGUPDA` (config-update actor attribution, #671) on top of the v3 set.
+const KEYS_AT_V4: [&str; 28] = [
+    "ADMIN", "OPERATOR", "PADMIN", "POP", "PADMINTS", "POPTS", "CONFIG", "CUSTCFG", "PAUSED", "PAUSEINF",
+    "STATS", "CALCCNT", "VIOLCNT", "CALCTS", "VIOLTS", "HIST", "HISTLEN", "CFGCNT", "VER", "RETLIM",
+    "TPRUNED", "TTOTENT", "LCFGUPD", "LCFGUPDA", "HISTE", "HISTI", "HISTH", "HISTT",
+];
+
+/// The `STORAGE_VERSION` the snapshot above was observed at.
+// v5 changes the ABI generation but retains the v4 storage-key set.
+const SNAPSHOT_STORAGE_VERSION: u32 = 5;
+
+#[test]
+fn test_storage_key_set_pinned_to_version_snapshot_or_newer() {
+    // The invariant: while STORAGE_VERSION is unchanged, the key set must equal
+    // the snapshot for that version. Adding or removing a key is a schema
+    // change and MUST ship with a STORAGE_VERSION bump — otherwise backends
+    // migrating on the storage version miss (or expect) a key that is not
+    // there. Removal is allowed only under the same version-step rule, so the
+    // check is exact equality against the snapshot, not just containment.
+    let current = crate::api_stability::storage_key_symbols();
+
+    assert!(KEYS_AT_V3.iter().all(|key| KEYS_AT_V4.contains(key)));
+    assert_eq!(KEYS_AT_V4.len(), KEYS_AT_V3.len() + 1);
+    let matches_snapshot = current.len() == KEYS_AT_V4.len()
+        && KEYS_AT_V4.iter().all(|k| current.contains(k))
+        && current.iter().all(|k| KEYS_AT_V4.contains(k));
+
+    assert!(
+        matches_snapshot || STORAGE_VERSION > SNAPSHOT_STORAGE_VERSION,
+        "storage-key set diverged from the STORAGE_VERSION {} snapshot without a matching \
+         STORAGE_VERSION bump. Adding/removing a reserved key is a storage-schema change: \
+         bump STORAGE_VERSION in lib.rs in the same commit (and document the new key in \
+         docs/RESERVED_KEYS_POLICY.md), then advance the snapshot here (#602).",
+        SNAPSHOT_STORAGE_VERSION
+    );
+}
+
+#[cfg(test)]
+mod access_control_invariant_tests {
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{testutils::Address as _, Address, Env, String};
+
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let operator = Address::generate(env);
+        client.initialize(&admin, &operator);
+        (admin, operator, client)
+    }
+
+    #[test]
+    fn pause_cycles_never_change_roles_or_stats() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        for _ in 0..10 {
+            client.pause(&admin, &String::from_str(&env, "cycle"));
+            client.unpause(&admin);
+        }
+        assert!(client.try_pause(&stranger, &String::from_str(&env, "x")).is_err());
+        assert_eq!(client.get_stats().total_calculations, 0);
+    }
+}

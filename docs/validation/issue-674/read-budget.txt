@@ -1,0 +1,10 @@
+[SC-016/SC-W5-029] Read-cost regression checks (Soroban SCVal estimation):
+  ✓ configSnapshot: 169B / 320B
+  ✓ historyEntry: 64B / 96B
+  ✓ versionInfo: 38B / 80B
+  ✓ metadataRead: 42B / 128B
+  ~ configSnapshot: 169B -> 169B (within tolerance)
+  ~ historyEntry: 64B -> 64B (within tolerance)
+  ~ versionInfo: 38B -> 38B (within tolerance)
+  ~ metadataRead: 42B -> 42B (within tolerance)
+All read-cost checks passed.

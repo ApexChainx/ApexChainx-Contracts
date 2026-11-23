@@ -3,6 +3,9 @@
  * Ensures contract severity symbols match the backend enum values exactly.
  */
 
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 // Contract-side symbol constants (mirrors Soroban Symbol storage keys)
 const CONTRACT_SEVERITIES = ["critical", "high", "medium", "low"] as const;
 type Severity = typeof CONTRACT_SEVERITIES[number];
@@ -22,27 +25,27 @@ function toBackendEnum(severity: string): number | null {
 describe("SC-W5-058 Severity Symbol Mapping Parity", () => {
   it("all contract severities map to a backend enum value", () => {
     for (const s of CONTRACT_SEVERITIES) {
-      expect(toBackendEnum(s)).not.toBeNull();
+      assert.ok(toBackendEnum(s) !== null, `toBackendEnum(s) should not be null`);
     }
   });
 
   it("enum values are unique integers", () => {
     const values = Object.values(BACKEND_ENUM);
-    expect(new Set(values).size).toBe(values.length);
+    assert.strictEqual(new Set(values).size, values.length);
   });
 
   it("unknown severity returns null — not a silent default", () => {
-    expect(toBackendEnum("unknown")).toBeNull();
-    expect(toBackendEnum("")).toBeNull();
+    assert.strictEqual(toBackendEnum("unknown"), null);
+    assert.strictEqual(toBackendEnum(""), null);
   });
 
   it("contract severity order matches backend enum order", () => {
     const sorted = [...CONTRACT_SEVERITIES].sort((a, b) => BACKEND_ENUM[a] - BACKEND_ENUM[b]);
-    expect(sorted).toEqual([...CONTRACT_SEVERITIES]);
+    assert.deepStrictEqual(sorted, [...CONTRACT_SEVERITIES]);
   });
 
   it("critical has lowest numeric value (highest priority)", () => {
-    expect(BACKEND_ENUM.critical).toBeLessThan(BACKEND_ENUM.high);
-    expect(BACKEND_ENUM.high).toBeLessThan(BACKEND_ENUM.medium);
+    assert.ok(BACKEND_ENUM.critical < BACKEND_ENUM.high, `BACKEND_ENUM.critical should be < BACKEND_ENUM.high`);
+    assert.ok(BACKEND_ENUM.high < BACKEND_ENUM.medium, `BACKEND_ENUM.high should be < BACKEND_ENUM.medium`);
   });
 });

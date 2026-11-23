@@ -13,6 +13,67 @@ Use this section to tell people about which versions of your project are current
 
 This security policy applies to all smart contracts and related software within the ApexChainx-Contracts repository.
 
+## Dependency Updates
+
+Dependency updates that may introduce security or compatibility impacts
+should use the **Dependency Security Review** issue template before
+opening a pull request.
+
+This helps maintainers evaluate security, compatibility, licensing,
+and supply-chain risks before changes are merged.
+
+## Release Validation Checklist
+
+Before promoting any release candidate to production, the following
+validation gates MUST pass (enforced by the
+`release-validation.yml` CI workflow):
+
+### Build & Artifact Integrity
+
+- [ ] **Native build succeeds** — `cargo build` completes without errors
+- [ ] **WASM build succeeds** — `cargo build --target wasm32-unknown-unknown --release` completes
+- [ ] **WASM artifact hash is deterministic** — `sha256sum` of the WASM binary is recorded in the release validation report
+- [ ] **Artifact hash self-consistency verified** — `sha256sum -c` passes on the recorded hash
+- [ ] **no_std compliance** — `./scripts/check-no-std.sh` passes (no accidental `std::` imports)
+- [ ] **WASM no-std compliance** — `cargo check --target wasm32-unknown-unknown --lib` passes
+
+### Code Quality
+
+- [ ] **Formatting** — `cargo fmt -- --check` confirms formatting compliance
+- [ ] **Linting** — `cargo clippy --all-targets -- -D warnings` produces no warnings
+- [ ] **No unused dependencies** — `cargo machete` and `cargo udeps` pass
+
+### Testing
+
+- [ ] **All unit tests pass** — `cargo test --lib` reports `test result: ok`
+- [ ] **Fuzz tests pass** — `cargo test --lib fuzz_tests::` reports `test result: ok`
+
+### Smoke-Test Expectations
+
+- [ ] **Contract initializes** — `initialize(admin, operator)` succeeds
+- [ ] **Configuration works** — `set_config` with valid parameters succeeds
+- [ ] **SLA calculation works** — `calculate_sla` with valid inputs returns expected result
+- [ ] **Stats query works** — `get_stats` returns valid statistics
+- [ ] **History pruning works** — `prune_history` with valid parameters succeeds
+
+### Reporting
+
+- [ ] **Validation report generated** — `release-validation-report` artifact contains the full report
+- [ ] **Artifact hash recorded** — WASM hash is included in the report for downstream verification
+
+### Promoting a Release
+
+1. Ensure the `Release Validation` CI workflow passes on the target commit
+2. Download the `release-validation-report` artifact from the CI run
+3. Verify the WASM artifact hash matches any previous release audit trail
+4. Create a GitHub Release with the WASM artifact and `manifest.sha256`
+5. Update `CHANGELOG.md` with the release notes
+
+---
+### Binary Provenance
+
+Release WASM artifacts are governed by the [WASM Binary Reproducibility Policy](docs/WASM_REPRODUCIBILITY_POLICY.md). Every release includes a SHA-256 manifest that links the deployed bytecode to its exact build inputs. Maintainers and security reviewers should verify the published checksum against a local build before deploying.
+
 ## Reporting a Vulnerability
 
 We take the security of our smart contracts seriously. If you believe you have found a security vulnerability in our contracts, please report it to us as described below.

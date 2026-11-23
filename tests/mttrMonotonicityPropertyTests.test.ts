@@ -3,6 +3,9 @@
  * Higher MTTR should never produce a lower penalty (monotone non-decreasing).
  */
 
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 function computePenalty(mttr: number, threshold: number, penaltyBps: number): number {
   if (mttr <= threshold || threshold <= 0) return 0;
   return Math.floor((mttr - threshold) * penaltyBps / 10000);
@@ -22,24 +25,24 @@ describe("SC-W5-066 MTTR Monotonicity and Payout Gradients", () => {
     let prev = computePenalty(mttrValues[0], THRESHOLD, BPS);
     for (const mttr of mttrValues.slice(1)) {
       const curr = computePenalty(mttr, THRESHOLD, BPS);
-      expect(curr).toBeGreaterThanOrEqual(prev);
+      assert.ok(curr >= prev, `curr should be >= prev`);
       prev = curr;
     }
   });
 
   it("penalty at threshold is zero (boundary)", () => {
-    expect(computePenalty(THRESHOLD, THRESHOLD, BPS)).toBe(0);
+    assert.strictEqual(computePenalty(THRESHOLD, THRESHOLD, BPS), 0);
   });
 
   it("penalty below threshold is always zero", () => {
     for (const mttr of [0, 1, 30, 59]) {
-      expect(computePenalty(mttr, THRESHOLD, BPS)).toBe(0);
+      assert.strictEqual(computePenalty(mttr, THRESHOLD, BPS), 0);
     }
   });
 
   it("payout gradient is positive for non-zero penalty", () => {
     const penalty1 = computePenalty(90,  THRESHOLD, BPS);
     const penalty2 = computePenalty(120, THRESHOLD, BPS);
-    expect(computePayout(penalty2, CONTRACT_VALUE)).toBeGreaterThanOrEqual(computePayout(penalty1, CONTRACT_VALUE));
+    assert.ok(computePayout(penalty2, CONTRACT_VALUE) >= computePayout(penalty1, CONTRACT_VALUE, `computePayout(penalty2, CONTRACT_VALUE) should be >= computePayout(penalty1, CONTRACT_VALUE`));
   });
 });

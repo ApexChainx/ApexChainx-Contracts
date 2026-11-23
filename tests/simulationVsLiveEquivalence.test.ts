@@ -3,6 +3,9 @@
  * Verifies that simulated evaluation matches the live contract evaluation exactly.
  */
 
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 type Verdict = "met" | "violated" | "invalid";
 
 // Represents the live on-chain evaluation path
@@ -29,15 +32,15 @@ const CASES = [
 describe("SC-W5-065 Simulation vs Live Equivalence", () => {
   it("simulation output matches live output for all test cases", () => {
     for (const { mttr, threshold, bps } of CASES) {
-      expect(simulateEvaluate(mttr, threshold, bps)).toEqual(liveEvaluate(mttr, threshold, bps));
+      assert.deepStrictEqual(simulateEvaluate(mttr, threshold, bps), liveEvaluate(mttr, threshold, bps));
     }
   });
 
   it("verdict is identical between paths", () => {
-    expect(simulateEvaluate(90, 60, 300).verdict).toBe(liveEvaluate(90, 60, 300).verdict);
+    assert.strictEqual(simulateEvaluate(90, 60, 300).verdict, liveEvaluate(90, 60, 300).verdict);
   });
 
   it("penalty is identical between paths", () => {
-    expect(simulateEvaluate(90, 60, 300).penalty).toBe(liveEvaluate(90, 60, 300).penalty);
+    assert.strictEqual(simulateEvaluate(90, 60, 300).penalty, liveEvaluate(90, 60, 300).penalty);
   });
 });

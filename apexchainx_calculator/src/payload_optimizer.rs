@@ -1,16 +1,27 @@
 //! SC-W5-037 – Event payload size optimization without semantic loss.
 //!
-//! This module provides optimized event payload encoding that reduces
-//! on-chain storage and gas costs while preserving full semantic meaning.
+//! This module provides event-payload helpers that keep on-chain events
+//! compact while preserving full semantic meaning.
 //!
 //! # Optimization Strategies
 //!
-//! 1. **Derive `payment_type` from `status`** — "viol" → "pen", "met" → "rew"
-//!    eliminates the need to store payment_type separately in events
+//! 1. **Deterministic `payment_type` derivation** — "viol" → "pen", "met" → "rew"
+//!    gives consumers a self-consistent way to cross-check the payment type
+//!    against the SLA status. The canonical event payload (see
+//!    [`crate::event_schema`]) still carries `payment_type` explicitly so a
+//!    single event is fully self-contained for reconciliation (per the
+//!    self-contained-payload decision), so consumers never need to derive it.
 //! 2. **Compact field ordering** — minimises Soroban encoding overhead by
-//!    grouping fields by type (Symbols together, integers together)
-//! 3. **Omit derivable fields** — fields that can be deterministically
-//!    reconstructed from other event data are not stored
+//!    grouping fields by type (Symbols together, integers together).
+//! 3. **Issue #786 — Tokenomics-adjacent gas optimization** — the helper
+//!    functions in this module (`derive_payment_type`, `is_valid_status`,
+//!    `is_consistent_payment`, `is_valid_rating`) are all `symbol_short!`-based
+//!    comparisons and are called on the event-publication path (Phase 4 of
+//!    `calculate_sla`). Because `symbol_short!` values are compile-time
+//!    constants, the compiler can inline and constant-fold these checks to a
+//!    single integer comparison, costing no extra gas beyond what the event
+//!    XDR encoding itself requires. Callers should *not* cache derived values
+//!    across calls — the derivation is cheaper than a storage read.
 //!
 //! # Validations
 //!
@@ -23,10 +34,12 @@
 //!
 //! # Backend Guidance
 //!
-//! Backend consumers can safely derive `payment_type` from `status`:
+//! Backend consumers can deterministically cross-check `payment_type` against
+//! `status` using the derivation rule below. No derivation *round-trip* is
+//! required to consume events — the canonical payload carries both fields
+//! explicitly — but the two must agree:
 //! - `status == "met"` → `payment_type == "rew"` (reward)
 //! - `status == "viol"` → `payment_type == "pen"` (penalty)
-//! This eliminates the need to store both fields in event payloads.
 
 use soroban_sdk::{symbol_short, Symbol};
 
@@ -66,7 +79,6 @@ pub fn is_valid_rating(rating: &Symbol) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::Env;
 
     #[test]
     fn test_derive_payment_from_met() {
@@ -87,9 +99,18 @@ mod tests {
 
     #[test]
     fn test_consistent_payment() {
-        assert!(is_consistent_payment(&symbol_short!("met"), &symbol_short!("rew")));
-        assert!(is_consistent_payment(&symbol_short!("viol"), &symbol_short!("pen")));
-        assert!(!is_consistent_payment(&symbol_short!("met"), &symbol_short!("pen")));
+        assert!(is_consistent_payment(
+            &symbol_short!("met"),
+            &symbol_short!("rew")
+        ));
+        assert!(is_consistent_payment(
+            &symbol_short!("viol"),
+            &symbol_short!("pen")
+        ));
+        assert!(!is_consistent_payment(
+            &symbol_short!("met"),
+            &symbol_short!("pen")
+        ));
     }
 
     #[test]

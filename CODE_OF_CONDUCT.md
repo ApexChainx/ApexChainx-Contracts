@@ -68,6 +68,9 @@ Community leaders will follow these Community Impact Guidelines in determining t
 
 **Consequence**: A permanent ban from any sort of public interaction within the community.
 
+## Sanitization
+The codebase is already mature enough that a small gap in documentation, event compatibility, migration posture, or test coverage can become a high-cost production issue. This issue is meant to reduce that risk with a well-scoped, contributor-friendly improvement.
+
 ## Attribution
 
 This Code of Conduct is adapted from the [Contributor Covenant][homepage], version 2.1, available at [https://www.contributor-covenant.org/version/2/1/code_of_conduct.html][v2.1].

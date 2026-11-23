@@ -29,19 +29,13 @@ mod coordination_harness_tests {
     use crate::cross_contract_safety::{self, CrossContractCallStatus, CrossContractSafety};
     use crate::event_correlation;
     use crate::version_negotiation::{
-        build_negotiation_info, negotiate_contract_versions, NegotiationOutcome,
-        VersionNegotiationInfo,
+        build_negotiation_info, negotiate_contract_versions, NegotiationOutcome, VersionNegotiationInfo,
     };
 
     // -----------------------------------------------------------------------
     // Helper: build a mock peer info
     // -----------------------------------------------------------------------
-    fn peer_info(
-        name: &str,
-        protocol: u32,
-        storage: u32,
-        min_compat: u32,
-    ) -> VersionNegotiationInfo {
+    fn peer_info(name: &str, protocol: u32, storage: u32, min_compat: u32) -> VersionNegotiationInfo {
         VersionNegotiationInfo {
             contract_name: Symbol::new(&Env::default(), name),
             protocol_version: protocol,
@@ -49,6 +43,8 @@ mod coordination_harness_tests {
             min_compatible_protocol: min_compat,
             is_paused: false,
             needs_migration: false,
+            result_schema_version: crate::RESULT_SCHEMA_VERSION,
+            event_version: crate::event_schema::EVENT_VERSION,
         }
     }
 
@@ -138,32 +134,17 @@ mod coordination_harness_tests {
         let ledger_seq = 12345u32;
         let corr_id = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
 
-        // The correlation ID should be stable and propagate to downstream contracts
+        // The correlation ID must be non-zero and deterministic for a
+        // (outage, ledger) pair so downstream contracts can re-derive it.
         assert_ne!(corr_id, 0, "Correlation ID must be non-zero");
+        let rederived = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, rederived, "Correlation ID must be deterministic");
 
-        // Verify the correlation topics structure
-        let topics = event_correlation::correlation_event_topics(
-            symbol_short!("sla_calc"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            corr_id,
-        );
-        assert_eq!(topics.0, symbol_short!("sla_calc"));
-        assert_eq!(topics.1, symbol_short!("v1"));
-        assert_eq!(topics.2, symbol_short!("critical"));
-        assert_eq!(topics.3, corr_id);
-
-        // The same correlation ID should be passed to downstream contract events
-        let downstream_topics = event_correlation::correlation_event_topics(
-            symbol_short!("set_int"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            corr_id,
-        );
-        assert_eq!(
-            downstream_topics.3, corr_id,
-            "Downstream contract must propagate the same correlation ID"
-        );
+        // The id a downstream contract re-derives from the same (outage,
+        // ledger) pair propagates unchanged; its single documented home is the
+        // `set_int` event payload (see event_schema.rs, #565/#566).
+        let downstream_id = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, downstream_id, "Correlation ID must propagate unchanged");
     }
 
     // ===================================================================
@@ -204,14 +185,8 @@ mod coordination_harness_tests {
             Vec::new(&env),
         );
 
-        assert!(
-            result.is_err(),
-            "Call to unknown contract must return error"
-        );
-        assert_eq!(
-            result.unwrap_err().status,
-            CrossContractCallStatus::FatalError
-        );
+        assert!(result.is_err(), "Call to unknown contract must return error");
+        assert_eq!(result.unwrap_err().status, CrossContractCallStatus::FatalError);
         assert_eq!(safety.depth(), 0, "No compensation registered on failure");
     }
 
@@ -286,22 +261,17 @@ mod coordination_harness_tests {
         let safety = CrossContractSafety::new(&env);
         assert!(!safety.has_pending(), "Step 3: Safety tracker starts empty");
 
-        // Step 4: Verify correlation topics propagate
-        let sla_topic = event_correlation::correlation_event_topics(
-            symbol_short!("sla_calc"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            corr_id,
-        );
-        let settle_topic = event_correlation::correlation_event_topics(
-            symbol_short!("set_int"),
-            symbol_short!("v1"),
-            symbol_short!("critical"),
-            corr_id,
-        );
-        assert_eq!(
-            sla_topic.3, settle_topic.3,
-            "Step 4: Correlation IDs must match across contracts"
+        // Step 4: The workflow's correlation id is deterministic and structurally separates ledgers. Same-ledger
+        // fingerprints can collide; join downstream events using the full outage
+        // and ledger context (SC-W5-079,
+        // #564). It is carried in the `set_int` payload (event_schema.rs).
+        let rederived = event_correlation::generate_correlation_id(&env, &outage_id, ledger_seq);
+        assert_eq!(corr_id, rederived, "Step 4: Correlation ID must be deterministic");
+        let other_outage = Symbol::new(&env, "WF_2024_002");
+        let other_id = event_correlation::generate_correlation_id(&env, &other_outage, ledger_seq);
+        assert_ne!(
+            corr_id, other_id,
+            "Step 4: These sample outage fingerprints must differ"
         );
     }
 
@@ -384,6 +354,8 @@ mod coordination_harness_tests {
                 min_compatible_protocol: 1,
                 is_paused: false,
                 needs_migration: false,
+                result_schema_version: crate::RESULT_SCHEMA_VERSION,
+                event_version: crate::event_schema::EVENT_VERSION,
             });
         }
 

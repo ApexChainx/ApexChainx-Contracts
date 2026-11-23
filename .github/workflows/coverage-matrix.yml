@@ -1,0 +1,52 @@
+# =============================================================================
+# ApexChainx Contracts — Cross-Language Coverage Matrix (#632)
+# =============================================================================
+# Issue #632: orchestrate the two test toolchains (Rust + TypeScript) so a
+# method covered by Rust tests but never exercised by the TS mirrors (or vice
+# versa) is visible instead of passing both sides green with disagreeing
+# models. This job runs scripts/coverage-matrix.ts across the four targets —
+# rust, ts-property, ts-parity, offchain — and fails when a gap exists.
+# =============================================================================
+#
+# CI temporarily disabled — triggers commented out below. When CI is re-enabled
+# this job should run on the same events as ci.yml.
+# on:
+#   push:
+#     branches: [main]
+#   pull_request:
+#     branches: [main]
+
+name: Coverage Matrix
+
+concurrency:
+  group: coverage-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage-matrix:
+    name: Cross-Language Coverage Matrix
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      # --strict turns any RUST-ONLY / TS-ONLY / UNCOVERED / drift gap into a
+      # failing exit code, so a parity hole fails the job instead of hiding.
+      - name: Build coverage matrix
+        run: npx tsx scripts/coverage-matrix.ts --strict --out coverage-matrix-report.md
+
+      - name: Upload coverage matrix report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-matrix-report
+          path: coverage-matrix-report.md
+          retention-days: 30

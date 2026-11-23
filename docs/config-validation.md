@@ -62,11 +62,41 @@ validation parameters:
 | `medium` | 240 minutes (4h) | 10 units | Longer response window, moderate penalty floor |
 | `low` | 1,440 minutes (24h) | Max 100 units | Lowest priority, penalties capped to prevent over-punishment |
 
+### Cross-Parameter Consistency Rules
+
+| Rule | Condition | Error on Violation | Rationale |
+|------|-----------|-------------------|-----------|
+| Reward exceeds penalty | `penalty_per_minute × 1.5 < reward_base` | `InvalidReward` (code 10) | Ensures meeting SLA targets is always financially beneficial compared to paying penalties for minor threshold overruns |
+
+### Cross-Severity Consistency Rules
+
+| Rule | Condition | Error on Violation | Rationale |
+|------|-----------|-------------------|-----------|
+| Penalty severity ordering | `critical.penalty >= high.penalty >= medium.penalty` (low is exempt — see below) | `InvalidPenalty` (code 9) | Maintains logical severity progression — a higher-severity outage must never carry a lower penalty than a lower-severity one |
+
+### Penalty ladder & the low-severity exemption (#594)
+
+The ladder above is enforced for the three higher tiers and, on **medium**
+updates, against `low` (`medium.penalty >= low.penalty`). Updating **low**
+itself performs no cross-severity check: because `low`'s per-severity cap (100)
+intentionally exceeds `medium`'s minimum (10), a configuration where
+`low.penalty > medium.penalty` is **reachable and accepted by design**. This is
+a documented tolerance, not a config error:
+
+- Backend implementers consuming `get_config_bundle` must **not** reject or
+  flag a low-above-medium segment; the contract intentionally admits it.
+- Reverting such a segment requires updating `low` to ≤ `medium` first; a
+  later `medium` update enforces `medium.penalty >= low.penalty` and would
+  reject a value below the current `low.penalty`.
+- `low.penalty == medium.penalty` is always allowed (equality does not invert
+  the ladder).
+
 ### Rule Enforcement Order
 
 1. **General parameter bounds** are validated first (range checks)
 2. **Severity-specific constraints** are validated second (severity-dependent limits)
-3. **Cross-parameter consistency** is validated last (e.g., penalty < reward for same severity)
+3. **Cross-parameter consistency** is validated third (penalty × 1.5 < reward for same severity)
+4. **Cross-severity consistency** is validated last (higher severity penalties ≥ lower severity penalties)
 
 ## Error Handling
 
@@ -75,8 +105,8 @@ validation parameters:
 | Error Code | Name | Trigger Condition | Recovery |
 |------------|------|-------------------|----------|
 | 8 | `InvalidThreshold` | Threshold outside valid range or severity-specific limit | Adjust to valid range (1–1440, severity-dependent) |
-| 9 | `InvalidPenalty` | Penalty per minute outside valid range | Adjust to valid range (1–10,000, severity-dependent) |
-| 10 | `InvalidReward` | Reward base outside valid range | Adjust to valid range (1–100,000) |
+| 9 | `InvalidPenalty` | Penalty per minute outside valid range or violates cross-severity ordering | Adjust to valid range (1–10,000, severity-dependent) or align with adjacent severity levels |
+| 10 | `InvalidReward` | Reward base outside valid range or violates cross-parameter consistency | Adjust to valid range (1–100,000) or ensure penalty × 1.5 < reward |
 | 11 | `InvalidSeverity` | Severity not in supported set | Use one of: critical, high, medium, low |
 
 ### Deterministic Failure Guarantees
@@ -98,6 +128,10 @@ Input Parameters
 [Severity-Specific Validation]  ←── Error 8, 9
        ↓
 [Severity Existence Check]  ←── Error 11
+       ↓
+[Cross-Parameter Consistency]  ←── Error 10
+       ↓
+[Cross-Severity Consistency]  ←── Error 9
        ↓
 [Event Emission on Success]  ←── Config saved
 ```
@@ -205,6 +239,14 @@ set_config(admin, medium, 60, 25, -100);      // → InvalidReward
 
 // ERROR: unsupported severity level
 set_config(admin, urgent, 15, 100, 750);      // → InvalidSeverity
+
+// ERROR: reward too low relative to penalty (need penalty × 1.5 < reward)
+set_config(admin, critical, 15, 100, 100);    // → InvalidReward (100×1.5=150 ≮ 100)
+
+// ERROR: cross-severity penalty inversion (high penalty < medium penalty)
+// First ensure medium has a lower penalty, then try setting high below it
+set_config(admin, medium, 60, 50, 750);       // medium penalty = 50
+set_config(admin, high, 30, 25, 750);         // → InvalidPenalty (high 25 < medium 50)
 ```
 
 ## Implementation Notes
@@ -216,3 +258,91 @@ set_config(admin, urgent, 15, 100, 750);      // → InvalidSeverity
 | Success events | Successful config updates emit versioned `cfg_upd` events |
 | Failure behavior | Failed validations do not emit events or consume extra gas |
 | Determinism | Same invalid inputs always produce same error codes |
+
+## See Also
+
+- **[Severity Compatibility Matrix](./severity-compatibility-matrix.md)** — Canonical vs. custom severity families, additive vs. breaking change classification, release planning checklist.
+- **[Event Ordering Guarantees](./event-ordering-guarantees.md)** — Deterministic event sequencing contract for backend consumers.
+- **[CONTRACT_API_COMPATIBILITY.md](./CONTRACT_API_COMPATIBILITY.md)** — API surface stability and deprecation policy.
+---
+
+## Custom Severity Configuration (`set_custom_severity`)
+
+> **Reference:** The `set_custom_severity`, `get_custom_severity`, and
+> `remove_custom_severity` methods in `apexchainx_calculator/src/config.rs` and
+> `apexchainx_calculator/src/lib.rs`.
+
+### Overview
+
+Custom severity support allows the admin to register arbitrary severity levels
+beyond the four canonical ones (`critical`, `high`, `medium`, `low`). This is
+useful for workloads that need additional grading tiers without altering the
+canonical configuration.
+
+### Validation Differences from `set_config`
+
+| Aspect | `set_config` | `set_custom_severity` |
+|--------|-------------|----------------------|
+| Severity check | Must be canonical (critical/high/medium/low) | Must NOT be canonical |
+| Parameter bounds | General + per-severity + cross-parameter + cross-severity | General bounds only (`validate_general_bounds`) |
+| Per-severity limits | `critical` max 60 min, `low` penalty cap 100, etc. | None — only the universal ranges apply |
+| Cross-severity ordering | Enforces penalty progression (critical ≥ high ≥ medium) | Not enforced |
+| Metadata recording | Config version hash, `get_last_config_update` (sequence + actor) updated | `get_last_config_update` (sequence + actor) updated; **not** tracked in the canonical version hash or snapshot |
+
+### General Bounds Applied
+
+| Parameter | Valid Range |
+|-----------|-------------|
+| `threshold_minutes` | 1 – 1,440 (24 hours) |
+| `penalty_per_minute` | 1 – 10,000 |
+| `reward_base` | 1 – 100,000 |
+| Cross-parameter consistency | `penalty_per_minute × 1.5 < reward_base` |
+
+### Budget Estimate
+
+`set_custom_severity` performs a single storage read-modify-write on the
+`CUSTOM_CONFIG_KEY` map and emits one event. Based on regression coverage
+(`test_set_custom_severity_budget_is_reasonable` in `tests.rs`):
+
+| Metric | Bound |
+|--------|-------|
+| CPU instructions | < 150,000 |
+| Storage entries | Grows by 1 per unique severity (never shrinks unless `remove_custom_severity` is called) |
+
+### Storage and Compatibility Notes
+
+- Custom severity entries are stored in a separate `CUSTOM_CONFIG_KEY` map,
+  independent of the canonical `CONFIG_KEY` map.
+- They do **not** appear in `get_config_snapshot` or `get_config_version_hash`
+  — those APIs reflect canonical severities only.
+- Since storage v4 (#671), a `set_custom_severity` call **does** refresh
+  `get_last_config_update` (returning `{ sequence, actor }` for the acting
+  admin), so a forensics query can attribute custom-tier tuning too; it just
+  does not move the canonical config version hash.
+- To inspect registered custom severities, use `get_custom_config_snapshot`.
+- Removing a severity with `remove_custom_severity` clears its entry from the
+  map and emits a `cfg_upd` event with zeroed payload.
+- Repeated calls to `set_custom_severity` for the same severity overwrite the
+  previous values (last-write-wins).
+- `calculate_sla` and `calculate_sla_view` resolve custom severities through
+  `load_config`, which falls back to the custom map when the severity is not
+  canonical.
+
+### When to Use
+
+- Additional grading tiers beyond the four canonical levels are needed.
+- The admin is aware that custom entries are not covered by the config version
+  hash or canonical snapshot.
+- Storage growth is acceptable — each distinct custom severity occupies one
+  entry in the contract's instance storage.
+
+### Public Methods Reference
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `set_custom_severity` | `(env, caller, severity, threshold_minutes, penalty_per_minute, reward_base)` | Register or update a custom severity |
+| `get_custom_severity` | `(env, severity)` | Read a registered custom severity |
+| `remove_custom_severity` | `(env, caller, severity)` | Unregister a custom severity |
+| `get_custom_config_snapshot` | `(env)` | List all registered custom severities |
+| Zero-threshold safety | `threshold_minutes = 0` is rejected with `InvalidThreshold` (code 8) before reaching storage. This prevents a division in `compute_result`'s performance-ratio calculation from ever operating on a zero denominator |
+| Cross-severity hardening | `validate_cross_severity_penalty_ordering` uses safe `.ok_or(InvalidSeverity)` lookups on the canonical severity list rather than panicking `.unwrap()` calls, so any unexpected invariant violation surfaces as a deterministic error instead of an unrecoverable host trap |

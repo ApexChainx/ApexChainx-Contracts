@@ -1,0 +1,6 @@
+[SC-019] Contract metadata introspection:
+  ✓ version: 1.0.0
+  ✓ capabilities: calculate_sla, get_stats, get_history, governance
+  ✓ paused: false
+  ✓ statsEnabled: true, historyEnabled: true
+Metadata introspection passed.

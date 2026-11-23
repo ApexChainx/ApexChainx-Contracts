@@ -3,6 +3,9 @@
  * Verifies that replaying the same sequence of contract calls yields identical results.
  */
 
+
+import { describe, it, beforeEach } from "node:test";
+import assert from "node:assert/strict";
 interface OutageRecord { id: string; mttr: number; threshold: number }
 type Verdict = "met" | "violated" | "invalid";
 
@@ -26,24 +29,24 @@ describe("SC-W5-060 Backend Replay Idempotency Parity", () => {
   beforeEach(() => processedIds.clear());
 
   it("first call is not idempotent (new)", () => {
-    expect(processOutage(SEQUENCE[0]).idempotent).toBe(false);
+    assert.strictEqual(processOutage(SEQUENCE[0]).idempotent, false);
   });
 
   it("replayed call is flagged as idempotent", () => {
     processOutage(SEQUENCE[0]);
-    expect(processOutage(SEQUENCE[2]).idempotent).toBe(true);
+    assert.strictEqual(processOutage(SEQUENCE[2]).idempotent, true);
   });
 
   it("verdict is stable across original and replay", () => {
     const first  = processOutage(SEQUENCE[0]);
     const replay = processOutage(SEQUENCE[2]);
-    expect(first.verdict).toBe(replay.verdict);
+    assert.strictEqual(first.verdict, replay.verdict);
   });
 
   it("full sequence produces expected verdicts in order", () => {
     const results = SEQUENCE.map(processOutage);
-    expect(results[0].verdict).toBe("met");
-    expect(results[1].verdict).toBe("violated");
-    expect(results[2].verdict).toBe("met");
+    assert.strictEqual(results[0].verdict, "met");
+    assert.strictEqual(results[1].verdict, "violated");
+    assert.strictEqual(results[2].verdict, "met");
   });
 });

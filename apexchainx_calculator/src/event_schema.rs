@@ -5,7 +5,7 @@
 //!
 //! Topic layout (3 topics):
 //!   topic[0] = event name (Symbol constant)
-//!   topic[1] = event version ("v1")
+//!   topic[1] = per-name schema version (see EVENT_SCHEMAS)
 //!   topic[2] = event-specific context (severity, caller address, etc.)
 //!
 //! Payload field ordering and types are documented below per event variant.
@@ -13,24 +13,83 @@
 //!
 //! # Event Catalog
 //!
+//! The three decision-carrying events (`sla_calc`, `set_int`, `dup_input`)
+//! share a single canonical payload field order — the `SLAResult` struct
+//! order — so indexers parse one layout regardless of which decision event
+//! they consume. Any divergence between them is a bug (#429). The canonical
+//! order is:
+//!
+//!   (outage_id, status, mttr_minutes, threshold_minutes, amount,
+//!    payment_type, rating, config_version_hash, recorded_at)
+//!
+//! `sla_calc` and `dup_input` carry exactly those nine fields. `set_int`
+//! carries the same nine fields in the same order **plus** a trailing
+//! `correlation_id` field (see below) — an additive extension that does not
+//! disturb the shared prefix (#566).
+//!
 //! ## sla_calc (`sla_calc`)
 //! Emitted on every successful `calculate_sla` call.
 //! - topic[2]: severity Symbol
-//! - payload:  (outage_id: Symbol, status: Symbol, payment_type: Symbol,
-//!   rating: Symbol, mttr_minutes: u32, threshold_minutes: u32,
-//!   amount: i128)
+//! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64)
 //!
 //! ## set_int (`set_int`)
 //! Settlement intent emitted alongside sla_calc for backend reconciliation.
+//! Per-name v2 uses the ledger-bound correlation encoding documented in
+//! `docs/EVENT_VERSION_MIGRATION.md`; historical v1 uses the earlier encoding.
+//! Carries the full decision (including `mttr_minutes`, `threshold_minutes`,
+//! and `rating`) so a settlement-only consumer can reconstruct the SLA
+//! decision without a follow-up read (#428).
 //! - topic[2]: severity Symbol
-//! - payload:  (outage_id: Symbol, status: Symbol, payment_type: Symbol,
-//!   amount: i128, config_version_hash: u64, recorded_at: u64)
+//! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64,
+//!   correlation_id: u64)
+//!
+//! The trailing `correlation_id` field (an additive change, #566) is the
+//! **single documented home** of the correlation ID (SC-W5-079): it is
+//! `event_correlation::generate_correlation_id`'s output for the (outage_id,
+//! ledger sequence) pair of the emitting calculation, so a backend can join
+//! the `set_int` to its originating calculation deterministically. It is the
+//! only decision event that carries the id — `sla_calc` has nine fields; `dup_input` appends two attempted-input fields. (`#565`)
+//!
+//! ## dup_input (`dup_input`)
+//! Emitted when `calculate_sla` rejects a conflicting duplicate `outage_id`
+//! (the `DuplicateOutageInput` error path). Carries the previously stored
+//! `SLAResult` so consumers can reconcile the rejection without a separate
+//! `get_latest_by_outage` read. It is a failed-call diagnostic, not a committed
+//! event: consumers must inspect the failed-call flag. (#385)
+//! - topic[2]: severity Symbol
+//! - payload:  (outage_id: Symbol, status: Symbol, mttr_minutes: u32,
+//!   threshold_minutes: u32, amount: i128, payment_type: Symbol,
+//!   rating: Symbol, config_version_hash: u64, recorded_at: u64,
+//!   attempted_mttr: u32, attempted_threshold: u32)
 //!
 //! ## cfg_upd (`cfg_upd`)
 //! Emitted on every successful `set_config` call.
 //! - topic[2]: severity Symbol
 //! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
 //!   reward_base: i128)
+//! - repeated writes preserve invocation order; see the regression policy in
+//!   `docs/PROJECT_CONTEXT.md`
+//!
+//! ## sev_add (`sev_add`)
+//! Emitted when `set_custom_severity` registers a **new** custom severity.
+//! - topic[2]: custom severity Symbol
+//! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
+//!   reward_base: i128)
+//!
+//! ## sev_upd (`sev_upd`)
+//! Emitted when `set_custom_severity` **reconfigures** an existing one.
+//! - topic[2]: custom severity Symbol
+//! - payload:  (threshold_minutes: u32, penalty_per_minute: i128,
+//!   reward_base: i128)
+//!
+//! ## cfg_rem (`cfg_rem`)
+//! Emitted when `remove_custom_severity` deletes a custom severity.
+//! - topic[2]: custom severity Symbol
+//! - payload:  ()
 //!
 //! ## paused (`paused`)
 //! Emitted when the contract is paused.
@@ -43,8 +102,13 @@
 //! - payload:  (false,)
 //!
 //! ## op_set (`op_set`)
-//! Emitted on operator change.
-//! - topic[2]: caller Address
+//! Emitted when the operator is set directly by the admin (single-step legacy path).
+//! Unlike the two-step path (`op_prop` → `op_acc`), this event indicates the new
+//! operator did **not** consent to the role change — `set_operator` only requires
+//! the admin's authorization. Consumers that need to distinguish consented from
+//! non-consented operator changes should check for this event name vs. the
+//! `op_prop`+`op_acc` pair.
+//! - topic[2]: caller Address (admin who performed the set)
 //! - payload:  (new_operator: Address,)
 //!
 //! ## pruned (`pruned`)
@@ -77,6 +141,18 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## adm_sup (`adm_sup`)
+//! Emitted when a pending admin proposal is superseded by a re-proposal
+//! before the prior candidate accepted or cancelled. (#468)
+//! - topic[2]: caller Address
+//! - payload:  (superseded_admin: Address, new_admin: Address)
+//!
+//! ## adm_xp (`adm_xp`)
+//! Emitted at most once when a lapsed admin proposal is first observed by an
+//! accept attempt, immediately before the pending admin keys are cleared. (#589)
+//! - topic[2]: caller Address (the caller whose accept attempt observed expiry)
+//! - payload:  (expired_admin: Address,)
+//!
 //! ## op_prop (`op_prop`)
 //! Emitted when a new operator is proposed.
 //! - topic[2]: caller Address
@@ -92,6 +168,19 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## op_sup (`op_sup`)
+//! Emitted when a pending operator proposal is superseded by a re-proposal
+//! before the prior candidate accepted or cancelled. (#468)
+//! - topic[2]: caller Address
+//! - payload:  (superseded_operator: Address, new_operator: Address)
+//!
+//! ## op_xp (`op_xp`)
+//! Emitted at most once when a lapsed operator proposal is first observed by
+//! an accept attempt, immediately before the pending operator keys are
+//! cleared. (#589)
+//! - topic[2]: caller Address (the caller whose accept attempt observed expiry)
+//! - payload:  (expired_operator: Address,)
+//!
 //! ## cfg_frz (`cfg_frz`)
 //! Emitted when the configuration is frozen by admin.
 //! - topic[2]: caller Address
@@ -102,24 +191,124 @@
 //! - topic[2]: caller Address
 //! - payload:  ()
 //!
+//! ## stats_sat (`stats_sat`)
+//! Emitted when a running-stats counter saturates during increment_stats
+//! (e.g. total_calculations reaching u64::MAX, or an i128 total capping).
+//! Signals backend indexers that the on-chain total has capped and now
+//! under-reports true economic exposure. The counter is still capped at its
+//! bound on-chain; this event carries the pre-cap state so consumers can
+//! reconcile. (SC-W5-047)
+//! - topic[2]: counter_name Symbol (which counter saturated: `totcalc`,
+//!   `totviol`, `totrew`, `totpen`)
+//! - payload:  (field: Symbol, previous_value: i128, attempted_increment: i128)
+//!
+//! ## mig_done (`mig_done`)
+//! Emitted when a storage migration completes successfully.
+//! - topic[2]: caller Address
+//! - payload:  (old_version: u32, new_version: u32)
+//!
 //! # Schema Versioning
 //!
 //! Breaking changes (field removal, type changes, reordering) MUST increment
 //! the version symbol from "v1" to "v2". Additive changes (new fields at the
 //! end) are NOT considered breaking and do not require a version bump as long
 //! as old consumers ignore unrecognised trailing fields.
-
-#![allow(dead_code)]
+//!
+//! The `set_int` payload gained the trailing `correlation_id` field under
+//! `"v1"` as an additive change (#566); the `EVENT_ABI_GENERATION` co-bump
+//! invariant (#497) applies only to breaking event changes and remains
+//! unchanged.
+//!
+//! # Symbol Deprecation Protocol
+//!
+//! When a Result or Severity symbol needs to change, follow this deprecation
+//! lifecycle to avoid breaking backend consumers:
+//!
+//! 1. **Introduction (minor release)**: Add the new symbol alongside the old one.
+//!    Both symbols are emitted in events. `get_result_schema()` returns both
+//!    with a `deprecated_symbols` entry marking the old symbol as deprecated.
+//!
+//! 2. **Coexistence (at least one minor release)**: The old symbol continues to
+//!    be emitted alongside the new one. Backends can migrate at their own pace.
+//!    The `deprecated_symbols` entry includes `removed_at` = None (TBD).
+//!
+//! 3. **Removal (major release)**: The old symbol is removed from event emission.
+//!    The `schema_version` in `get_result_schema()` is bumped. The deprecated
+//!    entry remains in `deprecated_symbols` with `removed_at` set to the schema
+//!    version at which removal occurred.
+//!
+//! ## Example
+//!
+//! If we replace `"viol"` with `"violated"` as the human-readable status:
+//!
+//! - **v1**: `"viol"` is the only status symbol for violated SLAs.
+//! - **v2**: `"violated"` is introduced. Events emit both `"viol"` and
+//!   `"violated"`. `get_result_schema()` returns:
+//!   ```json
+//!   {
+//!     "status_met": "met",
+//!     "status_violated": "violated",
+//!     "deprecated_symbols": [
+//!       { "old_symbol": "viol", "new_symbol": "violated", "deprecated_at": 2, "removed_at": null }
+//!     ]
+//!   }
+//!   ```
+//! - **v3**: `"viol"` is removed. Events emit only `"violated"`.
+//!   `deprecated_symbols` is updated with `removed_at: 3`.
+//!
+//! Backends MUST check `deprecated_symbols` at startup and log warnings for
+//! any deprecated symbols they still rely on.
+//!
+//! # Review Checklist
+//!
+//! When adding or modifying events, refer to both the SC-099 Event-Topic Schema
+//! Checklist and the SC-100 Public Method Review Checklist in `CONTRIBUTING.md`.
 
 use soroban_sdk::{symbol_short, Symbol};
 
-/// Canonical event version symbol used by all events.
-pub const EVENT_VERSION: Symbol = symbol_short!("v1");
+/// Global event ABI generation symbol; topic[1] uses event_version(name).
+pub const EVENT_VERSION: Symbol = symbol_short!("v2");
+
+/// 1-based event-ABI generation number for the current `EVENT_VERSION`.
+///
+/// This is the mechanical index that ties the event symbol to the rest of the
+/// contract's version posture. Generation 1 corresponds to `"v1"`; a breaking
+/// event change MUST advance `EVENT_VERSION` and this generation together. Removals/removals of
+/// event fields are tracked by generation, not by the symbol string, so the
+/// co-bump rules in `contract_info.rs` and `docs/UPGRADE_PLAYBOOK.md` can be
+/// enforced numerically instead of by parsing symbols. (#497)
+pub const EVENT_ABI_GENERATION: u32 = 2;
+
+/// Required minimum result schema per global event ABI generation (index g - 1).
+/// Storage has its own table because its versions advance independently.
+///
+/// | event ABI | result schema | storage schema |
+/// |-----------|---------------|----------------|
+/// | v1        | 1             | 1              |
+/// | v2        | 2             | 4              |
+///
+/// `test_event_abi_cobump_invariant` enforces both dimensions (#497).
+pub const EVENT_ABI_TO_SCHEMA_VERSION: &[u32] = &[1, 2];
+
+/// Storage requirements are independent of result schema numbers: storage was
+/// already v3 before event ABI generation 2, so requiring merely v2 would not
+/// enforce a storage co-bump. Generation 2 must acknowledge storage v5 (#497).
+pub const EVENT_ABI_TO_STORAGE_VERSION: &[u32] = &[1, 5];
 
 /// Event name constants — these form topic[0] of every event.
 pub const EVENT_SLA_CALC: Symbol = symbol_short!("sla_calc");
 pub const EVENT_SETTLE_INTENT: Symbol = symbol_short!("set_int");
 pub const EVENT_CONFIG_UPD: Symbol = symbol_short!("cfg_upd");
+/// Emitted when a custom severity is removed via remove_custom_severity.
+pub const EVENT_CONFIG_REM: Symbol = symbol_short!("cfg_rem");
+/// Emitted when a new custom severity is registered (first creation).
+/// Distinguishable from cfg_upd by indexers: the custom severity did not
+/// exist before this call. (#456)
+pub const EVENT_SEV_ADD: Symbol = symbol_short!("sev_add");
+/// Emitted when an existing custom severity is reconfigured.
+/// Distinguishable from sev_add by indexers: the custom severity already
+/// existed before this call. (#456)
+pub const EVENT_SEV_UPD: Symbol = symbol_short!("sev_upd");
 pub const EVENT_PAUSED: Symbol = symbol_short!("paused");
 pub const EVENT_UNPAUSED: Symbol = symbol_short!("unpause");
 pub const EVENT_OP_SET: Symbol = symbol_short!("op_set");
@@ -132,22 +321,123 @@ pub const EVENT_ADMIN_REN: Symbol = symbol_short!("adm_ren");
 pub const EVENT_OP_PROP: Symbol = symbol_short!("op_prop");
 pub const EVENT_OP_ACC: Symbol = symbol_short!("op_acc");
 pub const EVENT_OP_CAN: Symbol = symbol_short!("op_can");
+/// Emitted when a pending admin proposal is superseded by a re-proposal. (#468)
+pub const EVENT_ADMIN_SUP: Symbol = symbol_short!("adm_sup");
+/// Emitted at most once when a lapsed admin proposal is first observed. (#589)
+pub const EVENT_ADMIN_XP: Symbol = symbol_short!("adm_xp");
+/// Emitted when a pending operator proposal is superseded by a re-proposal. (#468)
+pub const EVENT_OP_SUP: Symbol = symbol_short!("op_sup");
+/// Emitted at most once when a lapsed operator proposal is first observed. (#589)
+pub const EVENT_OP_XP: Symbol = symbol_short!("op_xp");
 pub const EVENT_CONFIG_FREEZE: Symbol = symbol_short!("cfg_frz");
 pub const EVENT_CONFIG_UNFREEZE: Symbol = symbol_short!("cfg_unfrz");
+/// Emitted when a running-stats counter saturates. (SC-W5-047)
+pub const EVENT_STATS_SAT: Symbol = symbol_short!("stats_sat");
+/// Emitted on the `DuplicateOutageInput` error path with the stored result. (#385)
+pub const EVENT_DUP_INPUT: Symbol = symbol_short!("dup_input");
+/// Emitted when a storage migration completes successfully. (#61)
+///
+/// Named `mig_done` (not `migrate_done`) so it fits `symbol_short!`'s 9-byte
+/// limit like every sibling event-name constant (#573).
+pub const EVENT_MIGRATE_DONE: Symbol = symbol_short!("mig_done");
 
-/// Returns the canonical event version string for consumer documentation.
+/// Per-name schema registry: (wire name, topic symbol, version, last changed ABI generation).
+/// A breaking per-name bump must also advance the global ABI and schema policy (#497).
+/// Unchanged events retain v1 even when the global ABI advances.
+pub const EVENT_SCHEMAS: &[(&str, Symbol, u32, u32)] = &[
+    ("sla_calc", EVENT_SLA_CALC, 1, 1),
+    ("set_int", EVENT_SETTLE_INTENT, 2, 2),
+    ("cfg_upd", EVENT_CONFIG_UPD, 1, 1),
+    ("cfg_rem", EVENT_CONFIG_REM, 1, 1),
+    ("sev_add", EVENT_SEV_ADD, 1, 1),
+    ("sev_upd", EVENT_SEV_UPD, 1, 1),
+    ("paused", EVENT_PAUSED, 1, 1),
+    ("unpause", EVENT_UNPAUSED, 1, 1),
+    ("op_set", EVENT_OP_SET, 1, 1),
+    ("pruned", EVENT_PRUNED, 1, 1),
+    ("pruned_a", EVENT_PRUNED_AGE, 1, 1),
+    ("adm_prop", EVENT_ADMIN_PROP, 1, 1),
+    ("adm_acc", EVENT_ADMIN_ACC, 1, 1),
+    ("adm_can", EVENT_ADMIN_CAN, 1, 1),
+    ("adm_ren", EVENT_ADMIN_REN, 1, 1),
+    ("op_prop", EVENT_OP_PROP, 1, 1),
+    ("op_acc", EVENT_OP_ACC, 1, 1),
+    ("op_can", EVENT_OP_CAN, 1, 1),
+    ("adm_sup", EVENT_ADMIN_SUP, 1, 1),
+    ("adm_xp", EVENT_ADMIN_XP, 1, 1),
+    ("op_sup", EVENT_OP_SUP, 1, 1),
+    ("op_xp", EVENT_OP_XP, 1, 1),
+    ("cfg_frz", EVENT_CONFIG_FREEZE, 1, 1),
+    ("cfg_unfrz", EVENT_CONFIG_UNFREEZE, 1, 1),
+    ("stats_sat", EVENT_STATS_SAT, 1, 1),
+    ("dup_input", EVENT_DUP_INPUT, 1, 1),
+    ("mig_done", EVENT_MIGRATE_DONE, 1, 1),
+    ("ret_lim", crate::EVENT_RET_LIM, 1, 1),
+];
+
+/// Look up a known name. Unknown names fail closed instead of inheriting a global version.
+pub fn event_version(name: Symbol) -> Symbol {
+    for (_, event, version, _) in EVENT_SCHEMAS {
+        if *event == name {
+            return match version {
+                1 => symbol_short!("v1"),
+                2 => symbol_short!("v2"),
+                _ => panic!("unsupported per-event version"),
+            };
+        }
+    }
+    panic!("unknown event name")
+}
+
+/// Returns the global event ABI symbol for version negotiation.
 pub fn current_event_version() -> Symbol {
     EVENT_VERSION
 }
 
 #[cfg(test)]
 mod tests {
+    // #496 – allows the emit-site audit below to read crate source. This crate
+    // is `#![no_std]`, so `std` must be linked explicitly (as in orphan_lint).
+    extern crate std;
+
     use super::*;
     use alloc::format;
+    use std::string::String;
+    use std::vec::Vec;
 
     #[test]
     fn test_event_version_is_stable() {
-        assert_eq!(current_event_version(), symbol_short!("v1"));
+        assert_eq!(current_event_version(), symbol_short!("v2"));
+    }
+
+    #[test]
+    fn test_event_abi_generation_tracks_version_symbol() {
+        // The generation table must have an entry for the current generation.
+        assert!(
+            EVENT_ABI_GENERATION >= 1 && EVENT_ABI_GENERATION as usize <= EVENT_ABI_TO_SCHEMA_VERSION.len(),
+            "EVENT_ABI_GENERATION {} out of range for the policy table",
+            EVENT_ABI_GENERATION
+        );
+        // Generation 1 is always "v1".
+        assert_eq!(EVENT_ABI_GENERATION, 2);
+        assert_eq!(current_event_version(), symbol_short!("v2"));
+    }
+
+    #[test]
+    fn per_name_versions_are_independent_and_cobumped() {
+        assert_eq!(event_version(EVENT_SETTLE_INTENT), symbol_short!("v2"));
+        assert_eq!(event_version(EVENT_PAUSED), symbol_short!("v1"));
+        for (name, symbol, version, generation) in EVENT_SCHEMAS {
+            assert!(*version >= 1 && *generation <= EVENT_ABI_GENERATION);
+            assert!(*generation >= *version, "{} version escaped ABI co-bump", name);
+            assert_eq!(*symbol, Symbol::new(&soroban_sdk::Env::default(), name));
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown event name")]
+    fn unknown_names_do_not_inherit_a_version() {
+        event_version(symbol_short!("unknown"));
     }
 
     #[test]
@@ -156,6 +446,9 @@ mod tests {
             EVENT_SLA_CALC,
             EVENT_SETTLE_INTENT,
             EVENT_CONFIG_UPD,
+            EVENT_CONFIG_REM,
+            EVENT_SEV_ADD,
+            EVENT_SEV_UPD,
             EVENT_PAUSED,
             EVENT_UNPAUSED,
             EVENT_OP_SET,
@@ -165,11 +458,19 @@ mod tests {
             EVENT_ADMIN_ACC,
             EVENT_ADMIN_CAN,
             EVENT_ADMIN_REN,
+            EVENT_ADMIN_SUP,
+            EVENT_ADMIN_XP,
             EVENT_OP_PROP,
             EVENT_OP_ACC,
             EVENT_OP_CAN,
+            EVENT_OP_SUP,
+            EVENT_OP_XP,
             EVENT_CONFIG_FREEZE,
             EVENT_CONFIG_UNFREEZE,
+            EVENT_STATS_SAT,
+            EVENT_DUP_INPUT,
+            EVENT_MIGRATE_DONE,
+            crate::EVENT_RET_LIM,
         ];
 
         for i in 0..names.len() {
@@ -181,6 +482,197 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The emit-site catalog: every event name the contract publishes, paired
+    /// with the `EVENT_*` constant that names it in code. This is the single
+    /// source of truth the bidirectional audits below enforce: every catalogued
+    /// event must have a real publish site (forward), and every publish site
+    /// must be catalogued (reverse) so an uncatalogued event cannot escape
+    /// schema review (#496, #575).
+    ///
+    /// `sev_add`/`sev_upd` are emitted by `set_custom_severity` (the same
+    /// function, branch selected by the create-vs-reconfigure lifecycle) via a
+    /// bound `event_name` variable, so they are listed with the constant that
+    /// carries each branch. `cfg_rem`, the removal counterpart, is listed too —
+    /// the three must stay symmetric so the custom-severity lifecycle is fully
+    /// audited.
+    const EMIT_SITE_CATALOG: &[(&str, &str)] = &[
+        ("sla_calc", "EVENT_SLA_CALC"),
+        ("set_int", "EVENT_SETTLE_INTENT"),
+        ("cfg_upd", "EVENT_CONFIG_UPD"),
+        ("sev_add", "EVENT_SEV_ADD"),
+        ("sev_upd", "EVENT_SEV_UPD"),
+        ("cfg_rem", "EVENT_CONFIG_REM"),
+        ("paused", "EVENT_PAUSED"),
+        ("unpause", "EVENT_UNPAUSED"),
+        ("op_set", "EVENT_OP_SET"),
+        ("pruned", "EVENT_PRUNED"),
+        ("pruned_a", "EVENT_PRUNED_AGE"),
+        ("adm_prop", "EVENT_ADMIN_PROP"),
+        ("adm_acc", "EVENT_ADMIN_ACC"),
+        ("adm_can", "EVENT_ADMIN_CAN"),
+        ("adm_ren", "EVENT_ADMIN_REN"),
+        ("adm_sup", "EVENT_ADMIN_SUP"),
+        ("adm_xp", "EVENT_ADMIN_XP"),
+        ("op_prop", "EVENT_OP_PROP"),
+        ("op_acc", "EVENT_OP_ACC"),
+        ("op_can", "EVENT_OP_CAN"),
+        ("op_sup", "EVENT_OP_SUP"),
+        ("op_xp", "EVENT_OP_XP"),
+        ("cfg_frz", "EVENT_CONFIG_FREEZE"),
+        ("cfg_unfrz", "EVENT_CONFIG_UNFREEZE"),
+        ("stats_sat", "EVENT_STATS_SAT"),
+        ("dup_input", "EVENT_DUP_INPUT"),
+        ("mig_done", "EVENT_MIGRATE_DONE"),
+        ("ret_lim", "EVENT_RET_LIM"),
+    ];
+
+    /// All crate sources, excluding this schema catalog and the `api_stability`
+    /// guardrail: both are *declaration* sites, not emit sites.
+    fn crate_sources() -> Vec<String> {
+        let src_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut sources: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&src_dir).expect("src/ readable for emit-site audit") {
+            let entry = entry.expect("read_dir entry");
+            let fname = entry.file_name().to_string_lossy().into_owned();
+            if fname == "event_schema.rs" || fname == "api_stability.rs" || !fname.ends_with(".rs") {
+                continue;
+            }
+            sources.push(std::fs::read_to_string(src_dir.join(&fname)).expect("cannot read source file"));
+        }
+        sources
+    }
+
+    /// A publish call can span several lines, and the emitting constant often
+    /// sits on the line *before* `.publish(...)` — e.g. `set_custom_severity`
+    /// binds `let event_name = if is_update { EVENT_SEV_UPD } else { EVENT_SEV_ADD }`
+    /// immediately above its single publish call. Each publish site is
+    /// therefore audited over a window spanning ±300 bytes. (#575)
+    fn publish_windows<'a>(text: &'a str) -> impl Iterator<Item = &'a str> + 'a {
+        text.match_indices("publish").map(move |(idx, _)| {
+            let mut start = idx.saturating_sub(300);
+            while !text.is_char_boundary(start) {
+                start -= 1;
+            }
+            let mut end = (idx + 300).min(text.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            &text[start..end]
+        })
+    }
+
+    /// Yields every `EVENT_*` identifier declared with `const` in `text`.
+    /// Used by the reverse audit so prose placeholders (e.g. the `EVENT_NAME`
+    /// in `event.rs`'s doc comment) are not mistaken for emit-site references.
+    fn declared_event_idents(text: &str) -> Vec<String> {
+        let mut names: Vec<String> = Vec::new();
+        for (idx, _) in text.match_indices("const") {
+            let prev_is_word = text
+                .as_bytes()
+                .get(idx.wrapping_sub(1))
+                .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_');
+            if prev_is_word {
+                continue; // "constant", "const_" etc., not a `const` declaration
+            }
+            let trimmed = text[idx + "const".len()..].trim_start();
+            if let Some(rest) = trimmed.strip_prefix("EVENT_") {
+                let name_len = rest
+                    .char_indices()
+                    .take_while(|(_, c)| c.is_ascii_alphanumeric() || *c == '_')
+                    .last()
+                    .map_or(0, |(i, c)| i + c.len_utf8());
+                names.push(format!("EVENT_{}", &rest[..name_len]));
+            }
+        }
+        names
+    }
+
+    /// Yields every `EVENT_*` constant identifier token in `text`.
+    fn event_tokens(text: &str) -> impl Iterator<Item = &str> + '_ {
+        text.match_indices("EVENT_").map(move |(idx, _)| {
+            let rest = &text[idx..];
+            let name_len = rest
+                .char_indices()
+                .take_while(|(_, c)| c.is_ascii_alphanumeric() || *c == '_')
+                .last()
+                .map_or(0, |(i, c)| i + c.len_utf8());
+            &text[idx..idx + name_len]
+        })
+    }
+
+    /// #496 – The compiler can only see an event constant is unused; the
+    /// divergence that matters is *declared but never emitted*. Every event
+    /// name constant in the catalog below must be referenced inside a `publish`
+    /// call somewhere in the crate's `src/` (excluding this catalog and the
+    /// `api_stability` guardrail). Adding an event constant to the schema
+    /// without wiring it to an emit site fails this test.
+    #[test]
+    fn test_every_declared_event_has_an_emit_site() {
+        use std::string::String;
+        use std::vec::Vec;
+
+        let sources = crate_sources();
+        let mut failures: Vec<String> = Vec::new();
+        for (event_name, ident) in EMIT_SITE_CATALOG {
+            let emitted = sources
+                .iter()
+                .any(|text: &String| publish_windows(text).any(|window| window.contains(ident)));
+            if !emitted {
+                failures.push(alloc::format!(
+                    "event `{}` (constant `{}`) is declared in the schema catalog but never \
+                     emitted from a publish site in src/ — wire it up or remove it (#496)",
+                    event_name,
+                    ident
+                ));
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    /// #575 – The reverse direction of the emit-site audit: every publish site
+    /// must reference a constant that is in the catalog. `sev_add`/`sev_upd`
+    /// were previously emitted but absent from the catalog, so their payload
+    /// shapes, topic arities, and version bumps escaped schema review — and the
+    /// lifecycle looked asymmetric next to the audited `cfg_rem`. A publish
+    /// site that reaches an `EVENT_*` constant missing from
+    /// [`EMIT_SITE_CATALOG`] fails this test.
+    ///
+    /// `EVENT_VERSION` is global ABI metadata, not an event name, and
+    /// is deliberately excluded; prose tokens that are not declared `const`s
+    /// are ignored.
+    #[test]
+    fn test_every_publish_site_is_in_the_catalog() {
+        use std::collections::HashSet;
+        use std::string::String;
+        use std::vec::Vec;
+
+        let catalog_idents: HashSet<&str> = EMIT_SITE_CATALOG.iter().map(|(_, ident)| *ident).collect();
+        let mut declared: HashSet<String> = HashSet::new();
+        for source in crate_sources() {
+            declared.extend(declared_event_idents(&source));
+        }
+
+        let mut failures: Vec<String> = Vec::new();
+        for source in crate_sources() {
+            for window in publish_windows(&source) {
+                for ident in event_tokens(window) {
+                    if ident == "EVENT_VERSION" || !declared.contains(ident) {
+                        continue;
+                    }
+                    if !catalog_idents.contains(ident) {
+                        failures.push(alloc::format!(
+                            "publish site references `{}`, which is not in the emit-site \
+                             catalog — add it (with its payload schema) so it cannot escape \
+                             schema review (#575)",
+                            ident
+                        ));
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     #[test]

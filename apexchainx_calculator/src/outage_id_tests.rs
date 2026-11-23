@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod outage_id_tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+    #![allow(clippy::module_inception)]
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -18,12 +20,7 @@ mod outage_id_tests {
         let env = Env::default();
         let (_admin, _operator, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.calculate_sla(
-            &stranger,
-            &symbol_short!("U_OUT"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&stranger, &symbol_short!("U_OUT"), &symbol_short!("high"), &10);
     }
 
     #[test]
@@ -32,16 +29,11 @@ mod outage_id_tests {
         let env = Env::default();
         let (admin, _operator, client) = setup(&env);
         // admin holds the admin role, not the operator role
-        client.calculate_sla(
-            &admin,
-            &symbol_short!("U_ADMIN"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&admin, &symbol_short!("U_ADMIN"), &symbol_short!("high"), &10);
     }
 
     #[test]
-    fn test_repeated_outage_id_each_recorded() {
+    fn test_repeated_identical_outage_is_idempotent() {
         let env = Env::default();
         let (_admin, operator, client) = setup(&env);
         let outage_id = symbol_short!("INC01");
@@ -50,7 +42,10 @@ mod outage_id_tests {
         client.calculate_sla(&operator, &outage_id, &symbol_short!("high"), &10);
 
         let stats = client.get_stats();
-        assert_eq!(stats.total_calculations, 2);
+        assert_eq!(
+            stats.total_calculations, 1,
+            "identical re-submission must not double-record history"
+        );
     }
 
     #[test]

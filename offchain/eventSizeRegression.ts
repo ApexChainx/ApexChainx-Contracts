@@ -1,68 +1,48 @@
-/**
- * SC-017 / SC-W5-029: Event-size regression tests for lifecycle, SLA calculation,
- * and version negotiation events.
- * Catches payload bloat before deployment by asserting max byte sizes per event type.
- */
-
-const EVENT_SIZE_LIMITS: Record<string, number> = {
-  sla_calculated: 200,
-  contract_paused: 100,
-  contract_unpaused: 80,
-  admin_proposed: 120,
-  operator_proposed: 120,
-  version_info_read: 96,  // SC-W5-029: version negotiation event must be compact
-};
-
-interface ContractEvent {
-  type: string;
-  payload: Record<string, unknown>;
+﻿/** Payload-only SCVal XDR budgets, cross-checked against actual Rust events. */
+import { readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+export const EVENT_SIZE_LIMITS = {
+  sla_calc: 152, set_int: 164, cfg_upd: 60,
+  paused: 20, unpause: 20, adm_prop: 56, op_prop: 56,
+} as const;
+type Kind = "symbol" | "u32" | "i128" | "u64" | "bool" | "address";
+export interface Field { kind: Kind; value?: string }
+export function estimateScValSize(fields: readonly Field[]): number {
+  // SCVal discriminant, optional vector discriminant, vector length.
+  return 12 + fields.reduce((size, field) => {
+    if (field.kind === "symbol") {
+      const length = Buffer.byteLength(field.value ?? "", "utf8");
+      if (length > 32) throw new Error("Symbol exceeds 32 bytes");
+      return size + 8 + Math.ceil(length / 4) * 4;
+    }
+    // Account addresses include SCAddress and PublicKey discriminants.
+    return size + { u32: 8, bool: 8, i128: 20, u64: 12, address: 44 }[field.kind];
+  }, 0);
 }
-
-function eventSize(event: ContractEvent): number {
-  return Buffer.byteLength(JSON.stringify(event.payload), "utf8");
-}
-
-function assertEventSize(event: ContractEvent): void {
-  const limit = EVENT_SIZE_LIMITS[event.type];
-  if (limit === undefined) throw new Error(`Unknown event type: ${event.type}`);
-  const size = eventSize(event);
-  if (size > limit) {
-    throw new Error(
-      `[SC-017] Event "${event.type}" is ${size}B, limit is ${limit}B`
-    );
-  }
-  console.log(`  ✓ ${event.type}: ${size}B / ${limit}B`);
-}
-
-const events: ContractEvent[] = [
-  {
-    type: "sla_calculated",
-    payload: { severity: "critical", mttr: 45, sla_met: true, reward_tier: "good" },
-  },
-  {
-    type: "contract_paused",
-    payload: { reason: "maintenance", timestamp: 1714233600 },
-  },
-  {
-    type: "contract_unpaused",
-    payload: { timestamp: 1714237200 },
-  },
-  {
-    type: "admin_proposed",
-    payload: { proposed: "GABC123", proposer: "GXYZ456" },
-  },
-  {
-    type: "operator_proposed",
-    payload: { proposed: "GDEF789", proposer: "GXYZ456" },
-  },
-  {
-    // SC-W5-029: version negotiation read is not an emitted event but its
-    // response payload must stay compact for backend startup latency budgets.
-    type: "version_info_read",
-    payload: { storage_version: 1, result_schema_version: 1, needs_migration: false, is_paused: false },
-  },
+const sla: Field[] = [
+  { kind: "symbol", value: "ABCDEFGHIJKLMNOPQRSTUVWXYZ012345" },
+  { kind: "symbol", value: "met" }, { kind: "u32" }, { kind: "u32" },
+  { kind: "i128" }, { kind: "symbol", value: "rew" },
+  { kind: "symbol", value: "excel" }, { kind: "u64" }, { kind: "u64" },
 ];
-
-console.log("[SC-017/SC-W5-029] Event-size regression checks:");
-events.forEach(assertEventSize);
-console.log("All event-size checks passed.");
+const payloads: Record<keyof typeof EVENT_SIZE_LIMITS, Field[]> = {
+  sla_calc: sla, set_int: [...sla, { kind: "u64" }],
+  cfg_upd: [{ kind: "u32" }, { kind: "i128" }, { kind: "i128" }],
+  paused: [{ kind: "bool" }], unpause: [{ kind: "bool" }],
+  adm_prop: [{ kind: "address" }], op_prop: [{ kind: "address" }],
+};
+export function runChecks(): void {
+  const measured = JSON.parse(readFileSync(new URL("../ts/fixtures/event-size-semantics.json", import.meta.url), "utf8")) as
+    { name: keyof typeof EVENT_SIZE_LIMITS; fields: number; xdrBytes: number }[];
+  if (new Set(measured.map(row => row.name)).size !== Object.keys(payloads).length || measured.length !== Object.keys(payloads).length)
+    throw new Error("Event-size fixture coverage mismatch");
+  for (const row of measured) {
+    const fields = payloads[row.name];
+    if (!fields || fields.length !== row.fields || estimateScValSize(fields) !== row.xdrBytes)
+      throw new Error(`${row.name}: TypeScript payload estimate disagrees with Rust XDR`);
+    const limit = EVENT_SIZE_LIMITS[row.name];
+    if (row.xdrBytes > limit) throw new Error(`${row.name}: ${row.xdrBytes}B exceeds ${limit}B`);
+    console.log(`${row.name}: ${row.xdrBytes}B / ${limit}B (Rust XDR verified)`);
+  }
+}
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) runChecks();

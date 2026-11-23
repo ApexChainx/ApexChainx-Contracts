@@ -1,0 +1,59 @@
+name: Event and parity acceptance
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [fix/verified-event-correlation-parity]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: mkdir -p validation-results
+      - name: Full Rust regression suite
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --locked --lib 2>&1 | tee validation-results/rust-tests.log
+      - name: Generated fixtures and constants are current
+        shell: bash
+        run: |
+          git diff --exit-code -- ts/fixtures ts/generated
+          test -z "$(git ls-files --others --exclude-standard -- ts/fixtures ts/generated)"
+      - name: TypeScript parity and manifest coverage
+        shell: bash
+        run: |
+          set -o pipefail
+          npm run check:parity-coverage 2>&1 | tee validation-results/coverage.log
+          npm run test:parity 2>&1 | tee validation-results/ts-parity.log
+          npm run typecheck 2>&1 | tee validation-results/typecheck.log
+      - name: Format, lint and production WASM build
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo fmt --all --check 2>&1 | tee validation-results/format.log
+          cargo clippy --locked --all-targets -- -D warnings 2>&1 | tee validation-results/clippy.log
+          cargo build --locked --target wasm32-unknown-unknown --release 2>&1 | tee validation-results/wasm-build.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: event-parity-acceptance
+          path: validation-results/
+          retention-days: 30

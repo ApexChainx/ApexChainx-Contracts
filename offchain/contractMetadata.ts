@@ -4,6 +4,9 @@
  * capabilities, and health status for backend startup/health-check use.
  */
 
+
+
+
 interface ContractMetadata {
   version: string;
   capabilities: string[];

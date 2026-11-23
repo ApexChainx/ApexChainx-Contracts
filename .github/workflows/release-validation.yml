@@ -1,0 +1,277 @@
+# =============================================================================
+# ApexChainx Contracts — Release Validation Gate
+# =============================================================================
+#
+# Non-interactive CI smoke-test artifact validation for every release
+# candidate.  Runs on every push to main AND on every version tag (v*),
+# verifying:
+#   1. Build succeeds (native + WASM)
+#   2. All tests pass (unit + fuzz)
+#   3. Lint/format compliance (clippy + fmt)
+#   4. WASM artifact hash is deterministic and recorded
+#   5. Smoke-test expectations are met (contract initializes, configures,
+#      calculates, and prunes)
+#
+# Results are recorded in a reviewable artifact (release-validation-report)
+# that maintainers can inspect before promoting a release.
+# =============================================================================
+
+name: Release Validation
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      waiver_ref:
+        description: 'Optional immutable commit containing reviewed release/waivers.json'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+
+concurrency:
+  group: release-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Release Candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    defaults:
+      run:
+        shell: bash
+
+    outputs:
+      wasm_hash: ${{ steps.hash.outputs.wasm_hash }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain with wasm32 target
+        uses: dtolnay/rust-toolchain@1.94.1
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Create validation-results directory
+        run: mkdir -p validation-results
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install locked tooling
+        run: npm ci
+
+      - name: Read separately reviewed waiver registry
+        if: inputs.waiver_ref != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WAIVER_REF: ${{ inputs.waiver_ref }}
+        run: |
+          set -o pipefail
+          [[ "$WAIVER_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'waiver_ref must be an immutable commit'; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/contents/release/waivers.json?ref=$WAIVER_REF" --jq .content | base64 --decode > validation-results/reviewed-waivers.json
+          echo "RELEASE_WAIVERS_FILE=validation-results/reviewed-waivers.json" >> "$GITHUB_ENV"
+          echo "$WAIVER_REF" > validation-results/waiver-source-commit.txt
+
+      - name: Release safety preflight
+        id: preflight
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: npm run release:preflight
+
+      - name: Publish preflight checklist
+        if: always()
+        run: |
+          if [ -f validation-results/preflight/release-ticket.md ]; then
+            cat validation-results/preflight/release-ticket.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # -------------------------------------------------------------------
+      # Step 1: Lint & Format
+      # -------------------------------------------------------------------
+      - name: Format check
+        id: run_fmt
+        working-directory: apexchainx_calculator
+        run: |
+          set -o pipefail
+          echo "=== Format check ==="
+          cargo fmt -- --check --color=always 2>&1 | tee ../validation-results/fmt_output.log
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "status=FAIL" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+
+      - name: Clippy
+        id: run_clippy
+        working-directory: apexchainx_calculator
+        run: |
+          set -o pipefail
+          echo "=== Clippy ==="
+          cargo clippy --all-targets -- -D warnings 2>&1 | tee ../validation-results/clippy_output.log
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------
+      # Step 2: no-std compliance
+      # -------------------------------------------------------------------
+      - name: no_std compatibility lint
+        id: run_no_std_lint
+        run: |
+          set -o pipefail
+          echo "=== no_std compatibility lint ==="
+          ./scripts/check-no-std.sh 2>&1 | tee validation-results/no_std_lint.log
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+
+      - name: WASM no-std compliance check
+        id: run_wasm_check
+        working-directory: apexchainx_calculator
+        run: |
+          set -o pipefail
+          echo "=== WASM no-std compliance ==="
+          cargo check --target wasm32-unknown-unknown --lib 2>&1 | tee ../validation-results/wasm_check.log
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------
+      # Step 3: Build
+      # -------------------------------------------------------------------
+      - name: Build native
+        id: build_native
+        working-directory: apexchainx_calculator
+        run: |
+          set -o pipefail
+          echo "=== Native build ==="
+          cargo build 2>&1 | tee ../validation-results/build_native.log
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+
+      - name: Build WASM
+        id: build_wasm
+        working-directory: apexchainx_calculator
+        run: |
+          set -o pipefail
+          echo "=== WASM build ==="
+          cargo build --target wasm32-unknown-unknown --release 2>&1 | tee ../validation-results/build_wasm.log
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------
+      # Step 4: Artifact hash
+      # -------------------------------------------------------------------
+      - name: Generate WASM artifact hash
+        id: hash
+        run: |
+          echo "=== Artifact hash ==="
+          # Workspace build — artifacts land in the ROOT target/, not apexchainx_calculator/target/.
+          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          WASM_HASH=$(sha256sum "$WASM" | awk '{print $1}')
+          echo "wasm_hash=$WASM_HASH" >> "$GITHUB_OUTPUT"
+          echo "$WASM_HASH  apexchainx_calculator.wasm" > validation-results/wasm_artifact_hash.txt
+          echo "Hash: $WASM_HASH"
+          echo "=== Artifact size ==="
+          wc -c < "$WASM" | tee validation-results/wasm_artifact_size.txt
+
+      - name: Verify manifest self-consistency
+        id: verify_hash
+        run: |
+          echo "=== Hash self-consistency ==="
+          cp target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm .
+          sha256sum -c validation-results/wasm_artifact_hash.txt
+          rm apexchainx_calculator.wasm
+
+      # -------------------------------------------------------------------
+      # Step 5: Unit Tests
+      # -------------------------------------------------------------------
+      - name: Run unit tests
+        id: run_tests
+        working-directory: apexchainx_calculator
+        run: |
+          set -o pipefail
+          echo "=== Unit tests ==="
+          cargo test --lib 2>&1 | tee ../validation-results/unit_tests.log
+          # Extract test result summary from last line
+          SUMMARY=$(tail -1 ../validation-results/unit_tests.log)
+          echo "test_summary=$SUMMARY" >> "$GITHUB_OUTPUT"
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+
+      - name: Run property-based fuzz tests
+        id: run_fuzz
+        working-directory: apexchainx_calculator
+        run: |
+          set -o pipefail
+          echo "=== Fuzz tests ==="
+          cargo test --lib fuzz_tests:: 2>&1 | tee ../validation-results/fuzz_tests.log
+          SUMMARY=$(tail -1 ../validation-results/fuzz_tests.log)
+          echo "fuzz_summary=$SUMMARY" >> "$GITHUB_OUTPUT"
+          echo "status=PASS" >> "$GITHUB_OUTPUT"
+
+      # -------------------------------------------------------------------
+      # Step 6: Smoke-test expectations
+      # -------------------------------------------------------------------
+      - name: Record validation outcomes
+        if: always()
+        env:
+          VALIDATION_STEPS: ${{ toJSON(steps) }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          steps = json.loads(os.environ["VALIDATION_STEPS"])
+          labels = {
+              "preflight": "Release safety preflight",
+              "run_fmt": "Format", "run_clippy": "Clippy",
+              "run_no_std_lint": "Production no_std graph", "run_wasm_check": "WASM check",
+              "build_native": "Native build", "build_wasm": "WASM release build",
+              "hash": "Artifact hash", "verify_hash": "Hash verification",
+              "run_tests": "Unit tests", "run_fuzz": "Property fuzz tests",
+          }
+          output = Path("validation-results")
+          output.mkdir(exist_ok=True)
+          lines = ["# Release validation report", "", f"Candidate: {os.environ['GITHUB_SHA']}",
+                   "", "| Check | Outcome |", "|---|---|"]
+          for key, label in labels.items():
+              outcome = steps.get(key, {}).get("outcome", "skipped")
+              lines.append(f"| {label} | {outcome.upper()} |")
+          lines += ["", "See preflight/release-ticket.md and the attached per-check logs."]
+          (output / "report.md").write_text("\n".join(lines) + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("\n".join(lines) + "\n")
+          PY
+
+      # -------------------------------------------------------------------
+      # Step 7: Upload report
+      # -------------------------------------------------------------------
+      - name: Upload validation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-validation-report
+          path: |
+            validation-results/
+            offchain/readCostMeasurements.json
+            offchain/readCostBaseline.json
+            target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
+          retention-days: 90
+
+      - name: Enforce release preflight
+        if: always() && steps.preflight.outcome != 'success'
+        run: |
+          echo 'Release preflight failed; see the retained report. Release remains blocked.'
+          exit 1

@@ -4,10 +4,16 @@
  * Off-chain systems can retrieve all SLA history entries for a specific
  * outage ID without scanning the full list themselves.
  *
+ * Off-chain mirror of the contract's `get_history_by_outage` and
+ * `get_latest_by_outage` (`apexchainx_calculator/src/history.rs`).
+ *
  * Behaviour:
  *   - Returns entries in insertion order (oldest first) — deterministic.
  *   - Returns an empty array when no entries match (zero-match case).
  *   - Handles repeated outage IDs correctly (many-match case).
+ *
+ * Verified against contract-recorded lookups by
+ * `ts/parity/readSemanticsParity.test.ts`.
  */
 
 export interface HistoryEntry {
@@ -39,26 +45,27 @@ export function getHistoryByOutage(
   return { outageId, entries, count: entries.length };
 }
 
-// ---------------------------------------------------------------------------
-// Quick self-test
-// ---------------------------------------------------------------------------
-if (require.main === module) {
-  const history: HistoryEntry[] = [
-    { id: "e0", outageId: "OUT-1", severity: "critical", mttr: 30,  slaMetPct: 100, recordedAt: 1 },
-    { id: "e1", outageId: "OUT-2", severity: "high",     mttr: 90,  slaMetPct: 80,  recordedAt: 2 },
-    { id: "e2", outageId: "OUT-1", severity: "critical", mttr: 45,  slaMetPct: 100, recordedAt: 3 },
-    { id: "e3", outageId: "OUT-1", severity: "medium",   mttr: 200, slaMetPct: 60,  recordedAt: 4 },
-  ];
-
-  const r0 = getHistoryByOutage(history, "OUT-NONE");
-  console.assert(r0.count === 0, "zero match");
-
-  const r1 = getHistoryByOutage(history, "OUT-2");
-  console.assert(r1.count === 1, "one match");
-
-  const r2 = getHistoryByOutage(history, "OUT-1");
-  console.assert(r2.count === 3, "many matches");
-  console.assert(r2.entries[0].id === "e0", "insertion order preserved");
-
-  console.log("outage query OK — OUT-1 entries:", r2.count);
+/**
+ * Returns the most recent entry for `outageId`, mirroring the contract's
+ * `get_latest_by_outage`.
+ *
+ * "Most recent" is the **last matching entry in insertion order**, not the one
+ * with the largest `recordedAt`. The distinction matters: history is
+ * append-only and never reordered, so the contract scans forward and keeps the
+ * last match rather than comparing timestamps. Sorting by `recordedAt` would
+ * disagree whenever two results share a ledger timestamp.
+ *
+ * Returns `null` when nothing matches — the contract returns `None`.
+ */
+export function getLatestByOutage(
+  history: HistoryEntry[],
+  outageId: string,
+): HistoryEntry | null {
+  let latest: HistoryEntry | null = null;
+  for (const entry of history) {
+    if (entry.outageId === outageId) {
+      latest = entry;
+    }
+  }
+  return latest;
 }

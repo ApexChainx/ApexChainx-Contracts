@@ -8,6 +8,12 @@
  *
  * Both modes are deterministic: given the same history and parameters
  * they always produce the same result.
+ *
+ * [`pruneByMinAge`] is the direct mirror of the contract's
+ * `prune_history_by_age` and is the one to use when reconciling with on-chain
+ * state; `pruneByAge` and `pruneByWindow` are off-chain conveniences over the
+ * same predicate. Verified against contract-recorded prunes by
+ * `ts/parity/readSemanticsParity.test.ts`.
  */
 
 export interface HistoryEntry {
@@ -49,25 +55,31 @@ export function pruneByWindow(
   return pruneByAge(history, cutoff);
 }
 
-// ---------------------------------------------------------------------------
-// Quick self-test
-// ---------------------------------------------------------------------------
-if (require.main === module) {
-  const history: HistoryEntry[] = [
-    { id: "e0", outageId: "o1", severity: "high", mttr: 60, slaMetPct: 100, recordedAt: 100 },
-    { id: "e1", outageId: "o2", severity: "high", mttr: 60, slaMetPct: 100, recordedAt: 200 },
-    { id: "e2", outageId: "o3", severity: "high", mttr: 60, slaMetPct: 100, recordedAt: 300 },
-  ];
-
-  const r1 = pruneByAge(history, 200);
-  console.assert(r1.pruned === 1 && r1.kept.length === 2, "prune-by-age");
-
-  const r2 = pruneByWindow(history, 150);
-  console.assert(r2.kept.length === 2 && r2.pruned === 1, "prune-by-window");
-
-  const r3 = pruneByWindow([], 100);
-  console.assert(r3.kept.length === 0, "empty history");
-
-  console.log("prune-by-age OK, pruned:", r1.pruned);
-  console.log("prune-by-window OK, kept:", r2.kept.length);
+/**
+ * Prunes by **relative age**, mirroring the contract's
+ * `prune_history_by_age(min_age_seconds)`.
+ *
+ * The contract computes `cutoff = now.saturating_sub(min_age_seconds)` from the
+ * *ledger* timestamp and keeps every entry with `recorded_at >= cutoff`. Two
+ * details are easy to get wrong and are handled here explicitly:
+ *
+ *   - **`now` is the ledger timestamp, not wall-clock time.** Callers must pass
+ *     the ledger timestamp they are reconciling against, or the mirror will
+ *     disagree with the chain.
+ *   - **The subtraction saturates.** A `min_age_seconds` larger than `now` —
+ *     `u64::MAX` being the obvious case — clamps the cutoff to `0` and keeps
+ *     everything, rather than underflowing into a huge cutoff that would prune
+ *     the entire history.
+ *
+ * Both arguments are `bigint` because the contract's are `u64`, which exceeds
+ * the range a JavaScript number represents exactly.
+ */
+export function pruneByMinAge(
+  history: HistoryEntry[],
+  now: bigint,
+  minAgeSeconds: bigint,
+): PruneResult {
+  const cutoff = now > minAgeSeconds ? now - minAgeSeconds : 0n;
+  const kept = history.filter((e) => BigInt(e.recordedAt) >= cutoff);
+  return { kept, pruned: history.length - kept.length };
 }

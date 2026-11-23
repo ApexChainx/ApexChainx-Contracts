@@ -1,0 +1,17 @@
+   Compiling apexchainx_calculator v0.1.0 (C:\Users\PC\Documents\fun\ApexChainx-Contracts\validation-results\release-preflight\apexchainx_calculator)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.29s
+     Running unittests src\lib.rs (C:/Users/PC/Documents/fun/ApexChainx-Contracts/target\debug\deps\apexchainx_calculator-c05885d2382ee880.exe)
+
+running 10 tests
+test fuzz_feasibility::tests::feasibility_scenarios_match_the_contract_validator ... ok
+test orphan_lint_tests::test_no_orphan_source_files_under_src ... ok
+test orphan_lint_tests::test_orphan_lint_detects_a_declared_module ... ok
+test outage_id::tests::accepts_symbol_alphabet_and_length_boundaries_without_normalizing ... ok
+test tests::test_operator_proposal_expiry_rolls_back_effects_on_error ... ok
+test tests::test_result_schema_is_explicit_and_stable ... ok
+test history_invariant_tests::cached_count_tracks_append_retention_count_prune_and_age_prune ... ok
+test ts_parity_fixtures::event_abi_v2_migration_preserves_v3_history_and_is_idempotent ... ok
+test ts_parity_fixtures::parity_manifest_has_no_unaccounted_methods ... ok
+test ts_parity_fixtures::generate_ts_parity_fixtures ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 791 filtered out; finished in 18.85s

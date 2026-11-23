@@ -23,13 +23,38 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.94.1
         with:
           targets: wasm32-unknown-unknown
           components: rustfmt, clippy
+
+      # Issue #207: Early no-std lint — scans Rust source for accidental `use
+      # std::` or `extern crate std` before the costly WASM compilation step.
+      # Runs fast (pure grep) and gives contributors a clear, file-level error.
+      - name: no_std compatibility lint (early gate)
+        run: ./scripts/check-no-std.sh
+
+      # Issue #491: Orphan module lint — fails when a `.rs` file in the crate
+      # is never declared as a module (e.g. the committed scratch_test.rs that
+      # shipped for weeks without CI noticing). An undeclared file is invisible
+      # to cargo check/clippy/test, so its tests rot silently; this gate closes
+      # that class.
+      - name: Orphan module lint (early gate)
+        run: ./scripts/check-orphan-modules.sh
+
+      # Issue #12: WASM no-std compliance check.
+      # Compiles only the library crate for wasm32-unknown-unknown so that any
+      # accidental `std` import surfaces here (before deployment) as a compile
+      # error. Invokes the wasm32 compiler from the host runner via `cargo check`,
+      # which is cheaper than the `Build WASM` step below (metadata only, no codegen).
+      - name: WASM no-std compliance check
+        working-directory: apexchainx_calculator
+        run: |
+          set -o pipefail
+          cargo check --target wasm32-unknown-unknown --lib 2>&1 | tee no_std_check.log \
+            || (echo "=== no_std compliance check failed: std imports are not allowed in WASM ===" \
+                && cat no_std_check.log && exit 1)
 
       - name: Debug environment
         run: |
@@ -46,15 +71,39 @@ jobs:
       - name: Cargo check
         working-directory: apexchainx_calculator
         run: |
+          set -o pipefail
           cargo check 2>&1 | tee check.log || (echo "=== Cargo check failed ===" && cat check.log && exit 1)
 
       - name: Format check
         working-directory: apexchainx_calculator
-        run: cargo fmt --check
+        run: |
+          cargo fmt -- --check --color=always 2>&1 | tee fmt_output.log
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo ""
+            echo "=== Formatting diff ==="
+            cargo fmt -- --check 2>&1 || true
+            git diff -- '*.rs' || true
+            echo ""
+            echo "Run 'cargo fmt' locally to fix."
+            exit 1
+          fi
 
       - name: Clippy
         working-directory: apexchainx_calculator
         run: cargo clippy --all-targets -- -D warnings
+
+      # cargo-udeps requires a nightly toolchain (see CONTRIBUTING.md), while
+      # this job otherwise pins stable 1.94.1. Pin a nightly from the same era:
+      # newer nightlies (>= 1.96) reject ethnum 1.5.0's transmute-based
+      # conversions (TryFromIntError is no longer zero-sized), breaking this gate.
+      - name: Unused dependency gate
+        working-directory: apexchainx_calculator
+        run: |
+          cargo install cargo-machete --locked
+          cargo install cargo-udeps --locked
+          rustup toolchain install nightly-2026-02-01 --component rust-src
+          cargo machete
+          cargo +nightly-2026-02-01 udeps --all-targets
 
       - name: Build native
         working-directory: apexchainx_calculator
@@ -72,12 +121,309 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
 
       - name: Run tests
         working-directory: apexchainx_calculator
         run: cargo test --lib
+
+      # Issue #255: Result schema migration guardrail.
+      # schema_migration_tests.rs contains a compile-time exhaustive SLAResult
+      # destructure and runtime assertions that RESULT_SCHEMA_VERSION and
+      # RESULT_SCHEMA_FIELD_COUNT match the actual struct layout and the values
+      # returned by get_result_schema(). Any PR that modifies SLAResult without
+      # updating both constants will fail here.
+      # See: docs/result-schema-migration-guard.md
+      - name: Result schema migration guard
+        working-directory: apexchainx_calculator
+        run: cargo test --lib schema_migration_tests
+
+      # Issue #81: Normalize snapshot artifacts before upload so that volatile
+      # fields (timestamp, elapsed_ms, generated_at) are stripped and keys are
+      # sorted. This prevents noisy PR diffs caused by non-semantic changes.
+      - name: Normalize snapshot artifacts
+        run: npx --yes tsx tools/normalize-snapshots.ts
+
+      - name: Upload snapshot artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sla-test-snapshots
+          path: apexchainx_calculator/test_snapshots/tests/
+          retention-days: 30
+
+  fuzz-tests:
+    name: Fuzz Tests (proptest)
+    runs-on: ubuntu-latest
+    # Cold builds (first run without cache) need more than 2 minutes; the
+    # proptest cases themselves run quickly once compiled.
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: fuzz-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            fuzz-${{ runner.os }}-cargo-
+
+      - name: Run property-based fuzz tests
+        working-directory: apexchainx_calculator
+        run: "cargo test --lib fuzz_tests::"
+
+  # Issue #388: run the config-mutation-sequence fuzz target for a fixed number
+  # of iterations as a regression test. A fixed seed keeps the run reproducible;
+  # this is a bounded regression (not an unbounded campaign — see fuzz.yml for
+  # the nightly long-running campaign).
+  fuzz-regression:
+    name: Fuzz Regression (config mutation sequences)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apexchainx_calculator/fuzz/target
+          key: fuzz-regression-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            fuzz-regression-${{ runner.os }}-cargo-
+
+      # `cargo fuzz run <target>` builds only the named target, so a target
+      # that stops compiling stays invisible on PRs and the nightly campaign in
+      # fuzz.yml swallows the error. `cargo fuzz build` builds all of them, and
+      # this job already has nightly and cargo-fuzz installed, so it is nearly
+      # free here. See docs/FUZZING_GUARANTEES.md.
+      - name: Build all fuzz targets
+        working-directory: apexchainx_calculator/fuzz
+        run: cargo +nightly fuzz build
+
+      - name: Run config mutation sequence fuzz target (fixed iterations)
+        working-directory: apexchainx_calculator/fuzz
+        run: cargo +nightly fuzz run config_mutation_sequences -- -runs=10000 -seed=388
+
+  # Issue: ts/ reimplements contract read semantics in TypeScript. This job is
+  # the mechanism that stops the two drifting: it regenerates the
+  # contract-derived artefacts from live contract behaviour, fails if that
+  # produces an uncommitted diff (a Rust change that never reached TypeScript),
+  # then replays the recorded inputs through the TypeScript helpers.
+  # See docs/TS_PARITY_CONTRACT.md.
+  ts-parity:
+    name: TS Parity (contract-derived fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ts-parity-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ts-parity-${{ runner.os }}-cargo-
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Regenerate contract-derived artifacts
+        working-directory: apexchainx_calculator
+        run: cargo test --lib ts_parity_fixtures
+
+      - name: Fail if the committed artifacts are stale
+        run: |
+          if ! git diff --quiet -- ts/fixtures ts/generated; then
+            echo "::error::Contract-derived TS artifacts are stale. A read semantic changed in Rust but ts/fixtures and ts/generated were not regenerated and committed. Run 'just ts-fixtures' and commit the result."
+            git --no-pager diff -- ts/fixtures ts/generated
+            exit 1
+          fi
+
+      - name: Type-check the ts/ helpers
+        run: npx tsc --noEmit
+
+      - name: Run the TypeScript parity suite
+        run: npx tsx --test ts/parity/readSemanticsParity.test.ts
+
+  # Issue #490: Run the orphaned TypeScript property/regression test suite.
+  # These tests assert cross-language parity, simulation reproducibility,
+  # and behavioral invariants that cargo test does not cover.
+  ts-property-tests:
+    name: TS Property Tests (tests/*.test.ts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run property/regression test suite
+        run: npx tsx --test tests/*.test.ts
+
+  # Issue #490: Run offchain budget/regression checks (event size, read cost,
+  # governance consistency, metadata). Each script exits non-zero on failure.
+  offchain-checks:
+    name: Offchain Budget Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run event-size regression checks
+        run: npx tsx offchain/eventSizeRegression.ts
+
+      - name: Run read-cost regression checks (baseline-gated)
+        run: npx tsx offchain/readCostRegression.ts
+
+      # Issue #614: publish the before/after read-cost measurements so a
+      # regression that sneaks past (or the budget that saved us) is diffable
+      # in the build artifacts instead of living only in the log line.
+      - name: Upload read-cost measurements (before/after)
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-cost-measurements
+          path: offchain/readCostMeasurements.json
+          retention-days: 30
+
+      - name: Upload read-cost baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: read-cost-baseline
+          path: offchain/readCostBaseline.json
+          retention-days: 30
+
+      - name: Run governance consistency checks
+        run: npx tsx offchain/governanceConsistency.ts
+
+      - name: Run contract metadata checks
+        run: npx tsx offchain/contractMetadata.ts
+
+      # Issue #631: the persistence scenario fixtures must regenerate
+      # deterministically and stay in lockstep with the schema that produces
+      # them. generate-fixtures.ts exits non-zero when the committed
+      # pers-store/fixtures/persistence-fixtures.json is stale, so a schema
+      # change that never reached the fixtures fails this job.
+      - name: Verify persistence scenario fixtures are fresh
+        run: npx tsx pers-store/generate-fixtures.ts
+
+  release-tests:
+    name: Release Tests (#90)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: release-test-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            release-test-${{ runner.os }}-cargo-
+
+      - name: Run tests with --release (#90)
+        working-directory: apexchainx_calculator
+        run: cargo test --release --lib
+
+
+  parity-check:
+    name: Parity Check (canonical baseline)
+    runs-on: ubuntu-latest
+    # This job is a release gate: it verifies that the current compute_result
+    # implementation produces identical outputs to the locked-in historical
+    # golden vectors in test_snapshots/tests/parity_baseline.json.
+    # A failure here means a calculation regression has been introduced and
+    # must be reviewed before merging or cutting a release.
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@1.94.1
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: parity-${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            parity-${{ runner.os }}-cargo-
+
+      - name: Run parity checker against canonical baseline
+        working-directory: apexchainx_calculator
+        run: "cargo test --lib parity_tests::"
+
+      - name: Upload parity baseline as artifact (for release traceability)
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-baseline
+          path: apexchainx_calculator/test_snapshots/tests/parity_baseline.json
+          retention-days: 90
+
 
   provenance-hashes:
     name: Provenance & Hashes
@@ -92,25 +438,21 @@ jobs:
         with:
           targets: wasm32-unknown-unknown
 
-      - name: Build WASM release
-        working-directory: apexchainx_calculator
-        run: cargo build --target wasm32-unknown-unknown --release
+      - name: Install just
+        run: cargo install just
 
-      - name: Generate hash
-        run: |
-          WASM=target/wasm32-unknown-unknown/release/apexchainx_calculator.wasm
-          if [ -f "$WASM" ]; then
-            sha256sum "$WASM" | awk '{print $1 "  apexchainx_calculator.wasm"}' > provenance.sha256
-            echo "Hash generated successfully"
-            cat provenance.sha256
-          else
-            echo "WASM file not found at $WASM"
-            exit 1
-          fi
+      - name: Generate and save hash
+        run: just hash-save
 
+      - name: Verify hash against committed file
+        run: just hash-verify
+        continue-on-error: true
+      # `just hash-save` above already writes the hash to
+      # artifacts/apexchainx_calculator.wasm.sha256, which the upload step
+      # below publishes. No additional generation step is needed.
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: pr-provenance-hash
-          path: provenance.sha256
+          path: artifacts/apexchainx_calculator.wasm.sha256
           retention-days: 30

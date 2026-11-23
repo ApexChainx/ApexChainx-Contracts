@@ -1,0 +1,61 @@
+{
+  "candidate": "bbbb137778d5a53f0a317cda5dd85e3571d4b4da",
+  "generatedAt": "2026-09-27T11:30:48.290Z",
+  "results": [
+    {
+      "gate": "candidate-clean",
+      "status": "PASS",
+      "log": "candidate-clean.log"
+    },
+    {
+      "gate": "nightly-fuzz",
+      "status": "FAIL",
+      "log": "nightly-fuzz.log"
+    },
+    {
+      "gate": "fixture-freshness",
+      "status": "PASS",
+      "log": "fixture-freshness.log"
+    },
+    {
+      "gate": "parity-coverage",
+      "status": "PASS",
+      "log": "parity-coverage.log"
+    },
+    {
+      "gate": "ts-typecheck",
+      "status": "PASS",
+      "log": "ts-typecheck.log"
+    },
+    {
+      "gate": "ts-parity",
+      "status": "PASS",
+      "log": "ts-parity.log"
+    },
+    {
+      "gate": "offchain-eventSizeRegression",
+      "status": "PASS",
+      "log": "offchain-eventSizeRegression.log"
+    },
+    {
+      "gate": "offchain-readCostRegression",
+      "status": "PASS",
+      "log": "offchain-readCostRegression.log"
+    },
+    {
+      "gate": "offchain-governanceConsistency",
+      "status": "PASS",
+      "log": "offchain-governanceConsistency.log"
+    },
+    {
+      "gate": "offchain-contractMetadata",
+      "status": "PASS",
+      "log": "offchain-contractMetadata.log"
+    },
+    {
+      "gate": "persistence-freshness",
+      "status": "PASS",
+      "log": "persistence-freshness.log"
+    }
+  ]
+}

@@ -3,6 +3,9 @@
  * Verifies that submitting the same outage report twice yields the same result.
  */
 
+
+import { describe, it, beforeEach } from "node:test";
+import assert from "node:assert/strict";
 interface OutageReport { id: string; mttr: number; severity: string }
 type SubmitResult = "accepted" | "duplicate" | "invalid";
 
@@ -26,29 +29,29 @@ describe("SC-W5-069 Idempotent Duplicate Submissions", () => {
 
   it("first submission is accepted", () => {
     for (const r of SAMPLE_REPORTS) {
-      expect(submitOutage(r)).toBe("accepted");
+      assert.strictEqual(submitOutage(r), "accepted");
     }
   });
 
   it("duplicate submission returns duplicate — not accepted again", () => {
     submitOutage(SAMPLE_REPORTS[0]);
-    expect(submitOutage(SAMPLE_REPORTS[0])).toBe("duplicate");
+    assert.strictEqual(submitOutage(SAMPLE_REPORTS[0]), "duplicate");
   });
 
   it("idempotent: repeated duplicate calls always return duplicate", () => {
     submitOutage(SAMPLE_REPORTS[1]);
-    expect(submitOutage(SAMPLE_REPORTS[1])).toBe("duplicate");
-    expect(submitOutage(SAMPLE_REPORTS[1])).toBe("duplicate");
+    assert.strictEqual(submitOutage(SAMPLE_REPORTS[1]), "duplicate");
+    assert.strictEqual(submitOutage(SAMPLE_REPORTS[1]), "duplicate");
   });
 
   it("negative mttr is rejected as invalid", () => {
-    expect(submitOutage({ id: "bad-001", mttr: -1, severity: "high" })).toBe("invalid");
+    assert.strictEqual(submitOutage({ id: "bad-001", mttr: -1, severity: "high" }), "invalid");
   });
 
   it("distinct ids are each accepted once", () => {
     for (const r of SAMPLE_REPORTS) {
-      expect(submitOutage(r)).toBe("accepted");
+      assert.strictEqual(submitOutage(r), "accepted");
     }
-    expect(submitted.size).toBe(SAMPLE_REPORTS.length);
+    assert.strictEqual(submitted.size, SAMPLE_REPORTS.length);
   });
 });

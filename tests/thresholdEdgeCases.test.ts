@@ -3,7 +3,9 @@
  * Documents and validates contract policy for boundary MTTR inputs.
  */
 
-import { describe, it, expect } from '@jest/globals';
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 
 
 interface SlaConfig {
@@ -35,20 +37,20 @@ const CONFIGS: Record<Severity, SlaConfig> = {
 describe("SC-046 Threshold Edge Cases", () => {
   it("zero MTTR always meets any positive threshold", () => {
     for (const severity of CANONICAL_SEVERITIES) {
-      expect(evaluateSla(0, CONFIGS[severity])).toBe("met");
+      assert.strictEqual(evaluateSla(0, CONFIGS[severity]), "met");
     }
   });
 
   it("MTTR of 1 meets threshold when threshold >= 1", () => {
     for (const severity of CANONICAL_SEVERITIES) {
-      expect(evaluateSla(1, CONFIGS[severity])).toBe("met");
+      assert.strictEqual(evaluateSla(1, CONFIGS[severity]), "met");
     }
   });
 
   it("MTTR exactly at threshold is met (inclusive boundary)", () => {
     for (const severity of CANONICAL_SEVERITIES) {
       const cfg = CONFIGS[severity];
-      expect(evaluateSla(cfg.threshold, cfg)).toBe("met");
+      assert.strictEqual(evaluateSla(cfg.threshold, cfg), "met");
     }
   });
 
@@ -56,43 +58,43 @@ describe("SC-046 Threshold Edge Cases", () => {
     for (const cfg of Object.values(CONFIGS)) {
       const first = evaluateSla(cfg.threshold, cfg);
       const second = evaluateSla(cfg.threshold, cfg);
-      expect(first).toBe("met");
-      expect(second).toBe("met");
-      expect(second).toBe(first);
+      assert.strictEqual(first, "met");
+      assert.strictEqual(second, "met");
+      assert.strictEqual(second, first);
     }
   });
 
   it("MTTR one above threshold is violated", () => {
       for (const severity of CANONICAL_SEVERITIES) {
         const cfg = CONFIGS[severity];
-        expect(evaluateSla(cfg.threshold + 1, cfg)).toBe("violated");
+        assert.strictEqual(evaluateSla(cfg.threshold + 1, cfg), "violated");
       }
 
   });
 
   it("exact threshold does not drift into violation due to boundary math", () => {
     for (const cfg of Object.values(CONFIGS)) {
-      expect(evaluateSla(cfg.threshold, cfg)).not.toBe("violated");
-      expect(evaluateSla(cfg.threshold + 1, cfg)).toBe("violated");
+      assert.notStrictEqual(evaluateSla(cfg.threshold, cfg), "violated");
+      assert.strictEqual(evaluateSla(cfg.threshold + 1, cfg), "violated");
     }
   });
 
   it("zero threshold is rejected as invalid — not a silent pass", () => {
-    expect(evaluateSla(0, { threshold: 0, penaltyBps: 100 })).toBe("invalid");
-    expect(evaluateSla(1, { threshold: 0, penaltyBps: 100 })).toBe("invalid");
+    assert.strictEqual(evaluateSla(0, { threshold: 0, penaltyBps: 100 }), "invalid");
+    assert.strictEqual(evaluateSla(1, { threshold: 0, penaltyBps: 100 }), "invalid");
   });
 
   it("negative MTTR is rejected as invalid", () => {
-    expect(evaluateSla(-1, CONFIGS['critical'])).toBe("invalid");
+    assert.strictEqual(evaluateSla(-1, CONFIGS['critical']), "invalid");
   });
 
   it("uses a documented canonical severity order for backend fixtures", () => {
-    expect(CANONICAL_SEVERITIES).toEqual(["critical", "high", "medium"]);
-    expect(Object.keys(CONFIGS)).toEqual([...CANONICAL_SEVERITIES]);
+    assert.deepStrictEqual(CANONICAL_SEVERITIES, ["critical", "high", "medium"]);
+    assert.deepStrictEqual(Object.keys(CONFIGS), [...CANONICAL_SEVERITIES]);
   });
 
   it("near-zero MTTR (0.001) treated as zero — rounds to met", () => {
     const nearZero = Math.floor(0.001); // contract uses integer minutes
-    expect(evaluateSla(nearZero, CONFIGS['critical'])).toBe("met");
+    assert.strictEqual(evaluateSla(nearZero, CONFIGS['critical']), "met");
   });
 });

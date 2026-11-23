@@ -1,0 +1,2 @@
+    Checking apexchainx_calculator v0.1.0 (C:\Users\PC\Documents\fun\ApexChainx-Contracts\validation-results\release-preflight\apexchainx_calculator)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 27.71s

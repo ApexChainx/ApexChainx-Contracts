@@ -7,21 +7,23 @@
 //!   and do NOT require a version bump.
 //! - Old consumers can safely ignore unrecognised trailing fields.
 //!
-//! The current canonical event version is "v1" (EVENT_VERSION).
+//! Event schema versions are resolved independently by event name.
 
 #[cfg(test)]
 mod payload_versioning_tests {
+    #![allow(
+        clippy::module_inception,
+        clippy::len_zero,
+        clippy::unnecessary_unwrap,
+        clippy::type_complexity
+    )]
+    use crate::{SLACalculatorContract, SLACalculatorContractClient, EVENT_SETTLE_INTENT, EVENT_SLA_CALC};
     use soroban_sdk::{
-        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol,
-        TryIntoVal,
-    };
-    use crate::{
-        EVENT_CONFIG_UPD, EVENT_PAUSED, EVENT_PRUNED, EVENT_PRUNED_AGE, EVENT_SETTLE_INTENT,
-        EVENT_SLA_CALC, EVENT_UNPAUSED, EVENT_VERSION, SLACalculatorContract,
-        SLACalculatorContractClient,
+        symbol_short, testutils::Address as _, testutils::Events, Address, Env, Symbol, TryIntoVal,
     };
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -33,9 +35,11 @@ mod payload_versioning_tests {
     // ── sla_calc payload versioning ─────────────────────────────────────
 
     #[test]
-    fn test_sla_calc_payload_has_seven_fields() {
-        // sla_calc payload: (outage_id, status, payment_type, rating, mttr, threshold, amount)
-        // This is the canonical 7-field format. Adding fields would be backward-compatible.
+    fn test_sla_calc_payload_has_nine_fields() {
+        // sla_calc payload: (outage_id, status, mttr_minutes, threshold_minutes,
+        //   amount, payment_type, rating, config_version_hash, recorded_at)
+        // This is the canonical 9-field format (#429), shared with set_int and
+        // dup_input so indexers parse one layout.
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
@@ -54,21 +58,19 @@ mod payload_versioning_tests {
             }
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_SLA_CALC {
-                // Canonical 7-field payload must decode without error
-                let payload: Result<(Symbol, Symbol, Symbol, Symbol, u32, u32, i128), _> =
+                // Canonical 9-field payload must decode without error
+                let payload: Result<(Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64), _> =
                     data.try_into_val(&env);
-                assert!(
-                    payload.is_ok(),
-                    "sla_calc payload must decode as 7-field tuple"
-                );
-                let (outage_id, status, ptype, rating, mttr, threshold, amount) = payload.unwrap();
+                assert!(payload.is_ok(), "sla_calc payload must decode as 9-field tuple");
+                let (outage_id, status, mttr, threshold, amount, ptype, rating, _cfg, _recorded) =
+                    payload.unwrap();
                 assert_eq!(outage_id, symbol_short!("VERSION1"));
                 assert_eq!(status, symbol_short!("met"));
-                assert_eq!(ptype, symbol_short!("rew"));
-                assert_eq!(rating, symbol_short!("top"));
                 assert_eq!(mttr, 5u32);
                 assert_eq!(threshold, 15u32);
                 assert_eq!(amount, 1500i128);
+                assert_eq!(ptype, symbol_short!("rew"));
+                assert_eq!(rating, symbol_short!("top"));
                 return;
             }
         }
@@ -78,8 +80,12 @@ mod payload_versioning_tests {
     // ── set_int payload versioning ──────────────────────────────────────
 
     #[test]
-    fn test_settle_intent_payload_has_six_fields() {
-        // set_int payload: (outage_id, status, payment_type, amount, config_hash, recorded_at)
+    fn test_settle_intent_payload_carries_correlation_id() {
+        // set_int carries the full decision, sharing the canonical field order
+        // (#429) with sla_calc, PLUS a trailing correlation_id field (#566):
+        //   (outage_id, status, mttr_minutes, threshold_minutes, amount,
+        //    payment_type, rating, config_version_hash, recorded_at,
+        //    correlation_id)
         let env = Env::default();
         let (_, operator, client) = setup(&env);
 
@@ -98,12 +104,33 @@ mod payload_versioning_tests {
             }
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_SETTLE_INTENT {
-                // 6-field payload must decode without error
-                let payload: Result<(Symbol, Symbol, Symbol, i128, u64, u64), _> =
+                // 10-field payload (9 canonical + correlation_id) must decode
+                let payload: Result<(Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64, u64), _> =
                     data.try_into_val(&env);
                 assert!(
                     payload.is_ok(),
-                    "set_int payload must decode as 6-field tuple"
+                    "set_int payload must decode as the 10-field tuple"
+                );
+                let (
+                    _outage_id,
+                    _status,
+                    _mttr,
+                    _threshold,
+                    _amount,
+                    _ptype,
+                    _rating,
+                    _cfg,
+                    _recorded,
+                    correlated,
+                ) = payload.unwrap();
+                let expected = crate::event_correlation::generate_correlation_id(
+                    &env,
+                    &symbol_short!("VERSION2"),
+                    env.ledger().sequence(),
+                );
+                assert_eq!(
+                    correlated, expected,
+                    "#566: set_int must carry generate_correlation_id's output"
                 );
                 return;
             }
@@ -143,7 +170,7 @@ mod payload_versioning_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
 
         let events = env.events().all();
         let (_, _, data) = events.last().unwrap();
@@ -156,7 +183,7 @@ mod payload_versioning_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
 
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         let events = env.events().all();
@@ -170,19 +197,16 @@ mod payload_versioning_tests {
     #[test]
     fn test_prune_payload_is_two_u32s() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         let operator = Address::generate(&env);
         client.initialize(&admin, &operator);
 
-        for _ in 0..5u32 {
-            client.calculate_sla(
-                &operator,
-                &symbol_short!("PR_VER"),
-                &symbol_short!("low"),
-                &10,
-            );
+        for i in 0..5u32 {
+            let id = Symbol::new(&env, &alloc::format!("PR_VER{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("low"), &10);
         }
 
         client.prune_history(&admin, &2);
@@ -207,7 +231,7 @@ mod payload_versioning_tests {
             &5,
         );
         client.set_config(&admin, &symbol_short!("critical"), &20, &200, &1000);
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
 
         let events = env.events().all();
@@ -216,8 +240,9 @@ mod payload_versioning_tests {
             if topics.len() >= 2 {
                 let version: Symbol = topics.get(1).unwrap().try_into_val(&env).unwrap();
                 assert_eq!(
-                    version, EVENT_VERSION,
-                    "All events must use the current event version"
+                    version,
+                    crate::event_schema::event_version(topics.get(0).unwrap().try_into_val(&env).unwrap()),
+                    "topic[1] must match the per-name schema"
                 );
             }
         }
@@ -249,9 +274,9 @@ mod payload_versioning_tests {
             }
             let name: Symbol = topics.get(0).unwrap().try_into_val(&env).unwrap();
             if name == EVENT_SLA_CALC {
-                let payload: (Symbol, Symbol, Symbol, Symbol, u32, u32, i128) =
+                let payload: (Symbol, Symbol, u32, u32, i128, Symbol, Symbol, u64, u64) =
                     data.try_into_val(&env).unwrap();
-                assert_eq!(payload.6, result.amount, "Event amount must match result");
+                assert_eq!(payload.4, result.amount, "Event amount must match result");
                 return;
             }
         }
@@ -289,6 +314,6 @@ mod payload_versioning_tests {
         let env = Env::default();
         let (_admin, _operator, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.pause(&stranger);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
     }
 }

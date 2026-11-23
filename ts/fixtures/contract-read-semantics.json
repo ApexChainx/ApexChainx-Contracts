@@ -1,0 +1,559 @@
+{
+  "$comment": "GENERATED FILE - do not edit by hand. Regenerate with `cargo test -p apexchainx_calculator ts_parity_fixtures` (or `just ts-fixtures`). Every value below was produced by executing the contract in a Soroban Env; see apexchainx_calculator/src/ts_parity_fixtures.rs and docs/TS_PARITY_CONTRACT.md.",
+  "generator": "apexchainx_calculator/src/ts_parity_fixtures.rs",
+  "constants": {
+    "maxPageSize": 200,
+    "maxHistorySize": 1000,
+    "maxRecalcsPerOutage": 16,
+    "defaultRetentionLimit": 1000,
+    "resultSchemaVersion": 2,
+    "resultFieldCount": 9,
+    "historyEntries": 250,
+    "detailedHistoryEntries": 28
+  },
+  "symbols": {
+    "status.met": "met",
+    "status.violated": "viol",
+    "payment.reward": "rew",
+    "payment.penalty": "pen",
+    "rating.top": "top",
+    "rating.excellent": "excel",
+    "rating.good": "good",
+    "rating.poor": "poor",
+    "severity.critical": "critical",
+    "severity.high": "high",
+    "severity.medium": "medium",
+    "severity.low": "low"
+  },
+  "eventTopics": {
+    "slaCalculated": "sla_calc",
+    "settlementIntent": "set_int",
+    "duplicateInput": "dup_input",
+    "configUpdated": "cfg_upd",
+    "configRemoved": "cfg_rem",
+    "severityAdded": "sev_add",
+    "severityUpdated": "sev_upd",
+    "pruned": "pruned",
+    "prunedByAge": "pruned_a",
+    "retentionLimitSet": "ret_lim"
+  },
+  "eventVersion": "v2",
+  "eventVersions": {
+    "sla_calc": "v1",
+    "set_int": "v2",
+    "cfg_upd": "v1",
+    "cfg_rem": "v1",
+    "sev_add": "v1",
+    "sev_upd": "v1",
+    "paused": "v1",
+    "unpause": "v1",
+    "op_set": "v1",
+    "pruned": "v1",
+    "pruned_a": "v1",
+    "adm_prop": "v1",
+    "adm_acc": "v1",
+    "adm_can": "v1",
+    "adm_ren": "v1",
+    "op_prop": "v1",
+    "op_acc": "v1",
+    "op_can": "v1",
+    "adm_sup": "v1",
+    "adm_xp": "v1",
+    "op_sup": "v1",
+    "op_xp": "v1",
+    "cfg_frz": "v1",
+    "cfg_unfrz": "v1",
+    "stats_sat": "v1",
+    "dup_input": "v1",
+    "mig_done": "v1",
+    "ret_lim": "v1"
+  },
+  "configSnapshot": {
+    "versionHash": "1417728228875630226",
+    "entries": [
+      {
+        "severity": "critical",
+        "thresholdMinutes": 15,
+        "penaltyPerMinute": "100",
+        "rewardBase": "750"
+      },
+      {
+        "severity": "high",
+        "thresholdMinutes": 30,
+        "penaltyPerMinute": "50",
+        "rewardBase": "750"
+      },
+      {
+        "severity": "medium",
+        "thresholdMinutes": 60,
+        "penaltyPerMinute": "25",
+        "rewardBase": "750"
+      },
+      {
+        "severity": "low",
+        "thresholdMinutes": 120,
+        "penaltyPerMinute": "10",
+        "rewardBase": "600"
+      }
+    ]
+  },
+  "history": [
+    {
+      "outageId": "o000",
+      "mttrMinutes": 0,
+      "thresholdMinutes": 15,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700000000"
+    },
+    {
+      "outageId": "o001",
+      "mttrMinutes": 5,
+      "thresholdMinutes": 30,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700000060"
+    },
+    {
+      "outageId": "o002",
+      "mttrMinutes": 14,
+      "thresholdMinutes": 60,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700000120"
+    },
+    {
+      "outageId": "o003",
+      "mttrMinutes": 29,
+      "thresholdMinutes": 120,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1200",
+      "recordedAt": "1700000180"
+    },
+    {
+      "outageId": "o004",
+      "mttrMinutes": 45,
+      "thresholdMinutes": 15,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-3000",
+      "recordedAt": "1700000240"
+    },
+    {
+      "outageId": "o005",
+      "mttrMinutes": 90,
+      "thresholdMinutes": 30,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-3000",
+      "recordedAt": "1700000300"
+    },
+    {
+      "outageId": "o006",
+      "mttrMinutes": 200,
+      "thresholdMinutes": 60,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-3500",
+      "recordedAt": "1700000360"
+    },
+    {
+      "outageId": "o007",
+      "mttrMinutes": 0,
+      "thresholdMinutes": 120,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1200",
+      "recordedAt": "1700000420"
+    },
+    {
+      "outageId": "o008",
+      "mttrMinutes": 5,
+      "thresholdMinutes": 15,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700000480"
+    },
+    {
+      "outageId": "o009",
+      "mttrMinutes": 14,
+      "thresholdMinutes": 30,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700000540"
+    },
+    {
+      "outageId": "o010",
+      "mttrMinutes": 29,
+      "thresholdMinutes": 60,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700000600"
+    },
+    {
+      "outageId": "o011",
+      "mttrMinutes": 45,
+      "thresholdMinutes": 120,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1200",
+      "recordedAt": "1700000660"
+    },
+    {
+      "outageId": "o012",
+      "mttrMinutes": 90,
+      "thresholdMinutes": 15,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-7500",
+      "recordedAt": "1700000720"
+    },
+    {
+      "outageId": "o013",
+      "mttrMinutes": 200,
+      "thresholdMinutes": 30,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-8500",
+      "recordedAt": "1700000780"
+    },
+    {
+      "outageId": "o014",
+      "mttrMinutes": 0,
+      "thresholdMinutes": 60,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700000840"
+    },
+    {
+      "outageId": "o015",
+      "mttrMinutes": 5,
+      "thresholdMinutes": 120,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1200",
+      "recordedAt": "1700000900"
+    },
+    {
+      "outageId": "o016",
+      "mttrMinutes": 14,
+      "thresholdMinutes": 15,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "good",
+      "amount": "750",
+      "recordedAt": "1700000960"
+    },
+    {
+      "outageId": "o017",
+      "mttrMinutes": 29,
+      "thresholdMinutes": 30,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "good",
+      "amount": "750",
+      "recordedAt": "1700001020"
+    },
+    {
+      "outageId": "o018",
+      "mttrMinutes": 45,
+      "thresholdMinutes": 60,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "good",
+      "amount": "750",
+      "recordedAt": "1700001080"
+    },
+    {
+      "outageId": "o019",
+      "mttrMinutes": 90,
+      "thresholdMinutes": 120,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "good",
+      "amount": "600",
+      "recordedAt": "1700001140"
+    },
+    {
+      "outageId": "o020",
+      "mttrMinutes": 200,
+      "thresholdMinutes": 15,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-18500",
+      "recordedAt": "1700001200"
+    },
+    {
+      "outageId": "o021",
+      "mttrMinutes": 0,
+      "thresholdMinutes": 30,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700001260"
+    },
+    {
+      "outageId": "o022",
+      "mttrMinutes": 5,
+      "thresholdMinutes": 60,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1500",
+      "recordedAt": "1700001320"
+    },
+    {
+      "outageId": "o023",
+      "mttrMinutes": 14,
+      "thresholdMinutes": 120,
+      "status": "met",
+      "paymentType": "rew",
+      "rating": "top",
+      "amount": "1200",
+      "recordedAt": "1700001380"
+    },
+    {
+      "outageId": "o024",
+      "mttrMinutes": 29,
+      "thresholdMinutes": 15,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-1400",
+      "recordedAt": "1700001440"
+    },
+    {
+      "outageId": "o025",
+      "mttrMinutes": 45,
+      "thresholdMinutes": 30,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-750",
+      "recordedAt": "1700001500"
+    },
+    {
+      "outageId": "o026",
+      "mttrMinutes": 90,
+      "thresholdMinutes": 60,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-750",
+      "recordedAt": "1700001560"
+    },
+    {
+      "outageId": "o027",
+      "mttrMinutes": 200,
+      "thresholdMinutes": 120,
+      "status": "viol",
+      "paymentType": "pen",
+      "rating": "poor",
+      "amount": "-800",
+      "recordedAt": "1700001620"
+    }
+  ],
+  "paginationCases": [
+    {
+      "offset": 0,
+      "limit": 1,
+      "pageLength": 1,
+      "total": 250,
+      "hasMore": true,
+      "firstMttr": 0,
+      "lastMttr": 0
+    },
+    {
+      "offset": 0,
+      "limit": 10,
+      "pageLength": 10,
+      "total": 250,
+      "hasMore": true,
+      "firstMttr": 0,
+      "lastMttr": 14
+    },
+    {
+      "offset": 10,
+      "limit": 10,
+      "pageLength": 10,
+      "total": 250,
+      "hasMore": true,
+      "firstMttr": 29,
+      "lastMttr": 90
+    },
+    {
+      "offset": 0,
+      "limit": 200,
+      "pageLength": 200,
+      "total": 250,
+      "hasMore": true,
+      "firstMttr": 0,
+      "lastMttr": 29
+    },
+    {
+      "offset": 0,
+      "limit": 201,
+      "pageLength": 200,
+      "total": 250,
+      "hasMore": true,
+      "firstMttr": 0,
+      "lastMttr": 29
+    },
+    {
+      "offset": 0,
+      "limit": 4294967295,
+      "pageLength": 200,
+      "total": 250,
+      "hasMore": true,
+      "firstMttr": 0,
+      "lastMttr": 29
+    },
+    {
+      "offset": 100,
+      "limit": 200,
+      "pageLength": 150,
+      "total": 250,
+      "hasMore": false,
+      "firstMttr": 14,
+      "lastMttr": 45
+    },
+    {
+      "offset": 240,
+      "limit": 10,
+      "pageLength": 10,
+      "total": 250,
+      "hasMore": false,
+      "firstMttr": 14,
+      "lastMttr": 45
+    },
+    {
+      "offset": 240,
+      "limit": 50,
+      "pageLength": 10,
+      "total": 250,
+      "hasMore": false,
+      "firstMttr": 14,
+      "lastMttr": 45
+    },
+    {
+      "offset": 249,
+      "limit": 5,
+      "pageLength": 1,
+      "total": 250,
+      "hasMore": false,
+      "firstMttr": 45,
+      "lastMttr": 45
+    },
+    {
+      "offset": 250,
+      "limit": 5,
+      "pageLength": 0,
+      "total": 250,
+      "hasMore": false,
+      "firstMttr": null,
+      "lastMttr": null
+    },
+    {
+      "offset": 0,
+      "limit": 0,
+      "pageLength": 0,
+      "total": 250,
+      "hasMore": false,
+      "firstMttr": null,
+      "lastMttr": null
+    },
+    {
+      "offset": 5,
+      "limit": 0,
+      "pageLength": 0,
+      "total": 250,
+      "hasMore": false,
+      "firstMttr": null,
+      "lastMttr": null
+    },
+    {
+      "offset": 4294967295,
+      "limit": 4294967295,
+      "pageLength": 0,
+      "total": 250,
+      "hasMore": false,
+      "firstMttr": null,
+      "lastMttr": null
+    }
+  ],
+  "byOutageCases": [
+    {
+      "outageId": "o000",
+      "matchCount": 1,
+      "latestMttr": 0
+    },
+    {
+      "outageId": "o007",
+      "matchCount": 1,
+      "latestMttr": 0
+    },
+    {
+      "outageId": "o249",
+      "matchCount": 1,
+      "latestMttr": 45
+    },
+    {
+      "outageId": "o999",
+      "matchCount": 0,
+      "latestMttr": null
+    }
+  ],
+  "pruneByAgeCases": [
+    {
+      "now": "1700014940",
+      "minAgeSeconds": "1700014939",
+      "keptCount": 250
+    },
+    {
+      "now": "1700014940",
+      "minAgeSeconds": "15000",
+      "keptCount": 250
+    },
+    {
+      "now": "1700014940",
+      "minAgeSeconds": "3600",
+      "keptCount": 61
+    },
+    {
+      "now": "1700014940",
+      "minAgeSeconds": "600",
+      "keptCount": 11
+    },
+    {
+      "now": "1700014940",
+      "minAgeSeconds": "0",
+      "keptCount": 1
+    }
+  ]
+}

@@ -1,0 +1,514 @@
+/// Schema migration guardrail tests for `get_result_schema()` (#255).
+///
+/// These tests act as a CI-backed safety net that prevents `SLAResult` layout
+/// changes from being merged without a deliberate, reviewed schema version bump.
+///
+/// # How the guard works
+///
+/// 1. `RESULT_SCHEMA_FIELD_COUNT` in `lib.rs` records the number of named fields
+///    in `SLAResult`.
+/// 2. `RESULT_SCHEMA_VERSION` records the breaking-change counter.
+/// 3. The tests below assert that both constants match the actual struct shape
+///    and the values returned by `get_result_schema()`.
+///
+/// If a contributor adds or removes a field from `SLAResult` without updating
+/// `RESULT_SCHEMA_FIELD_COUNT` and `RESULT_SCHEMA_VERSION`, the sentinel test
+/// `test_result_schema_field_count_sentinel` will fail — surfacing the oversight
+/// before the PR lands.
+///
+/// # What to do when changing `SLAResult`
+///
+/// See `docs/result-schema-migration-guard.md` for the full migration checklist.
+/// Quick summary:
+///
+///   1. Add / remove / change the field in `SLAResult`.
+///   2. Update `RESULT_SCHEMA_FIELD_COUNT` to the new field count.
+///   3. Increment `RESULT_SCHEMA_VERSION` (breaking schema change).
+///   4. Update `get_result_schema()` if a new symbol descriptor is warranted.
+///   5. Add a CHANGELOG entry under `[Unreleased]` → `Changed`.
+///   6. Update the `expected_fields` list in
+///      `test_result_schema_symbols_are_stable` if a symbol changes.
+#[cfg(test)]
+mod tests {
+    use crate::{
+        SLACalculatorContract, SLACalculatorContractClient, CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT,
+        CONFIG_SNAPSHOT_SCHEMA_VERSION, RESULT_SCHEMA_FIELD_COUNT, RESULT_SCHEMA_VERSION,
+    };
+    use soroban_sdk::{testutils::Address as _, Env, Symbol};
+
+    // -----------------------------------------------------------------------
+    // Helpers
+    // -----------------------------------------------------------------------
+
+    fn setup() -> (Env, SLACalculatorContractClient<'static>) {
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &cid);
+        let admin = soroban_sdk::Address::generate(&env);
+        let operator = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin, &operator);
+        (env, client)
+    }
+
+    // -----------------------------------------------------------------------
+    // Sentinel: field count must match RESULT_SCHEMA_FIELD_COUNT
+    // -----------------------------------------------------------------------
+
+    /// **Migration guardrail — CI gate.**
+    ///
+    /// This test counts the fields of `SLAResult` by name and asserts the
+    /// count equals `RESULT_SCHEMA_FIELD_COUNT`.  It will fail if a field is
+    /// added, removed, or renamed without updating the constant.
+    ///
+    /// `SLAResult` currently has 9 fields:
+    ///   outage_id, status, mttr_minutes, threshold_minutes, amount,
+    ///   payment_type, rating, config_version_hash, recorded_at
+    ///
+    /// Update `RESULT_SCHEMA_FIELD_COUNT` in `lib.rs` when this changes.
+    #[test]
+    fn test_result_schema_field_count_sentinel() {
+        use crate::SLAResult;
+        use soroban_sdk::{symbol_short, Env};
+
+        let env = Env::default();
+
+        // Build a representative SLAResult and destructure it exhaustively so
+        // the compiler enforces that every field is named here.  When a new
+        // field is added the destructure will fail to compile unless the
+        // test is updated.  This is the first line of defense.
+        let sample = SLAResult {
+            outage_id: symbol_short!("out1"),
+            status: symbol_short!("met"),
+            mttr_minutes: 10,
+            threshold_minutes: 30,
+            amount: 750,
+            payment_type: symbol_short!("rew"),
+            rating: symbol_short!("excel"),
+            config_version_hash: 0,
+            recorded_at: 0,
+        };
+
+        // Destructure every field explicitly — adding a field without updating
+        // this match will cause a compile error, catching the drift at build time.
+        let SLAResult {
+            outage_id: _,
+            status: _,
+            mttr_minutes: _,
+            threshold_minutes: _,
+            amount: _,
+            payment_type: _,
+            rating: _,
+            config_version_hash: _,
+            recorded_at: _,
+        } = sample;
+
+        // The runtime check: ensure the constant matches the actual count.
+        // If the struct grows and the destructure above is updated but
+        // RESULT_SCHEMA_FIELD_COUNT is not, this assertion catches the gap.
+        let _ = &env; // env kept for Soroban test harness compatibility
+        assert_eq!(
+            RESULT_SCHEMA_FIELD_COUNT, 9,
+            "RESULT_SCHEMA_FIELD_COUNT is out of sync with SLAResult. \
+             Update lib.rs::RESULT_SCHEMA_FIELD_COUNT and \
+             RESULT_SCHEMA_VERSION when adding or removing fields."
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // get_result_schema() returns the expected version and field count
+    // -----------------------------------------------------------------------
+
+    /// Assert that `get_result_schema()` returns the constants declared in
+    /// `lib.rs` so any divergence between the runtime schema and the
+    /// compile-time constants surfaces in CI.
+    #[test]
+    fn test_get_result_schema_version_matches_constant() {
+        let (_env, client) = setup();
+        let schema = client.get_result_schema();
+        assert_eq!(
+            schema.schema_version, RESULT_SCHEMA_VERSION,
+            "get_result_schema() schema_version ({}) does not match \
+             RESULT_SCHEMA_VERSION constant ({}). \
+             Increment RESULT_SCHEMA_VERSION when the result layout changes.",
+            schema.schema_version, RESULT_SCHEMA_VERSION
+        );
+        assert_eq!(
+            schema.result_field_count, RESULT_SCHEMA_FIELD_COUNT,
+            "get_result_schema() result_field_count ({}) does not match \
+             RESULT_SCHEMA_FIELD_COUNT constant ({}). \
+             Update RESULT_SCHEMA_FIELD_COUNT to match the SLAResult field count.",
+            schema.result_field_count, RESULT_SCHEMA_FIELD_COUNT
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Symbol stability: symbol values must not change without a version bump
+    // -----------------------------------------------------------------------
+
+    /// Assert that every result symbol returned by `get_result_schema()` still
+    /// matches the canonical values baked into `compute_result`.
+    ///
+    /// If a symbol is renamed (e.g. `"met"` → `"sla_met"`) this test fails,
+    /// prompting the contributor to increment `RESULT_SCHEMA_VERSION` and
+    /// update `CHANGELOG.md`.
+    #[test]
+    fn test_result_schema_symbols_are_stable() {
+        let (env, client) = setup();
+        let schema = client.get_result_schema();
+
+        // These are the canonical symbol strings baked into compute_result.
+        // Changing any of them is a breaking wire-format change.
+        assert_eq!(schema.status_met, Symbol::new(&env, "met"));
+        assert_eq!(schema.status_violated, Symbol::new(&env, "viol"));
+        assert_eq!(schema.payment_reward, Symbol::new(&env, "rew"));
+        assert_eq!(schema.payment_penalty, Symbol::new(&env, "pen"));
+        assert_eq!(schema.rating_exceptional, Symbol::new(&env, "top"));
+        assert_eq!(schema.rating_excellent, Symbol::new(&env, "excel"));
+        assert_eq!(schema.rating_good, Symbol::new(&env, "good"));
+        assert_eq!(schema.rating_poor, Symbol::new(&env, "poor"));
+        assert!(
+            schema.includes_config_version_hash,
+            "includes_config_version_hash must remain true while \
+             SLAResult::config_version_hash exists"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Deprecated symbols list is empty at schema v1
+    // -----------------------------------------------------------------------
+
+    /// Confirm the deprecated_symbols list is empty for schema v1.
+    /// When a symbol is deprecated, this test must be updated to assert
+    /// the expected entry is present rather than asserting the list is empty.
+    #[test]
+    fn test_result_schema_no_deprecated_symbols_at_v1() {
+        let (_env, client) = setup();
+        let schema = client.get_result_schema();
+        assert_eq!(
+            schema.deprecated_symbols.len(),
+            0,
+            "Schema v1 should have no deprecated symbols. \
+             If you are introducing a deprecation, update this test to \
+             assert the expected DeprecatedSymbol entry is present."
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // get_config_bundle includes schema with correct version
+    // -----------------------------------------------------------------------
+
+    /// `get_config_bundle` composes `get_result_schema` internally.
+    /// Verify its embedded schema also reflects the current version.
+    #[test]
+    fn test_config_bundle_schema_version_consistent() {
+        let (_env, client) = setup();
+        let bundle = client.get_config_bundle();
+        if let Some(b) = bundle {
+            assert_eq!(
+                b.schema.schema_version, RESULT_SCHEMA_VERSION,
+                "get_config_bundle schema_version is inconsistent with RESULT_SCHEMA_VERSION"
+            );
+            assert_eq!(
+                b.schema.result_field_count, RESULT_SCHEMA_FIELD_COUNT,
+                "get_config_bundle result_field_count is inconsistent with RESULT_SCHEMA_FIELD_COUNT"
+            );
+        } else {
+            panic!("get_config_bundle returned None after initialization");
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // SLAConfigSnapshot sentinel: field count must match CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_config_snapshot_schema_field_count_sentinel() {
+        use crate::SLAConfigSnapshot;
+        use soroban_sdk::{Env, Vec};
+
+        let env = Env::default();
+        let sample = SLAConfigSnapshot {
+            version: CONFIG_SNAPSHOT_SCHEMA_VERSION,
+            entries: Vec::new(&env),
+        };
+
+        let SLAConfigSnapshot {
+            version: _,
+            entries: _,
+        } = sample;
+
+        assert_eq!(
+            CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT, 2,
+            "CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT is out of sync with SLAConfigSnapshot. \
+             Update lib.rs::CONFIG_SNAPSHOT_SCHEMA_FIELD_COUNT and \
+             CONFIG_SNAPSHOT_SCHEMA_VERSION when adding or removing fields."
+        );
+    }
+
+    /// **#671 – v3 → v4 migration: config-update actor attribution is
+    /// backward compatible.** A v3 contract has a recorded config-update
+    /// sequence but no actor key. After `migrate()` the storage version is
+    /// current and the metadata getter still returns the recorded sequence,
+    /// now reporting `actor: None` ("recorded before attribution existed").
+    #[test]
+    fn test_v3_to_v4_migration_preserves_sequence_without_actor() {
+        use crate::{config_metadata, STORAGE_VERSION};
+
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &cid);
+        let admin = soroban_sdk::Address::generate(&env);
+        let op = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin, &op);
+
+        // Synthesize the v3 metadata shape: a recorded sequence with no
+        // actor key (v3 contracts never wrote one).
+        env.as_contract(&cid, || {
+            env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &3u32);
+            config_metadata::record_config_update_legacy_sequence(&env, 1234);
+        });
+
+        // Migrate v3 → v4.
+        client.migrate(&admin);
+
+        let post = client.get_migration_state();
+        assert_eq!(post.stored_version, STORAGE_VERSION);
+        assert!(!post.needs_migration);
+
+        // The recorded sequence survives; the actor is reported as None
+        // rather than failing to decode or misattributing a zero address.
+        let recorded = client.get_last_config_update().unwrap();
+        assert_eq!(recorded.sequence, 1234);
+        assert_eq!(
+            recorded.actor, None,
+            "pre-v4 updates must report actor: None, never a fabricated address"
+        );
+    }
+
+    // Multi-arm migration harness and chaining test pattern (#505)
+    // -----------------------------------------------------------------------
+
+    /// **#505 – Multi-arm migration chaining & idempotency test pattern.**
+    ///
+    /// Demonstrates and validates the multi-step migration pattern (`v0 -> v1 -> ...`).
+    /// Verifies that a contract starting at a historical storage version (`v0`)
+    /// advances through all sequential migration arms to reach `STORAGE_VERSION`
+    /// in a single `migrate()` call, and that subsequent calls are idempotent no-ops.
+    #[test]
+    fn test_multi_arm_migration_chaining_and_idempotency() {
+        use crate::STORAGE_VERSION;
+        let env = Env::default();
+        env.mock_all_auths();
+        let cid = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &cid);
+        let admin = soroban_sdk::Address::generate(&env);
+        let operator = soroban_sdk::Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        // 1. Synthesize a v0 contract state by resetting STORAGE_VERSION_KEY to 0.
+        //    The write must run inside a contract call frame, hence as_contract.
+        env.as_contract(&cid, || {
+            env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &0u32);
+        });
+
+        // Verify pre-migration state reports needs_migration = true
+        let mig_state = client.get_migration_state();
+        assert_eq!(mig_state.stored_version, 0);
+        assert_eq!(mig_state.expected_version, STORAGE_VERSION);
+        assert!(mig_state.needs_migration);
+
+        // 2. Invoke migrate() — advances v0 -> v1 (and any subsequent arms sequentially)
+        let result = client.try_migrate(&admin);
+        assert!(result.is_ok(), "migrate() failed on v0 contract state");
+
+        // 3. Verify post-migration state is fully updated to current STORAGE_VERSION
+        let post_state = client.get_migration_state();
+        assert_eq!(post_state.stored_version, STORAGE_VERSION);
+        assert!(!post_state.needs_migration);
+
+        // 4. Idempotency test: calling migrate() again when already current is a safe no-op
+        let retry_result = client.try_migrate(&admin);
+        assert!(
+            retry_result.is_ok(),
+            "second migrate() call must be a safe idempotent no-op"
+        );
+        let retry_state = client.get_migration_state();
+        assert_eq!(retry_state.stored_version, STORAGE_VERSION);
+        assert!(!retry_state.needs_migration);
+    }
+}
+
+#[cfg(test)]
+mod proxy_upgrade_unit_tests {
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let operator = Address::generate(env);
+        client.initialize(&admin, &operator);
+        (admin, operator, client)
+    }
+
+    #[test]
+    fn stranger_cannot_migrate() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        assert!(client.try_migrate(&stranger).is_err());
+    }
+
+    #[test]
+    fn migrate_is_idempotent_for_the_admin() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        client.migrate(&admin);
+        client.migrate(&admin);
+        assert!(!client.get_migration_state().needs_migration);
+    }
+}
+
+#[cfg(test)]
+mod proxy_upgrade_storage_gap_safety_tests {
+    use crate::{SLACalculatorContract, SLACalculatorContractClient, STORAGE_VERSION};
+    use soroban_sdk::{testutils::Address as _, Address, Env, String};
+
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let operator = Address::generate(env);
+        client.initialize(&admin, &operator);
+        (admin, operator, client)
+    }
+
+    #[test]
+    fn test_storage_key_isolation_prevents_slot_collision() {
+        // In Soroban, storage is key-value based (indexed by Symbols), not positional
+        // EVM slots. This test asserts that upgradeable state variables reside in isolated
+        // key namespaces, preventing slot shifts or collisions without needing Solidity uint256[50] gaps.
+        let env = Env::default();
+        let (admin, operator, client) = setup(&env);
+
+        let initial_admin = client.get_admin();
+        let initial_operator = client.get_operator();
+        assert_eq!(initial_admin, admin);
+        assert_eq!(initial_operator, operator);
+
+        // Run migration
+        client.migrate(&admin);
+
+        // Post-migration state remains completely uncorrupted and intact
+        assert_eq!(client.get_admin(), admin);
+        assert_eq!(client.get_operator(), operator);
+        assert_eq!(client.get_storage_version(), STORAGE_VERSION);
+    }
+
+    #[test]
+    fn test_migration_preserves_pre_existing_keys_across_upgrade() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+
+        // Set pause state
+        client.pause(&admin, &String::from_str(&env, "pre_upgrade_reason"));
+        assert!(client.is_paused());
+
+        // Perform migration
+        client.migrate(&admin);
+
+        // Pause state and metadata must be preserved across migration
+        assert!(client.is_paused());
+        let info = client.get_pause_info().expect("pause info should persist");
+        assert_eq!(info.reason, String::from_str(&env, "pre_upgrade_reason"));
+    }
+}
+
+#[cfg(test)]
+mod upgrade_flow_integration_tests {
+    // Issue #757 - integration coverage for the flows a reentrancy guard
+    // would have to protect: the storage migration an upgrade runs.
+    //
+    // The migration is the one path in the contract that rewrites state
+    // wholesale, and it is admin-gated, so the cases that matter are the
+    // ones around who may run it and what it does to the state when it
+    // refuses.
+    use crate::{SLACalculatorContract, SLACalculatorContractClient, SLAError, STORAGE_VERSION};
+    use soroban_sdk::{testutils::Address as _, Address, Env};
+
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let operator = Address::generate(env);
+        client.initialize(&admin, &operator);
+        (admin, contract_id, client)
+    }
+
+    /// A contract whose stored version is newer than the running binary is a
+    /// rollback attempt, not an upgrade: the migration must refuse it.
+    #[test]
+    fn a_version_newer_than_the_binary_is_refused() {
+        let env = Env::default();
+        let (admin, contract_id, client) = setup(&env);
+
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .set(&crate::STORAGE_VERSION_KEY, &(STORAGE_VERSION + 1));
+        });
+
+        let result = client.try_migrate(&admin);
+        assert!(
+            matches!(result, Err(Ok(SLAError::VersionMismatch))),
+            "migrate() must refuse a stored version newer than the binary"
+        );
+    }
+
+    /// A refused migration must not touch the stored state: the version it
+    /// found is still the version it left behind.
+    #[test]
+    fn a_refused_migration_leaves_the_stored_version_untouched() {
+        let env = Env::default();
+        let (admin, contract_id, client) = setup(&env);
+
+        let future_version = STORAGE_VERSION + 1;
+        env.as_contract(&contract_id, || {
+            env.storage()
+                .instance()
+                .set(&crate::STORAGE_VERSION_KEY, &future_version);
+        });
+
+        assert!(client.try_migrate(&admin).is_err());
+        assert_eq!(client.get_migration_state().stored_version, future_version);
+    }
+
+    /// After a full multi-arm migration the contract is still usable: the
+    /// roles the upgrade was supposed to preserve are intact and the version
+    /// is current.
+    #[test]
+    fn the_contract_is_fully_usable_after_a_multi_arm_migration() {
+        let env = Env::default();
+        let (admin, contract_id, client) = setup(&env);
+
+        // Synthesize a v0 contract state, the way an old deployment looks.
+        env.as_contract(&contract_id, || {
+            env.storage().instance().set(&crate::STORAGE_VERSION_KEY, &0u32);
+        });
+
+        assert!(client.try_migrate(&admin).is_ok());
+        assert_eq!(client.get_migration_state().stored_version, STORAGE_VERSION);
+        assert!(!client.get_migration_state().needs_migration);
+
+        // The roles survived the migration, and an admin-only write still
+        // works on the migrated contract.
+        assert_eq!(client.get_admin(), admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "post-migration"));
+    }
+}

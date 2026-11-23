@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod auth_matrix_tests {
-    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env};
+    #![allow(clippy::module_inception)]
     use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, Symbol};
 
-    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient) {
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(env, &contract_id);
         let admin = Address::generate(env);
@@ -24,21 +26,29 @@ mod auth_matrix_tests {
     fn test_only_admin_can_set_config() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        client.set_config(
-            &admin,
-            &symbol_short!("high"),
-            &30,
-            &50,
-            &500,
-        );
+        client.set_config(&admin, &symbol_short!("high"), &30, &50, &500);
     }
 
     #[test]
     fn test_only_admin_can_pause() {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
-        client.pause(&admin);
+        client.pause(&admin, &soroban_sdk::String::from_str(&env, "test"));
         client.unpause(&admin);
+    }
+
+    #[test]
+    fn test_pause_authorization_precedes_invalid_reason_validation() {
+        let env = Env::default();
+        let (_, operator, client) = setup(&env);
+        let reason = "x".repeat(crate::MAX_REASON_LEN + 1);
+        let reason = soroban_sdk::String::from_str(&env, &reason);
+
+        assert_eq!(
+            client.try_pause(&operator, &reason),
+            Err(Ok(crate::SLAError::Unauthorized))
+        );
+        assert!(!client.is_paused());
     }
 
     #[test]
@@ -54,7 +64,8 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
         for i in 1u32..=3 {
-            client.calculate_sla(&operator, &symbol_short!("OUT"), &symbol_short!("high"), &i);
+            let id = Symbol::new(&env, &alloc::format!("OUT{}", i));
+            client.calculate_sla(&operator, &id, &symbol_short!("high"), &i);
         }
         let stats = client.get_stats();
         assert_eq!(stats.total_calculations, 3);
@@ -63,6 +74,7 @@ mod auth_matrix_tests {
     #[test]
     fn test_unauthorized_caller_cannot_calculate() {
         let env = Env::default();
+        env.mock_all_auths();
         let contract_id = env.register_contract(None, SLACalculatorContract);
         let client = SLACalculatorContractClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
@@ -74,12 +86,7 @@ mod auth_matrix_tests {
         // MockAuth would satisfy the call. The stranger has none, so the call
         // must surface an error – exactly the role-isolation we want to assert.
         env.mock_auths(&[]);
-        let result = client.try_calculate_sla(
-            &stranger,
-            &symbol_short!("OUT"),
-            &symbol_short!("high"),
-            &5,
-        );
+        let result = client.try_calculate_sla(&stranger, &symbol_short!("OUT"), &symbol_short!("high"), &5);
         assert!(result.is_err());
     }
 
@@ -98,12 +105,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.calculate_sla(
-            &stranger,
-            &symbol_short!("U_CALC"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&stranger, &symbol_short!("U_CALC"), &symbol_short!("high"), &10);
     }
 
     #[test]
@@ -112,12 +114,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (admin, _, client) = setup(&env);
         // admin holds the admin role, NOT the operator role.
-        client.calculate_sla(
-            &admin,
-            &symbol_short!("A_CALC"),
-            &symbol_short!("high"),
-            &10,
-        );
+        client.calculate_sla(&admin, &symbol_short!("A_CALC"), &symbol_short!("high"), &10);
     }
 
     #[test]
@@ -126,13 +123,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.set_config(
-            &stranger,
-            &symbol_short!("high"),
-            &30,
-            &50,
-            &500,
-        );
+        client.set_config(&stranger, &symbol_short!("high"), &30, &50, &500);
     }
 
     #[test]
@@ -140,13 +131,7 @@ mod auth_matrix_tests {
     fn test_operator_cannot_set_config() {
         let env = Env::default();
         let (_, operator, client) = setup(&env);
-        client.set_config(
-            &operator,
-            &symbol_short!("high"),
-            &30,
-            &50,
-            &500,
-        );
+        client.set_config(&operator, &symbol_short!("high"), &30, &50, &500);
     }
     #[test]
     #[should_panic]
@@ -154,7 +139,7 @@ mod auth_matrix_tests {
         let env = Env::default();
         let (_, _, client) = setup(&env);
         let stranger = Address::generate(&env);
-        client.pause(&stranger);
+        client.pause(&stranger, &soroban_sdk::String::from_str(&env, "test"));
     }
 
     #[test]
@@ -165,5 +150,207 @@ mod auth_matrix_tests {
         let stranger = Address::generate(&env);
         let new_op = Address::generate(&env);
         client.set_operator(&stranger, &new_op);
+    }
+
+    /// Verifies that a caller who holds the admin role but has NOT provided
+    /// Soroban auth receives a clean `Unauthorized` error (via try_*) rather
+    /// than a panic. This ensures the `require_auth()` gate is exercised and
+    /// the equality check is not the sole authentication mechanism.
+    #[test]
+    fn test_no_role_equivalence_bypass_does_not_panic() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(&env, &contract_id);
+        let admin = Address::generate(&env);
+        let operator = Address::generate(&env);
+        client.initialize(&admin, &operator);
+
+        // Clear all auths so the admin address is NOT authorised for Soroban
+        // auth, even though it holds the admin role in storage.
+        env.mock_auths(&[]);
+
+        // admin role is set, but auth is not provided → should return error, not panic
+        let result = client.try_set_config(&admin, &symbol_short!("high"), &30, &50, &500);
+        assert!(result.is_err());
+    }
+
+    // ── #634: Auth-model matrix pinning ──────────────────────────────────
+    //
+    // Encodes the tiers documented in docs/AUTH_MODEL.md as executable tests:
+    //   calculate_sla        = operator-mutating (only the operator may call)
+    //   calculate_sla_view   = public-view      (anyone, read-only)
+    //   replay_calculate_sla = public-replay    (anyone, read-only, no events)
+    //
+    // These pin that the auth model does not change silently in future
+    // refactors.
+
+    #[test]
+    fn test_calculate_sla_view_is_public_read_only() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        // A stranger (no role) may perform a live view evaluation.
+        let result = client.calculate_sla_view(&symbol_short!("OUT_VIEW"), &symbol_short!("high"), &10);
+        assert_eq!(result.outage_id, symbol_short!("OUT_VIEW"));
+        // View must never write history or stats.
+        let stats = client.get_stats();
+        assert_eq!(stats.total_calculations, 0);
+        assert_eq!(client.get_history().len(), 0);
+    }
+
+    #[test]
+    fn test_replay_calculate_sla_is_public() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        let _ = stranger;
+        // A stranger may deterministically replay a decision.
+        let (result, _hash) =
+            client.replay_calculate_sla(&symbol_short!("OUT_RPL"), &symbol_short!("high"), &10, &0);
+        assert_eq!(result.outage_id, symbol_short!("OUT_RPL"));
+    }
+
+    /// Replay is public because it is a pure read; it must never carry write
+    /// side-effects. This test pins that invariant: replay leaves history,
+    /// stats, and telemetry untouched.
+    #[test]
+    fn test_replay_calculate_sla_has_no_side_effects() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let before_stats = client.get_stats();
+        client.replay_calculate_sla(&symbol_short!("OUT_RPL"), &symbol_short!("high"), &10, &0);
+        assert_eq!(
+            client.get_stats().total_calculations,
+            before_stats.total_calculations
+        );
+        assert_eq!(client.get_history().len(), 0);
+    }
+
+    /// These two endpoints define the read-tier boundary: `calculate_sla` is
+    /// operator-only, while the two views are public. Calling the mutating
+    /// endpoint from a non-operator must be rejected even when the view
+    /// endpoints are freely callable.
+    #[test]
+    #[should_panic]
+    fn test_stranger_cannot_mutate_via_view_endpoints() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        // Freely callable views succeed for a stranger, but calculate_sla
+        // (the operator-mutating tier) must still reject them.
+        client.calculate_sla_view(&symbol_short!("OUT_LIVE"), &symbol_short!("high"), &10);
+        client.replay_calculate_sla(&symbol_short!("OUT_REP"), &symbol_short!("high"), &10, &0);
+        client.calculate_sla(&stranger, &symbol_short!("OUT_MUT"), &symbol_short!("high"), &10);
+    }
+}
+
+#[cfg(test)]
+mod access_control_unit_tests {
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, String};
+
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let operator = Address::generate(env);
+        client.initialize(&admin, &operator);
+        (admin, operator, client)
+    }
+
+    #[test]
+    fn stranger_cannot_pause() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        assert!(client.try_pause(&stranger, &String::from_str(&env, "x")).is_err());
+    }
+
+    #[test]
+    fn operator_cannot_set_config() {
+        let env = Env::default();
+        let (_, operator, client) = setup(&env);
+        assert!(client
+            .try_set_config(&operator, &symbol_short!("high"), &30, &50, &500)
+            .is_err());
+    }
+
+    #[test]
+    fn admin_cannot_calculate_sla() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        assert!(client
+            .try_calculate_sla(&admin, &symbol_short!("OUT1"), &symbol_short!("high"), &10)
+            .is_err());
+    }
+
+    #[test]
+    fn operator_cannot_migrate() {
+        let env = Env::default();
+        let (_, operator, client) = setup(&env);
+        assert!(client.try_migrate(&operator).is_err());
+    }
+}
+
+#[cfg(test)]
+mod reentrancy_guard_access_control_tests {
+    use crate::{SLACalculatorContract, SLACalculatorContractClient};
+    use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, String};
+
+    fn setup(env: &Env) -> (Address, Address, SLACalculatorContractClient<'_>) {
+        env.mock_all_auths();
+        let contract_id = env.register_contract(None, SLACalculatorContract);
+        let client = SLACalculatorContractClient::new(env, &contract_id);
+        let admin = Address::generate(env);
+        let operator = Address::generate(env);
+        client.initialize(&admin, &operator);
+        (admin, operator, client)
+    }
+
+    #[test]
+    fn stranger_cannot_unpause() {
+        let env = Env::default();
+        let (admin, _, client) = setup(&env);
+        client.pause(&admin, &String::from_str(&env, "pause_test"));
+        let stranger = Address::generate(&env);
+        assert!(client.try_unpause(&stranger).is_err());
+    }
+
+    #[test]
+    fn stranger_cannot_propose_admin_or_operator() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        let candidate = Address::generate(&env);
+        assert!(client.try_propose_admin(&stranger, &candidate).is_err());
+        assert!(client.try_propose_operator(&stranger, &candidate).is_err());
+    }
+
+    #[test]
+    fn stranger_cannot_freeze_or_unfreeze_config() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        assert!(client.try_freeze_config(&stranger).is_err());
+        assert!(client.try_unfreeze_config(&stranger).is_err());
+    }
+
+    #[test]
+    fn stranger_cannot_prune_history() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        assert!(client.try_prune_history(&stranger, &10).is_err());
+    }
+
+    #[test]
+    fn stranger_cannot_calculate_sla() {
+        let env = Env::default();
+        let (_, _, client) = setup(&env);
+        let stranger = Address::generate(&env);
+        assert!(client
+            .try_calculate_sla(&stranger, &symbol_short!("OUT1"), &symbol_short!("high"), &10)
+            .is_err());
     }
 }

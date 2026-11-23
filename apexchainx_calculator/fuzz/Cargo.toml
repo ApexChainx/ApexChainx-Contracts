@@ -1,0 +1,62 @@
+[package]
+name = "apexchainx-fuzz"
+version = "0.0.0"
+authors = ["Automated"]
+publish = false
+edition = "2021"
+
+# The fuzz crate lives inside the parent workspace directory but is built by
+# cargo-fuzz as a standalone workspace. The empty `[workspace]` table breaks it
+# out of the parent workspace so `cargo fuzz run ...` does not fail with
+# "current package believes it's in a workspace when it's not".
+[workspace]
+resolver = "2"
+
+[package.metadata]
+cargo-fuzz = true
+
+# NOTE: the committed `Cargo.lock` pins `ed25519-dalek` to 2.x. soroban-env-host
+# 21.2.1 declares `ed25519-dalek = ">=2.0.0"` (unbounded), but ed25519-dalek 3.x
+# broke the API its `testutils` module relies on. Do not `cargo update` this
+# crate without keeping `ed25519-dalek` on the 2.x line (matching the root
+# workspace's Cargo.lock).
+[dependencies]
+libfuzzer-sys = "0.4"
+soroban-sdk = { version = "21.7.7", features = ["testutils"] }
+
+[dependencies.apexchainx_calculator]
+path = ".."
+
+[[bin]]
+name = "compute_result"
+path = "fuzz_targets/compute_result.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "validate_config"
+path = "fuzz_targets/validate_config.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "config_mutation_sequences"
+path = "fuzz_targets/config_mutation_sequences.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "governance_sequences"
+path = "fuzz_targets/governance_sequences.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "history_state_machine"
+path = "fuzz_targets/history_state_machine.rs"
+test = false
+doc = false
+
+[profile.release]
+debug = true
+lto = false

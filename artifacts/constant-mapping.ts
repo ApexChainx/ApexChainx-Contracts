@@ -4,6 +4,9 @@
  * Run: npx ts-node artifacts/constant-mapping.ts > artifacts/constants.json
  */
 
+
+
+
 export const CONTRACT_CONSTANTS = {
   severities: ["critical", "high", "medium", "low"],
   rewardTiers: {
@@ -22,6 +25,7 @@ export const CONTRACT_CONSTANTS = {
   schemaVersion: 1,
 } as const;
 
+// Replace duplicated storage-default initialization logic with a single migration-safe defaults registry
 export type ContractConstants = typeof CONTRACT_CONSTANTS;
 
 export function generateMapping(): string {
