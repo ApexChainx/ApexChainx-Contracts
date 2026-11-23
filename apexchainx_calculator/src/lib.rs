@@ -20,6 +20,7 @@ pub mod cross_contract_safety;
 pub mod event_correlation;
 mod event_schema;
 pub mod history_snapshot;
+pub mod sla_operations;
 pub mod version_negotiation;
 
 use crate::config_bundle::ConfigBundle;
