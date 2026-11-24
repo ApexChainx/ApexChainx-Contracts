@@ -43,13 +43,7 @@ pub const FIXTURE_MODULES: &[FixtureModule] = &[
 /// Looks up a fixture module by name.
 #[must_use]
 pub fn find_fixture_module(name: &str) -> Option<&'static FixtureModule> {
-    for module in FIXTURE_MODULES {
-        if module.name == name {
-            return Some(module);
-        }
-    }
-
-    None
+    FIXTURE_MODULES.iter().find(|module| module.name == name)
 }
 
 /// Returns whether a fixture module with `name` is registered.
@@ -59,6 +53,9 @@ pub fn has_fixture_module(name: &str) -> bool {
 }
 
 pub mod sla_inputs;
+
+pub mod anomaly_scenarios;
+pub mod pagination_cases;
 
 pub mod history_records;
 pub mod settlement_scenarios;

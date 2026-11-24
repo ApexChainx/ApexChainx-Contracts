@@ -1,8 +1,10 @@
 //! Tests for the SLA operations workspace modules.
 
 mod aggregation_inputs_validation_tests;
+mod anomaly_scenarios_fixtures_tests;
 mod boundary_cases_fixtures_tests;
 mod invariants_validation_tests;
+mod pagination_cases_fixtures_tests;
 mod report_windows_validation_tests;
 mod sla_summary_report_tests;
 
@@ -18,3 +20,4 @@ mod history_records_fixtures_tests;
 mod severity_distribution_report_tests;
 mod sla_inputs_fixtures_tests;
 mod time_series_report_tests;
+mod workspace_composition_tests;

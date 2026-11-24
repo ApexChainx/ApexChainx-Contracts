@@ -39,11 +39,7 @@ impl ThresholdBounds {
 }
 
 /// Validates that bounds form a non-empty ascending inclusive range.
-#[must_use]
-pub const fn validate_threshold_bounds(
-    lower: u64,
-    upper: u64,
-) -> Result<(), ThresholdBoundsError> {
+pub const fn validate_threshold_bounds(lower: u64, upper: u64) -> Result<(), ThresholdBoundsError> {
     if lower > upper {
         Err(ThresholdBoundsError::NonAscending)
     } else if lower == upper {
@@ -54,7 +50,6 @@ pub const fn validate_threshold_bounds(
 }
 
 /// Validates that `value` lies within already-validated `bounds`.
-#[must_use]
 pub const fn validate_threshold_value(
     bounds: ThresholdBounds,
     value: u64,
