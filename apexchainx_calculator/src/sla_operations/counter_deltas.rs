@@ -48,11 +48,7 @@ pub const fn counter_delta(current: u64, previous: u64) -> CounterDelta {
         CounterMovement::Unchanged
     };
 
-    let magnitude = if current >= previous {
-        current - previous
-    } else {
-        previous - current
-    };
+    let magnitude = current.abs_diff(previous);
 
     CounterDelta {
         movement,
