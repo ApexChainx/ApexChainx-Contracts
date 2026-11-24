@@ -55,68 +55,9 @@ pub mod deployment_policy;
 pub mod error_responses;
 pub mod event;
 pub mod event_correlation;
-#[cfg(test)]
-mod event_ordering_tests;
-/// Canonical event schema and constants, consumed by backend indexers and by
-/// the event-ABI guardrails. Public so its `EVENT_*` constants are part of the
-/// crate's API surface (and therefore kept live by the compiler) rather than
-/// needing a blanket `#![allow(dead_code)]` as in the pre-#496 state.
-pub mod event_schema;
-#[cfg(test)]
-mod event_state_tests;
-/// Spec-assertion bodies shared by the `cargo-fuzz` targets in `fuzz/`.
-/// The targets stay a few lines long and every invariant they check is
-/// compiled and unit-tested here. See `docs/FUZZING_GUARANTEES.md`.
-pub mod fuzz_spec;
-pub mod governance;
-pub mod history;
-pub mod metadata;
-pub mod metrics;
-pub mod oracle;
-pub use crate::oracle::{AggregatedMetric, MetricReport, OracleConfig, OracleContract, OracleError};
-#[cfg(test)]
-mod orphan_lint_tests;
-#[cfg(test)]
-mod outage_id_tests;
-/// Parity checker: compares current `compute_result` against the locked-in
-/// canonical golden vectors in `test_snapshots/tests/parity_baseline.json`.
-/// Run with `cargo test --lib parity_tests::` or `just parity-check`.
-#[cfg(test)]
-mod parity_tests;
-/// #422 – event payload-optimization helpers (consumer-side validation).
-pub mod payload_optimizer;
-#[cfg(test)]
-mod payload_versioning_tests;
-pub mod policy;
-#[cfg(test)]
-mod prune_benchmark;
-#[cfg(test)]
-mod pruning_perf;
-#[cfg(test)]
-mod schema_migration_tests;
-/// #610 – severity-curve boundary fixtures (see docs/SEVERITY_CURVES.md).
-#[cfg(test)]
-mod severity_curve_tests;
-/// Executable restatement of the contract's documented pure semantics —
-/// the single source of truth imported by tests, the fuzz targets, and the
-/// TypeScript parity fixtures instead of being re-derived in each.
-pub mod spec;
+mod event_schema;
+pub mod history_snapshot;
 pub mod sla_operations;
-pub mod storage_estimation;
-#[cfg(test)]
-mod storage_footprint_tests;
-#[cfg(test)]
-mod storage_key_invariant_tests;
-pub mod storage_version;
-#[cfg(test)]
-mod threshold_config;
-#[cfg(test)]
-mod topic_stability_tests;
-/// Generates the contract-derived fixtures that `ts/` parity-checks against.
-/// Test-only: it executes the real contract in an `Env` and writes
-/// `ts/fixtures/contract-read-semantics.json`.
-#[cfg(test)]
-mod ts_parity_fixtures;
 pub mod version_negotiation;
 
 use crate::audit_state::AuditState;

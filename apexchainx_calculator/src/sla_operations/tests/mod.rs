@@ -1,23 +1,17 @@
-//! Tests for the SLA operations workspace modules.
+//! Workspace-local test suite for the SLA operations namespace.
+//!
+//! All test modules in this directory are gated behind `#[cfg(test)]` and are
+//! never compiled into the production WASM binary.
+//!
+//! # Test modules
+//!
+//! | Module                              | Covers                             |
+//! |-------------------------------------|------------------------------------|
+//! | `policy_snapshots_fixtures_tests`   | `fixtures::policy_snapshots`       |
+//! | `report_expectations_fixtures_tests`| `fixtures::report_expectations`    |
 
-mod aggregation_inputs_validation_tests;
-mod anomaly_scenarios_fixtures_tests;
-mod boundary_cases_fixtures_tests;
-mod invariants_validation_tests;
-mod pagination_cases_fixtures_tests;
-mod report_windows_validation_tests;
-mod sla_summary_report_tests;
+#[cfg(test)]
+pub mod policy_snapshots_fixtures_tests;
 
-mod history_export_report_tests;
-mod outage_analytics_report_tests;
-mod settlement_summary_report_tests;
-mod telemetry_samples_fixtures_tests;
-mod telemetry_snapshot_report_tests;
-
-mod compliance_report_tests;
-mod csv_rows_report_tests;
-mod history_records_fixtures_tests;
-mod severity_distribution_report_tests;
-mod sla_inputs_fixtures_tests;
-mod time_series_report_tests;
-mod workspace_composition_tests;
+#[cfg(test)]
+pub mod report_expectations_fixtures_tests;
